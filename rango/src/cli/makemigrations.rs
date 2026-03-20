@@ -22,13 +22,25 @@ pub fn run(src_dir: &str, output_dir: &str) -> Result<()> {
     fs::create_dir_all(output_dir)?;
 
     let next_num = next_migration_number(output_dir)?;
-    let filename = format!("{}/{:04}_auto.sql", output_dir, next_num);
+    let label = migration_label(&schemas);
+    let filename = format!("{}/{:04}_{}.sql", output_dir, next_num, label);
 
     let sql = generate_sql(&schemas);
     fs::write(&filename, &sql)?;
 
     println!("✅ Migration generated: {}", filename);
     Ok(())
+}
+
+/// Build a readable label from table names — truncated if too many
+fn migration_label(schemas: &[rango_core::TableSchema]) -> String {
+    let names: Vec<&str> = schemas.iter().map(|s| s.table_name.as_str()).collect();
+    let joined = names.join("_");
+    if joined.len() <= 40 {
+        joined
+    } else {
+        "auto".to_string()
+    }
 }
 
 /// Find next available migration number
