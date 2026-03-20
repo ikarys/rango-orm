@@ -1,10 +1,13 @@
 use rango_core::{FromRow, Model, ModelValues, SqlValue};
-use sqlx::{PgPool, query::Query, postgres::{Postgres, PgArguments}};
+use sqlx::{Executor, PgPool, Postgres, Transaction};
+use sqlx::postgres::{PgArguments, PgRow};
+use sqlx::query::Query;
 use anyhow::{Context, Result};
 
 use crate::row::PgRangoRow;
 
-/// Bind a SqlValue to a sqlx query.
+// ─── Bind macro ───────────────────────────────────────────────────────────────
+
 macro_rules! bind {
     ($q:expr, $val:expr) => {
         match $val {
@@ -26,107 +29,67 @@ macro_rules! bind {
     };
 }
 
-/// Bind a Vec<SqlValue> to a query — used by QueryBuilder.
 pub fn bind_sql_values<'q>(
     mut q: Query<'q, Postgres, PgArguments>,
     values: Vec<SqlValue>,
 ) -> Query<'q, Postgres, PgArguments> {
-    for val in values {
-        q = bind!(q, val);
-    }
+    for val in values { q = bind!(q, val); }
     q
 }
 
+// ─── Core ops — transparent over PgPool and Transaction ──────────────────────
+
 /// INSERT → returns the model as stored.
-pub async fn insert<M>(pool: &PgPool, model: M) -> Result<M>
+/// Accepts `&PgPool` or `&mut Transaction<'_, Postgres>` transparently.
+///
+/// # Example
+/// ```rust
+/// // With pool
+/// let user = rango::insert(&pool, user).await?;
+///
+/// // Inside rango::atomic()
+/// let user = rango::atomic(&pool, |tx| async move {
+///     let user = rango::insert(tx, user).await?;
+///     rango::insert(tx, profile).await?;
+///     Ok(user)
+/// }).await?;
+/// ```
+pub async fn insert<'e, E, M>(executor: E, model: M) -> Result<M>
 where
+    E: Executor<'e, Database = Postgres>,
     M: Model + ModelValues + FromRow,
 {
-    let table = M::table_name();
-    let fields = model.field_values();
-    let pk_col = M::pk_column();
-    let pk_val = model.pk_value();
-
-    let mut cols = vec![format!("\"{}\"", pk_col)];
-    cols.extend(fields.iter().map(|(c, _)| format!("\"{}\"", c)));
-    let placeholders: Vec<String> = (1..=cols.len()).map(|i| format!("${}", i)).collect();
-
-    let sql = format!(
-        "INSERT INTO \"{}\" ({}) VALUES ({}) RETURNING *",
-        table,
-        cols.join(", "),
-        placeholders.join(", ")
-    );
-
-    let mut all_values = vec![pk_val];
-    all_values.extend(fields.into_iter().map(|(_, v)| v));
-
-    let mut q = sqlx::query(&sql);
-    for val in all_values {
-        q = bind!(q, val);
-    }
-
-    let row = q.fetch_one(pool)
-        .await
-        .with_context(|| format!("INSERT into {} failed", table))?;
-
-    M::from_row(&PgRangoRow(row))
-        .map_err(|e| anyhow::anyhow!("Failed to read inserted row: {}", e))
+    let (sql, values) = build_insert_sql::<M>(&model);
+    let q = bind_sql_values(sqlx::query(&sql), values);
+    let row = q.fetch_one(executor).await
+        .with_context(|| format!("INSERT into {} failed", M::table_name()))?;
+    M::from_row(&PgRangoRow(row)).map_err(|e| anyhow::anyhow!("{}", e))
 }
 
 /// UPDATE → returns the updated model.
-pub async fn update<M>(pool: &PgPool, model: M) -> Result<M>
+pub async fn update<'e, E, M>(executor: E, model: M) -> Result<M>
 where
+    E: Executor<'e, Database = Postgres>,
     M: Model + ModelValues + FromRow,
 {
-    let table = M::table_name();
-    let fields = model.field_values();
-    let pk_col = M::pk_column();
-    let pk_val = model.pk_value();
-
-    if fields.is_empty() {
-        return Ok(model);
-    }
-
-    let set_clauses: Vec<String> = fields.iter().enumerate()
-        .map(|(i, (col, _))| format!("\"{}\" = ${}", col, i + 1))
-        .collect();
-
-    let pk_pos = fields.len() + 1;
-    let sql = format!(
-        "UPDATE \"{}\" SET {} WHERE \"{}\" = ${} RETURNING *",
-        table, set_clauses.join(", "), pk_col, pk_pos
-    );
-
-    let mut q = sqlx::query(&sql);
-    for (_, val) in &fields {
-        q = bind!(q, val.clone());
-    }
-    q = bind!(q, pk_val);
-
-    let row = q.fetch_one(pool)
-        .await
-        .with_context(|| format!("UPDATE {} failed", table))?;
-
-    M::from_row(&PgRangoRow(row))
-        .map_err(|e| anyhow::anyhow!("Failed to read updated row: {}", e))
+    let (sql, values) = build_update_sql::<M>(&model);
+    let q = bind_sql_values(sqlx::query(&sql), values);
+    let row = q.fetch_one(executor).await
+        .with_context(|| format!("UPDATE {} failed", M::table_name()))?;
+    M::from_row(&PgRangoRow(row)).map_err(|e| anyhow::anyhow!("{}", e))
 }
 
 /// DELETE a model.
-pub async fn delete<M>(pool: &PgPool, model: &M) -> Result<()>
+pub async fn delete<'e, E, M>(executor: E, model: &M) -> Result<()>
 where
+    E: Executor<'e, Database = Postgres>,
     M: Model + ModelValues,
 {
-    let table = M::table_name();
-    let pk_col = M::pk_column();
-    let pk_val = model.pk_value();
-
-    let sql = format!("DELETE FROM \"{}\" WHERE \"{}\" = $1", table, pk_col);
-    let q = sqlx::query(&sql);
-    let q = bind!(q, pk_val);
-    q.execute(pool).await
-        .with_context(|| format!("DELETE from {} failed", table))?;
-    Ok(())
+    let (sql, values) = build_delete_sql::<M>(model);
+    let q = bind_sql_values(sqlx::query(&sql), values);
+    q.execute(executor).await
+        .map(|_| ())
+        .with_context(|| format!("DELETE from {} failed", M::table_name()))
 }
 
 /// GET by primary key.
@@ -134,19 +97,15 @@ pub async fn get<M>(pool: &PgPool, pk: &SqlValue) -> Result<Option<M>>
 where
     M: Model + ModelValues + FromRow,
 {
-    let table = M::table_name();
-    let pk_col = M::pk_column();
-    let sql = format!("SELECT * FROM \"{}\" WHERE \"{}\" = $1 LIMIT 1", table, pk_col);
-
-    let q = sqlx::query(&sql);
-    let q = bind!(q, pk.clone());
-
+    let sql = format!(
+        "SELECT * FROM \"{}\" WHERE \"{}\" = $1 LIMIT 1",
+        M::table_name(), M::pk_column()
+    );
+    let q = bind_sql_values(sqlx::query(&sql), vec![pk.clone()]);
     let row = q.fetch_optional(pool).await
-        .with_context(|| format!("GET from {} failed", table))?;
-
+        .with_context(|| format!("GET from {} failed", M::table_name()))?;
     match row {
-        Some(r) => Ok(Some(M::from_row(&PgRangoRow(r))
-            .map_err(|e| anyhow::anyhow!("{}", e))?)),
+        Some(r) => Ok(Some(M::from_row(&PgRangoRow(r)).map_err(|e| anyhow::anyhow!("{}", e))?)),
         None => Ok(None),
     }
 }
@@ -156,12 +115,9 @@ pub async fn all<M>(pool: &PgPool) -> Result<Vec<M>>
 where
     M: Model + ModelValues + FromRow,
 {
-    let table = M::table_name();
-    let sql = format!("SELECT * FROM \"{}\"", table);
-
+    let sql = format!("SELECT * FROM \"{}\"", M::table_name());
     let rows = sqlx::query(&sql).fetch_all(pool).await
-        .with_context(|| format!("ALL from {} failed", table))?;
-
+        .with_context(|| format!("ALL from {} failed", M::table_name()))?;
     rows.into_iter()
         .map(|r| M::from_row(&PgRangoRow(r)).map_err(|e| anyhow::anyhow!("{}", e)))
         .collect()
@@ -176,36 +132,17 @@ pub async fn get_or_create<M>(
 where
     M: Model + ModelValues + FromRow,
 {
-    let table = M::table_name();
-    let conditions: Vec<String> = lookup.iter().enumerate()
-        .map(|(i, (col, _))| format!("\"{}\" = ${}", col, i + 1))
-        .collect();
-
-    let sql = format!(
-        "SELECT * FROM \"{}\" WHERE {} LIMIT 1",
-        table,
-        conditions.join(" AND ")
-    );
-
-    let mut q = sqlx::query(&sql);
-    for (_, val) in &lookup {
-        q = bind!(q, val.clone());
-    }
-
+    let (sql, values) = build_lookup_sql::<M>(&lookup);
+    let q = bind_sql_values(sqlx::query(&sql), values);
     let row = q.fetch_optional(pool).await
-        .with_context(|| format!("GET_OR_CREATE lookup on {} failed", table))?;
-
+        .with_context(|| format!("GET_OR_CREATE lookup on {} failed", M::table_name()))?;
     if let Some(r) = row {
-        let model = M::from_row(&PgRangoRow(r))
-            .map_err(|e| anyhow::anyhow!("{}", e))?;
-        return Ok((model, false));
+        return Ok((M::from_row(&PgRangoRow(r)).map_err(|e| anyhow::anyhow!("{}", e))?, false));
     }
-
-    let created = insert(pool, defaults).await?;
-    Ok((created, true))
+    Ok((insert(pool, defaults).await?, true))
 }
 
-/// UPDATE OR CREATE — updates if found, creates if not. Returns the model.
+/// UPDATE OR CREATE.
 pub async fn update_or_create<M>(
     pool: &PgPool,
     lookup: Vec<(&'static str, SqlValue)>,
@@ -214,28 +151,64 @@ pub async fn update_or_create<M>(
 where
     M: Model + ModelValues + FromRow,
 {
-    let table = M::table_name();
+    let (sql, bind_vals) = build_lookup_sql::<M>(&lookup);
+    let q = bind_sql_values(sqlx::query(&sql), bind_vals);
+    let row = q.fetch_optional(pool).await
+        .with_context(|| format!("UPDATE_OR_CREATE lookup on {} failed", M::table_name()))?;
+    if row.is_some() { update(pool, values).await } else { insert(pool, values).await }
+}
+
+// ─── SQL builders ─────────────────────────────────────────────────────────────
+
+fn build_insert_sql<M: Model + ModelValues>(model: &M) -> (String, Vec<SqlValue>) {
+    let fields = model.field_values();
+    let pk_col = M::pk_column();
+    let pk_val = model.pk_value();
+    let mut cols = vec![format!("\"{}\"", pk_col)];
+    cols.extend(fields.iter().map(|(c, _)| format!("\"{}\"", c)));
+    let placeholders: Vec<String> = (1..=cols.len()).map(|i| format!("${}", i)).collect();
+    let sql = format!(
+        "INSERT INTO \"{}\" ({}) VALUES ({}) RETURNING *",
+        M::table_name(), cols.join(", "), placeholders.join(", ")
+    );
+    let mut values = vec![pk_val];
+    values.extend(fields.into_iter().map(|(_, v)| v));
+    (sql, values)
+}
+
+fn build_update_sql<M: Model + ModelValues>(model: &M) -> (String, Vec<SqlValue>) {
+    let fields = model.field_values();
+    let pk_col = M::pk_column();
+    let pk_val = model.pk_value();
+    let set_clauses: Vec<String> = fields.iter().enumerate()
+        .map(|(i, (col, _))| format!("\"{}\" = ${}", col, i + 1))
+        .collect();
+    let sql = format!(
+        "UPDATE \"{}\" SET {} WHERE \"{}\" = ${} RETURNING *",
+        M::table_name(), set_clauses.join(", "), pk_col, fields.len() + 1
+    );
+    let mut values: Vec<SqlValue> = fields.into_iter().map(|(_, v)| v).collect();
+    values.push(pk_val);
+    (sql, values)
+}
+
+fn build_delete_sql<M: Model + ModelValues>(model: &M) -> (String, Vec<SqlValue>) {
+    (
+        format!("DELETE FROM \"{}\" WHERE \"{}\" = $1", M::table_name(), M::pk_column()),
+        vec![model.pk_value()],
+    )
+}
+
+fn build_lookup_sql<M: Model + ModelValues>(
+    lookup: &[(&'static str, SqlValue)],
+) -> (String, Vec<SqlValue>) {
     let conditions: Vec<String> = lookup.iter().enumerate()
         .map(|(i, (col, _))| format!("\"{}\" = ${}", col, i + 1))
         .collect();
-
     let sql = format!(
         "SELECT * FROM \"{}\" WHERE {} LIMIT 1",
-        table,
-        conditions.join(" AND ")
+        M::table_name(), conditions.join(" AND ")
     );
-
-    let mut q = sqlx::query(&sql);
-    for (_, val) in &lookup {
-        q = bind!(q, val.clone());
-    }
-
-    let row = q.fetch_optional(pool).await
-        .with_context(|| format!("UPDATE_OR_CREATE lookup on {} failed", table))?;
-
-    if row.is_some() {
-        update(pool, values).await
-    } else {
-        insert(pool, values).await
-    }
+    let values = lookup.iter().map(|(_, v)| v.clone()).collect();
+    (sql, values)
 }
