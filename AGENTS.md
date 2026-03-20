@@ -139,6 +139,9 @@ Design rules:
 | **Contraintes** | `#[model(unique_together(field1, field2))]`, `CHECK` constraints |
 | **Sous-requêtes** | Rango détecte quand une sous-requête est plus efficace qu'un JOIN ou N+1 |
 | **select_related** | Charge les FK en un seul JOIN au lieu de N requêtes |
+| **prefetch_related** | Charge les M2M en une requête séparée optimisée |
+| **only / defer** | `.only(&["id", "email"])` / `.defer(&["password"])` → retourne type partiel ou `HashMap` |
+| **values** | `.values(&["id", "email"])` → `Vec<HashMap<String, SqlValue>>` |
 | **Transactions** | `rango::transaction(&pool, \|tx\| async { ... }).await?` |
 | **Bulk ops** | `rango::bulk_insert(&pool, vec![...]).await?` |
 | **Aggregations** | `.count()` `.sum()` `.avg()` `.min()` `.max()` |
