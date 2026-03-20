@@ -272,6 +272,10 @@ fn field_type_to_getter(type_str: &str, col: &str, nullable: bool, core: &TokenS
         "FieldDate"     => quote! { row.get_date(#col).map(#core::FieldDate)? },
         "FieldTime"     => quote! { row.get_time(#col).map(#core::FieldTime)? },
         "FieldJson"     => quote! { row.get_json(#col).map(#core::FieldJson)? },
+        s if s.starts_with("ForeignKey<") => {
+            // Extract the type parameter — not used at runtime, only for type safety
+            quote! { row.get_uuid(#col).map(|id| #core::ForeignKey::new(id))? }
+        }
         s if s.starts_with("FieldVarchar<") => {
             let (min, max) = parse_two_generics(s, "FieldVarchar");
             let min_lit = proc_macro2::Literal::usize_unsuffixed(min);
@@ -304,6 +308,9 @@ fn field_type_to_getter(type_str: &str, col: &str, nullable: bool, core: &TokenS
             "FieldUuid"     => quote! { if row.is_null(#col) { None } else { Some(row.get_uuid(#col).map(#core::FieldUuid)?) } },
             "FieldDateTime" => quote! { if row.is_null(#col) { None } else { Some(row.get_datetime(#col).map(#core::FieldDateTime)?) } },
             "FieldJson"     => quote! { if row.is_null(#col) { None } else { Some(row.get_json(#col).map(#core::FieldJson)?) } },
+            s if s.starts_with("ForeignKey<") => {
+                quote! { if row.is_null(#col) { None } else { Some(row.get_uuid(#col).map(|id| #core::ForeignKey::new(id))?) } }
+            }
             s if s.starts_with("FieldVarchar<") => {
                 let (min, max) = parse_two_generics(s, "FieldVarchar");
                 let min_lit = proc_macro2::Literal::usize_unsuffixed(min);
@@ -378,6 +385,7 @@ fn map_field_type(ty: &Type, core: &TokenStream) -> Result<TokenStream> {
         "FieldTime"       => quote! { #core::ColumnType::Time },
         "FieldDateTime"   => quote! { #core::ColumnType::DateTime },
         "FieldJson"       => quote! { #core::ColumnType::Jsonb },
+        s if s.starts_with("ForeignKey<")    => quote! { #core::ColumnType::Uuid },
         s if s.starts_with("FieldVarchar<")  => parse_varchar(s, core)?,
         s if s.starts_with("FieldDecimal<")  => parse_decimal(s, core)?,
         s if s.starts_with("FieldPassword<") => parse_password(s, core)?,
