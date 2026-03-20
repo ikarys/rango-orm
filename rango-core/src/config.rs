@@ -3,6 +3,13 @@
 #[derive(Debug, Clone)]
 pub struct DatabaseConfig {
     pub url: String,
+    pub max_connections: u32,
+    pub min_connections: u32,
+    pub connect_timeout: u64,
+    pub idle_timeout: u64,
+    /// SQL statements executed on every new connection.
+    /// Useful for strict mode, timezone, charset, search_path, etc.
+    pub after_connect: Vec<String>,
 }
 
 impl DatabaseConfig {
@@ -12,7 +19,14 @@ impl DatabaseConfig {
     ///   mysql://user:pass@localhost:3306/mydb
     ///   sqlite:///path/to/db.sqlite3
     pub fn from_url(url: impl Into<String>) -> Self {
-        Self { url: url.into() }
+        Self {
+            url: url.into(),
+            max_connections: 20,
+            min_connections: 2,
+            connect_timeout: 10,
+            idle_timeout: 600,
+            after_connect: Vec::new(),
+        }
     }
 
     /// Build from environment variable (defaults to DATABASE_URL).
