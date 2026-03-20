@@ -159,6 +159,17 @@ fn generate_column_def(field: &Field) -> Result<TokenStream> {
     // Map Rust field type to ColumnType
     let col_type = map_field_type(inner_ty)?;
 
+    // Validate: auto_now_add / auto_now only on date/time fields
+    if attr.auto_now_add || attr.auto_now {
+        let type_str = quote!(#inner_ty).to_string().replace(" ", "");
+        if !matches!(type_str.as_str(), "FieldDate" | "FieldTime" | "FieldDateTime") {
+            return Err(syn::Error::new_spanned(
+                field,
+                "#[field(auto_now_add)] and #[field(auto_now)] are only valid on FieldDate, FieldTime, or FieldDateTime",
+            ));
+        }
+    }
+
     // Default value
     let default_val = if attr.auto_now_add || attr.auto_now {
         quote! { Some(::rango_core::DefaultValue::CurrentTimestamp) }
