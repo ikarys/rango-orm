@@ -23,6 +23,11 @@ pub struct DatabaseConfig {
     pub connect_timeout: u64,
     #[serde(default = "default_idle_timeout")]
     pub idle_timeout: u64,
+    /// SQL statements executed on every new connection.
+    /// Useful for: strict mode, timezone, search_path, charset, etc.
+    /// Example: ["SET time_zone = '+00:00'", "SET SESSION sql_mode = 'STRICT_TRANS_TABLES'"]
+    #[serde(default)]
+    pub after_connect: Vec<String>,
 }
 
 impl Default for DatabaseConfig {
@@ -32,6 +37,7 @@ impl Default for DatabaseConfig {
             min_connections: default_min_connections(),
             connect_timeout: default_connect_timeout(),
             idle_timeout: default_idle_timeout(),
+            after_connect: Vec::new(),
         }
     }
 }

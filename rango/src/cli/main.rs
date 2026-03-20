@@ -63,7 +63,7 @@ fn main() -> Result<()> {
                 migrations
             };
             tokio::runtime::Runtime::new()?
-                .block_on(migrate::run(&url, &dir))?;
+                .block_on(migrate::run(&url, &dir, &cfg.database.after_connect))?;
         }
     }
 

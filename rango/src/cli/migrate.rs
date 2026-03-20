@@ -1,10 +1,17 @@
 use anyhow::{Context, Result};
-use sqlx::PgPool;
+use rango_postgres::PgPool;
 use std::fs;
 
-pub async fn run(database_url: &str, migrations_dir: &str) -> Result<()> {
+pub async fn run(database_url: &str, migrations_dir: &str, after_connect: &[String]) -> Result<()> {
     println!("🔌 Connecting to database...");
-    let pool = PgPool::connect(database_url).await
+
+    let config = rango_core::DatabaseConfig {
+        url: database_url.to_string(),
+        after_connect: after_connect.to_vec(),
+        ..rango_core::DatabaseConfig::from_url(database_url)
+    };
+
+    let pool = rango_postgres::connect(&config).await
         .context("Failed to connect to database")?;
 
     ensure_migrations_table(&pool).await?;
