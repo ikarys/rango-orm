@@ -54,20 +54,76 @@ pub fn expand(input: DeriveInput) -> Result<TokenStream> {
         .map(|f| generate_column_def(f, &core))
         .collect::<Result<Vec<_>>>()?;
 
-    let core = rango_core_path();
+    // Generate ModelValues impl
+    let mut field_value_entries = Vec::new();
+    let mut pk_value_expr = quote! { #core::SqlValue::Null };
+    let mut pk_col_name = "id".to_string();
+
+    for f in fields.iter() {
+        let fname = f.ident.as_ref().unwrap();
+        let is_pk = fname == "id" || parse_field_attr(f)?.primary_key;
+        let col_name = fname.to_string();
+
+        if is_pk {
+            pk_col_name = col_name.clone();
+            pk_value_expr = quote! {
+                #core::ToSqlValue::to_sql_value(&self.#fname)
+            };
+        } else {
+            field_value_entries.push(quote! {
+                (#col_name, #core::ToSqlValue::to_sql_value(&self.#fname))
+            });
+        }
+    }
+
+    // Generate FromRow impl
+    let mut from_row_fields = Vec::new();
+    for f in fields.iter() {
+        let fname = f.ident.as_ref().unwrap();
+        let col_name = fname.to_string();
+        let (nullable, inner_ty) = extract_option(&f.ty);
+        let type_str = quote!(#inner_ty).to_string().replace(" ", "");
+
+        let getter = field_type_to_getter(&type_str, &col_name, nullable, &core);
+        from_row_fields.push(quote! { #fname: #getter });
+    }
+
+    let core2 = rango_core_path();
     Ok(quote! {
-        impl #core::Model for #struct_name {
+        impl #core2::Model for #struct_name {
             fn table_name() -> &'static str {
                 #table_name
             }
 
-            fn schema() -> #core::TableSchema {
-                #core::TableSchema {
+            fn schema() -> #core2::TableSchema {
+                #core2::TableSchema {
                     table_name: #table_name.to_string(),
                     columns: vec![
                         #(#column_defs),*
                     ],
                 }
+            }
+        }
+
+        impl #core2::FromRow for #struct_name {
+            fn from_row(row: &dyn #core2::RangoRow) -> Result<Self, #core2::RowError> {
+                Ok(Self {
+                    #(#from_row_fields),*
+                })
+            }
+        }
+
+        impl #core2::ModelValues for #struct_name {
+            fn field_values(&self) -> Vec<(&'static str, #core2::SqlValue)> {
+                vec![#(#field_value_entries),*]
+            }
+
+            fn pk_value(&self) -> #core2::SqlValue {
+                #pk_value_expr
+            }
+
+            fn pk_column() -> &'static str {
+                #pk_col_name
             }
         }
     })
@@ -194,6 +250,93 @@ fn generate_column_def(field: &Field, core: &TokenStream) -> Result<TokenStream>
             references: None,
         }
     })
+}
+
+/// Generate the expression to read a field from a RangoRow.
+fn field_type_to_getter(type_str: &str, col: &str, nullable: bool, core: &TokenStream) -> TokenStream {
+    let getter = match type_str {
+        "FieldBool"     => quote! { row.get_bool(#col).map(#core::FieldBool)? },
+        "FieldSmallInt" => quote! { row.get_i16(#col).map(#core::FieldSmallInt)? },
+        "FieldInt"      => quote! { row.get_i32(#col).map(#core::FieldInt)? },
+        "FieldBigInt"   => quote! { row.get_i64(#col).map(#core::FieldBigInt)? },
+        "FieldFloat"    => quote! { row.get_f32(#col).map(#core::FieldFloat)? },
+        "FieldDouble"   => quote! { row.get_f64(#col).map(#core::FieldDouble)? },
+        "FieldText"     => quote! { row.get_string(#col).map(#core::FieldText)? },
+        "FieldEmail"    => quote! { row.get_string(#col).map(#core::FieldEmail)? },
+        "FieldUrl"      => quote! { row.get_string(#col).map(#core::FieldUrl)? },
+        "FieldBytes"    => quote! { row.get_bytes(#col).map(#core::FieldBytes)? },
+        "FieldUuid"     => quote! { row.get_uuid(#col).map(#core::FieldUuid)? },
+        "FieldDateTime" => quote! { row.get_datetime(#col).map(#core::FieldDateTime)? },
+        "FieldDate"     => quote! { row.get_date(#col).map(#core::FieldDate)? },
+        "FieldTime"     => quote! { row.get_time(#col).map(#core::FieldTime)? },
+        "FieldJson"     => quote! { row.get_json(#col).map(#core::FieldJson)? },
+        s if s.starts_with("FieldVarchar<") => {
+            let (min, max) = parse_two_generics(s, "FieldVarchar");
+            let min_lit = proc_macro2::Literal::usize_unsuffixed(min);
+            let max_lit = proc_macro2::Literal::usize_unsuffixed(max);
+            quote! { row.get_string(#col).map(|s| #core::FieldVarchar::<#min_lit, #max_lit>(s))? }
+        }
+        s if s.starts_with("FieldPassword<") => {
+            let (min, max) = parse_two_generics(s, "FieldPassword");
+            let min_lit = proc_macro2::Literal::usize_unsuffixed(min);
+            let max_lit = proc_macro2::Literal::usize_unsuffixed(max);
+            quote! { row.get_string(#col).map(|s| #core::FieldPassword::<#min_lit, #max_lit>(s))? }
+        }
+        s if s.starts_with("FieldRange<") => {
+            let (min, max) = parse_two_generics_i64(s, "FieldRange");
+            let min_lit = proc_macro2::Literal::i64_unsuffixed(min);
+            let max_lit = proc_macro2::Literal::i64_unsuffixed(max);
+            quote! { row.get_i64(#col).map(|v| #core::FieldRange::<#min_lit, #max_lit>(v))? }
+        }
+        _ => quote! { compile_error!("Unknown field type in FromRow") },
+    };
+
+    if nullable {
+        match type_str {
+            "FieldBool"     => quote! { if row.is_null(#col) { None } else { Some(row.get_bool(#col).map(#core::FieldBool)?) } },
+            "FieldSmallInt" => quote! { if row.is_null(#col) { None } else { Some(row.get_i16(#col).map(#core::FieldSmallInt)?) } },
+            "FieldInt"      => quote! { if row.is_null(#col) { None } else { Some(row.get_i32(#col).map(#core::FieldInt)?) } },
+            "FieldBigInt"   => quote! { if row.is_null(#col) { None } else { Some(row.get_i64(#col).map(#core::FieldBigInt)?) } },
+            "FieldText"     => quote! { if row.is_null(#col) { None } else { Some(row.get_string(#col).map(#core::FieldText)?) } },
+            "FieldEmail"    => quote! { if row.is_null(#col) { None } else { Some(row.get_string(#col).map(#core::FieldEmail)?) } },
+            "FieldUuid"     => quote! { if row.is_null(#col) { None } else { Some(row.get_uuid(#col).map(#core::FieldUuid)?) } },
+            "FieldDateTime" => quote! { if row.is_null(#col) { None } else { Some(row.get_datetime(#col).map(#core::FieldDateTime)?) } },
+            "FieldJson"     => quote! { if row.is_null(#col) { None } else { Some(row.get_json(#col).map(#core::FieldJson)?) } },
+            s if s.starts_with("FieldVarchar<") => {
+                let (min, max) = parse_two_generics(s, "FieldVarchar");
+                let min_lit = proc_macro2::Literal::usize_unsuffixed(min);
+                let max_lit = proc_macro2::Literal::usize_unsuffixed(max);
+                quote! { if row.is_null(#col) { None } else { Some(row.get_string(#col).map(|s| #core::FieldVarchar::<#min_lit, #max_lit>(s))?) } }
+            }
+            _ => quote! { if row.is_null(#col) { None } else { Some(#getter) } },
+        }
+    } else {
+        getter
+    }
+}
+
+fn parse_two_generics(s: &str, prefix: &str) -> (usize, usize) {
+    let inner = s.trim_start_matches(&format!("{}<", prefix)).trim_end_matches('>');
+    let parts: Vec<&str> = inner.split(',').collect();
+    if parts.len() == 2 {
+        let min = parts[0].trim().parse().unwrap_or(0);
+        let max = parts[1].trim().parse().unwrap_or(255);
+        (min, max)
+    } else {
+        (0, 255)
+    }
+}
+
+fn parse_two_generics_i64(s: &str, prefix: &str) -> (i64, i64) {
+    let inner = s.trim_start_matches(&format!("{}<", prefix)).trim_end_matches('>');
+    let parts: Vec<&str> = inner.split(',').collect();
+    if parts.len() == 2 {
+        let min = parts[0].trim().parse().unwrap_or(i64::MIN);
+        let max = parts[1].trim().parse().unwrap_or(i64::MAX);
+        (min, max)
+    } else {
+        (i64::MIN, i64::MAX)
+    }
 }
 
 /// Returns (is_nullable, inner_type).
