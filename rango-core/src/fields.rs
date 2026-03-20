@@ -1,96 +1,233 @@
-use std::fmt;
+use chrono::{DateTime, NaiveDate, NaiveTime, Utc};
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 /// Marker trait for all Rango field types.
-/// Implemented by all Field* types — used by rango-derive to introspect columns.
 pub trait RangoField {
-    /// The Rust type stored inside this field.
     type Inner;
-
-    /// The SQL column type this field maps to.
     fn column_type() -> crate::schema::ColumnType;
-
-    /// Validate the inner value. Returns an error message if invalid.
-    fn validate(value: &Self::Inner) -> Result<(), FieldError>;
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FieldError(pub String);
-
-impl fmt::Display for FieldError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
+    fn into_inner(self) -> Self::Inner;
 }
 
 // ─── Primitive fields ────────────────────────────────────────────────────────
 
-/// Boolean field → BOOLEAN
-pub struct FieldBool;
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FieldBool(pub bool);
 
-/// Small integer field → SMALLINT
-pub struct FieldSmallInt;
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FieldSmallInt(pub i16);
 
-/// Integer field → INTEGER
-pub struct FieldInt;
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FieldInt(pub i32);
 
-/// Big integer field → BIGINT
-pub struct FieldBigInt;
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FieldBigInt(pub i64);
 
-/// 32-bit float → REAL
-pub struct FieldFloat;
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FieldFloat(pub f32);
 
-/// 64-bit float → DOUBLE PRECISION
-pub struct FieldDouble;
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FieldDouble(pub f64);
 
-/// Decimal field with precision and scale → NUMERIC(P, S)
-pub struct FieldDecimal<const PRECISION: u8, const SCALE: u8>;
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FieldDecimal<const PRECISION: u8, const SCALE: u8>(pub f64);
 
 // ─── String fields ───────────────────────────────────────────────────────────
 
-/// Unbounded text field → TEXT
-pub struct FieldText;
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FieldText(pub String);
 
-/// Variable-length string with min/max length → VARCHAR(MAX)
-/// Validated at construction: value length must be in [MIN, MAX].
-pub struct FieldVarchar<const MIN: usize, const MAX: usize>;
+/// VARCHAR with min/max length validation.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FieldVarchar<const MIN: usize, const MAX: usize>(pub String);
 
-/// Email field → VARCHAR(254), validated as email format
-pub struct FieldEmail;
+impl<const MIN: usize, const MAX: usize> FieldVarchar<MIN, MAX> {
+    pub fn new(s: impl Into<String>) -> Result<Self, FieldError> {
+        let s = s.into();
+        if s.len() < MIN {
+            return Err(FieldError(format!("Value too short (min {})", MIN)));
+        }
+        if s.len() > MAX {
+            return Err(FieldError(format!("Value too long (max {})", MAX)));
+        }
+        Ok(Self(s))
+    }
+}
 
-/// Password field → VARCHAR(MAX), validated for min/max length
-/// Note: Rango stores raw value — hashing is the application's responsibility.
-pub struct FieldPassword<const MIN: usize, const MAX: usize>;
+/// Email field — validated on construction.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FieldEmail(pub String);
 
-/// URL field → VARCHAR(2048), validated as URL format
-pub struct FieldUrl;
+impl FieldEmail {
+    pub fn new(s: impl Into<String>) -> Result<Self, FieldError> {
+        let s = s.into();
+        if !s.contains('@') || s.len() > 254 {
+            return Err(FieldError("Invalid email address".into()));
+        }
+        Ok(Self(s))
+    }
+}
+
+/// Password field — length validated on construction. Value is stored as-is.
+/// Hashing is the application's responsibility.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FieldPassword<const MIN: usize, const MAX: usize>(pub String);
+
+impl<const MIN: usize, const MAX: usize> FieldPassword<MIN, MAX> {
+    pub fn new(s: impl Into<String>) -> Result<Self, FieldError> {
+        let s = s.into();
+        if s.len() < MIN {
+            return Err(FieldError(format!("Password too short (min {})", MIN)));
+        }
+        if s.len() > MAX {
+            return Err(FieldError(format!("Password too long (max {})", MAX)));
+        }
+        Ok(Self(s))
+    }
+}
+
+/// URL field — basic validation.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FieldUrl(pub String);
+
+impl FieldUrl {
+    pub fn new(s: impl Into<String>) -> Result<Self, FieldError> {
+        let s = s.into();
+        if !s.starts_with("http://") && !s.starts_with("https://") {
+            return Err(FieldError("URL must start with http:// or https://".into()));
+        }
+        Ok(Self(s))
+    }
+}
 
 // ─── Binary ──────────────────────────────────────────────────────────────────
 
-/// Binary field → BYTEA (postgres) / BLOB (mysql/sqlite)
-pub struct FieldBytes;
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FieldBytes(pub Vec<u8>);
 
 // ─── UUID ─────────────────────────────────────────────────────────────────────
 
-/// UUID field → UUID (postgres) / CHAR(36) (mysql/sqlite)
-pub struct FieldUuid;
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FieldUuid(pub Uuid);
+
+impl FieldUuid {
+    /// Generate a new random UUID v4.
+    pub fn new() -> Self {
+        Self(Uuid::new_v4())
+    }
+}
+
+impl Default for FieldUuid {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 // ─── Date / Time ─────────────────────────────────────────────────────────────
 
-/// Date only → DATE
-pub struct FieldDate;
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FieldDate(pub NaiveDate);
 
-/// Time only → TIME
-pub struct FieldTime;
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FieldTime(pub NaiveTime);
 
-/// Date + time (with timezone) → TIMESTAMPTZ
-pub struct FieldDateTime;
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FieldDateTime(pub DateTime<Utc>);
+
+impl FieldDateTime {
+    pub fn now() -> Self {
+        Self(Utc::now())
+    }
+}
 
 // ─── JSON ────────────────────────────────────────────────────────────────────
 
-/// JSON field → JSONB (postgres) / JSON (others)
-pub struct FieldJson;
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FieldJson(pub serde_json::Value);
 
-// ─── Numeric range ───────────────────────────────────────────────────────────
+// ─── Range ───────────────────────────────────────────────────────────────────
 
-/// Integer with min/max range validation → INTEGER
-pub struct FieldRange<const MIN: i64, const MAX: i64>;
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FieldRange<const MIN: i64, const MAX: i64>(pub i64);
+
+impl<const MIN: i64, const MAX: i64> FieldRange<MIN, MAX> {
+    pub fn new(val: i64) -> Result<Self, FieldError> {
+        if val < MIN || val > MAX {
+            return Err(FieldError(format!("Value {} out of range [{}, {}]", val, MIN, MAX)));
+        }
+        Ok(Self(val))
+    }
+}
+
+// ─── Error ───────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FieldError(pub String);
+
+impl std::fmt::Display for FieldError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::error::Error for FieldError {}
+
+// ─── ToSqlValue implementations ──────────────────────────────────────────────
+
+use crate::query::{SqlValue, ToSqlValue};
+
+impl ToSqlValue for FieldBool    { fn to_sql_value(&self) -> SqlValue { SqlValue::Bool(self.0) } }
+impl ToSqlValue for FieldSmallInt { fn to_sql_value(&self) -> SqlValue { SqlValue::SmallInt(self.0) } }
+impl ToSqlValue for FieldInt     { fn to_sql_value(&self) -> SqlValue { SqlValue::Int(self.0) } }
+impl ToSqlValue for FieldBigInt  { fn to_sql_value(&self) -> SqlValue { SqlValue::BigInt(self.0) } }
+impl ToSqlValue for FieldFloat   { fn to_sql_value(&self) -> SqlValue { SqlValue::Float(self.0) } }
+impl ToSqlValue for FieldDouble  { fn to_sql_value(&self) -> SqlValue { SqlValue::Double(self.0) } }
+impl ToSqlValue for FieldText    { fn to_sql_value(&self) -> SqlValue { SqlValue::Text(self.0.clone()) } }
+impl ToSqlValue for FieldEmail   { fn to_sql_value(&self) -> SqlValue { SqlValue::Text(self.0.clone()) } }
+impl ToSqlValue for FieldUrl     { fn to_sql_value(&self) -> SqlValue { SqlValue::Text(self.0.clone()) } }
+impl ToSqlValue for FieldBytes   { fn to_sql_value(&self) -> SqlValue { SqlValue::Bytes(self.0.clone()) } }
+impl ToSqlValue for FieldUuid    { fn to_sql_value(&self) -> SqlValue { SqlValue::Uuid(self.0) } }
+impl ToSqlValue for FieldDateTime { fn to_sql_value(&self) -> SqlValue { SqlValue::DateTime(self.0) } }
+impl ToSqlValue for FieldDate    { fn to_sql_value(&self) -> SqlValue { SqlValue::Date(self.0) } }
+impl ToSqlValue for FieldTime    { fn to_sql_value(&self) -> SqlValue { SqlValue::Time(self.0) } }
+impl ToSqlValue for FieldJson    { fn to_sql_value(&self) -> SqlValue { SqlValue::Json(self.0.clone()) } }
+
+impl<const MIN: usize, const MAX: usize> ToSqlValue for FieldVarchar<MIN, MAX> {
+    fn to_sql_value(&self) -> SqlValue { SqlValue::Text(self.0.clone()) }
+}
+impl<const MIN: usize, const MAX: usize> ToSqlValue for FieldPassword<MIN, MAX> {
+    fn to_sql_value(&self) -> SqlValue { SqlValue::Text(self.0.clone()) }
+}
+impl<const MIN: i64, const MAX: i64> ToSqlValue for FieldRange<MIN, MAX> {
+    fn to_sql_value(&self) -> SqlValue { SqlValue::BigInt(self.0) }
+}
+impl<const P: u8, const S: u8> ToSqlValue for FieldDecimal<P, S> {
+    fn to_sql_value(&self) -> SqlValue { SqlValue::Double(self.0) }
+}
+
+// Option<T> support
+impl<T: ToSqlValue> ToSqlValue for Option<T> {
+    fn to_sql_value(&self) -> SqlValue {
+        match self {
+            Some(v) => v.to_sql_value(),
+            None => SqlValue::Null,
+        }
+    }
+}
+
+// ─── From<T> conversions (ergonomics) ────────────────────────────────────────
+
+impl From<bool> for FieldBool { fn from(v: bool) -> Self { Self(v) } }
+impl From<i16> for FieldSmallInt { fn from(v: i16) -> Self { Self(v) } }
+impl From<i32> for FieldInt { fn from(v: i32) -> Self { Self(v) } }
+impl From<i64> for FieldBigInt { fn from(v: i64) -> Self { Self(v) } }
+impl From<f32> for FieldFloat { fn from(v: f32) -> Self { Self(v) } }
+impl From<f64> for FieldDouble { fn from(v: f64) -> Self { Self(v) } }
+impl From<String> for FieldText { fn from(v: String) -> Self { Self(v) } }
+impl From<&str> for FieldText { fn from(v: &str) -> Self { Self(v.to_string()) } }
+impl From<Vec<u8>> for FieldBytes { fn from(v: Vec<u8>) -> Self { Self(v) } }
+impl From<Uuid> for FieldUuid { fn from(v: Uuid) -> Self { Self(v) } }
+impl From<NaiveDate> for FieldDate { fn from(v: NaiveDate) -> Self { Self(v) } }
+impl From<NaiveTime> for FieldTime { fn from(v: NaiveTime) -> Self { Self(v) } }
+impl From<DateTime<Utc>> for FieldDateTime { fn from(v: DateTime<Utc>) -> Self { Self(v) } }
+impl From<serde_json::Value> for FieldJson { fn from(v: serde_json::Value) -> Self { Self(v) } }

@@ -15,17 +15,16 @@
 pub use rango_core::*;
 
 // Make rango_core visible as a top-level crate for proc-macro generated code.
-// This allows `::rango_core::` paths to resolve in downstream crates
-// that only depend on `rango`.
 #[doc(hidden)]
 pub extern crate rango_core;
 
-// Re-export the derive macro
+// Re-export the derive macros
 pub use rango_derive::Model;
 pub use rango_derive::ModelMixin;
 
-// Re-export database pool type
+// Re-export database pool type and operations
 pub use rango_postgres::PgPool;
+pub use rango_postgres::{all, delete, get, get_or_create, insert, update, update_or_create};
 
 /// Connect to a PostgreSQL database.
 ///
@@ -42,6 +41,6 @@ pub async fn connect(config: &DatabaseConfig) -> Result<PgPool, sqlx::Error> {
 pub mod prelude {
     pub use rango_core::*;
     pub use rango_derive::{Model, ModelMixin};
-    pub use rango_postgres::PgPool;
+    pub use rango_postgres::{all, delete, get, get_or_create, insert, update, update_or_create, PgPool};
     pub use rango_core::ModelHooks;
 }
