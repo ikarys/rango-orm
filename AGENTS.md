@@ -25,10 +25,16 @@ struct Article {
 ```
 
 ### 2. Migrations are generated, never written
-`rango makemigrations` — diffs current models against last known state, generates a numbered `.sql` file.
-`rango migrate` — applies pending migrations in order.
+`rango makemigrations` — diffs current models against last known state, generates numbered `.sql` files.
+`rango migrate` — applies pending migrations in order, reads `DATABASE_URL` or `rango.toml`.
 
 You never touch migration files unless you want to. They're generated artifacts.
+
+This is the **#1 differentiator** vs other Rust ORMs:
+- Diesel → write SQL migrations by hand
+- SeaORM → generate from existing DB
+- sqlx → manual migrations
+- **Rango → change your struct, run `rango makemigrations`. Done.**
 
 ### 3. Zero ceremony
 - No `impl Model for Article { ... }` by hand
