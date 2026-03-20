@@ -3,6 +3,7 @@ use clap::{Parser, Subcommand};
 
 mod scanner;
 mod makemigrations;
+mod migrate;
 
 
 #[derive(Parser)]
@@ -23,6 +24,10 @@ enum Command {
         /// Output directory for migration files (default: migrations/)
         #[arg(short, long, default_value = "migrations")]
         output: String,
+
+        /// Table prefix (default: auto-detected from Cargo.toml)
+        #[arg(short, long)]
+        prefix: Option<String>,
     },
 
     /// Apply pending migrations to the database
@@ -41,11 +46,12 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Command::Makemigrations { path, output } => {
-            makemigrations::run(&path, &output)?;
+        Command::Makemigrations { path, output, prefix } => {
+            makemigrations::run(&path, &output, prefix.as_deref())?;
         }
         Command::Migrate { database_url, migrations } => {
-            println!("migrate: not yet implemented (db={database_url}, dir={migrations})");
+            tokio::runtime::Runtime::new()?
+                .block_on(migrate::run(&database_url, &migrations))?;
         }
     }
 

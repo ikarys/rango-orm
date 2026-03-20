@@ -1,13 +1,24 @@
-use anyhow::Result;
+use anyhow::{Context, Result, bail};
 use rango_core::{ColumnType, DefaultValue, TableSchema};
 use std::fs;
 
 use crate::scanner::scan_models;
 
-pub fn run(src_dir: &str, output_dir: &str) -> Result<()> {
+pub fn run(src_dir: &str, output_dir: &str, prefix: Option<&str>) -> Result<()> {
     println!("🔍 Scanning models in {}...", src_dir);
 
-    let schemas = scan_models(src_dir)?;
+    let prefix = match prefix {
+        Some(p) => p.to_string(),
+        None => detect_project_name()?,
+    };
+    println!("📦 Table prefix: {}", prefix);
+
+    let mut schemas = scan_models(src_dir)?;
+
+    // Apply prefix to all table names (skip if table was explicitly set via #[model(table="...")])
+    for schema in &mut schemas {
+        schema.table_name = format!("{}_{}", prefix, schema.table_name);
+    }
 
     if schemas.is_empty() {
         println!("No models found.");
@@ -30,6 +41,24 @@ pub fn run(src_dir: &str, output_dir: &str) -> Result<()> {
 
     println!("✅ Migration generated: {}", filename);
     Ok(())
+}
+
+/// Auto-detect project name from Cargo.toml in current directory
+fn detect_project_name() -> Result<String> {
+    let cargo_toml = fs::read_to_string("Cargo.toml")
+        .context("Could not find Cargo.toml — run from project root or use --prefix")?;
+
+    for line in cargo_toml.lines() {
+        let line = line.trim();
+        if line.starts_with("name") {
+            if let Some(val) = line.splitn(2, '=').nth(1) {
+                let name = val.trim().trim_matches('"').to_string();
+                return Ok(name);
+            }
+        }
+    }
+
+    anyhow::bail!("Could not detect project name from Cargo.toml — use --prefix")
 }
 
 /// Build a readable label from table names — truncated if too many
@@ -99,7 +128,7 @@ fn generate_create_table(schema: &TableSchema) -> String {
     }
 
     format!(
-        "CREATE TABLE IF NOT EXISTS {} (\n{}\n);\n",
+        "CREATE TABLE IF NOT EXISTS \"{}\" (\n{}\n);\n",
         schema.table_name,
         lines.join(",\n")
     )
