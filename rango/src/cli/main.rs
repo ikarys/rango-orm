@@ -1,9 +1,10 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
-mod scanner;
+mod config;
 mod makemigrations;
 mod migrate;
+mod scanner;
 
 
 #[derive(Parser)]
@@ -32,9 +33,9 @@ enum Command {
 
     /// Apply pending migrations to the database
     Migrate {
-        /// Database URL (or set DATABASE_URL env var)
-        #[arg(short, long, env = "DATABASE_URL")]
-        database_url: String,
+        /// Database URL (overrides DATABASE_URL from .env)
+        #[arg(short, long)]
+        database_url: Option<String>,
 
         /// Directory containing migration files (default: migrations/)
         #[arg(short, long, default_value = "migrations")]
@@ -47,11 +48,22 @@ fn main() -> Result<()> {
 
     match cli.command {
         Command::Makemigrations { path, output, prefix } => {
+            let cfg = config::RangoConfig::load()?;
+            let prefix = prefix
+                .or(cfg.models.prefix)
+                .map(|s| s.as_str().to_string());
             makemigrations::run(&path, &output, prefix.as_deref())?;
         }
         Command::Migrate { database_url, migrations } => {
+            let cfg = config::RangoConfig::load()?;
+            let url = cfg.resolve_database_url(database_url.as_deref())?;
+            let dir = if migrations == "migrations" {
+                cfg.migrations.dir.clone()
+            } else {
+                migrations
+            };
             tokio::runtime::Runtime::new()?
-                .block_on(migrate::run(&database_url, &migrations))?;
+                .block_on(migrate::run(&url, &dir))?;
         }
     }
 
