@@ -43,4 +43,5 @@ pub mod prelude {
     pub use rango_core::*;
     pub use rango_derive::{Model, ModelMixin};
     pub use rango_postgres::PgPool;
+    pub use rango_core::ModelHooks;
 }

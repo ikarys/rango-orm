@@ -5,6 +5,7 @@ mod config;
 mod makemigrations;
 mod migrate;
 mod scanner;
+mod snapshot;
 
 
 #[derive(Parser)]
