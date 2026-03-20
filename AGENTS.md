@@ -146,6 +146,16 @@ Design rules:
 | **Bulk ops** | `rango::bulk_insert(&pool, vec![...]).await?` |
 | **Aggregations** | `.count()` `.sum()` `.avg()` `.min()` `.max()` |
 | **Raw SQL escape hatch** | `rango::raw(&pool, "SELECT ...", params).await?` |
+| **Stored procedures** | `rango::call(&pool, "proc_name", params).await?` — MySQL/PG stored procs. À évaluer : utilité dans un ORM ? |
+| **Auto PK** | Si aucun champ `id` déclaré, Rango en génère un automatiquement. Type configurable dans `rango.toml` (`[models] default_pk = "uuid"` ou `"bigint"`). L'utilisateur peut déclarer le sien avec `#[field(primary_key)]`. |
+
+## Principes non-négociables
+
+- **100% async** — toutes les ops DB sont async, pas de blocking
+- **Performance** — pool de connexions, RETURNING * pour éviter les re-fetch, JOIN au lieu de N+1
+- **Concurrence** — tous les types doivent être `Send + Sync`, compatible tokio multi-thread
+- **Modularité** — chaque backend est une crate séparée, le core n'a aucune dep DB
+- **Simplicité d'utilisation** — la complexité est dans Rango, pas dans le code utilisateur
 
 ### Sous-requêtes — philosophie
 
