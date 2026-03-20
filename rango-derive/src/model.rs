@@ -7,6 +7,7 @@ use syn::{
 };
 
 use crate::utils::to_snake_case;
+use crate::rango_core_path;
 
 /// Parsed `#[field(...)]` attributes for one field.
 #[derive(Default)]
@@ -45,20 +46,23 @@ pub fn expand(input: DeriveInput) -> Result<TokenStream> {
         _ => return Err(syn::Error::new_spanned(struct_name, "Model can only be derived on structs")),
     };
 
+    let core = rango_core_path();
+
     // Generate one ColumnDef per field
     let column_defs: Vec<TokenStream> = fields
         .iter()
-        .map(|f| generate_column_def(f))
+        .map(|f| generate_column_def(f, &core))
         .collect::<Result<Vec<_>>>()?;
 
+    let core = rango_core_path();
     Ok(quote! {
-        impl ::rango_core::Model for #struct_name {
+        impl #core::Model for #struct_name {
             fn table_name() -> &'static str {
                 #table_name
             }
 
-            fn schema() -> ::rango_core::TableSchema {
-                ::rango_core::TableSchema {
+            fn schema() -> #core::TableSchema {
+                #core::TableSchema {
                     table_name: #table_name.to_string(),
                     columns: vec![
                         #(#column_defs),*
@@ -142,7 +146,7 @@ fn parse_field_attr(field: &Field) -> Result<FieldAttr> {
 }
 
 /// Generate a `ColumnDef { ... }` expression for one struct field.
-fn generate_column_def(field: &Field) -> Result<TokenStream> {
+fn generate_column_def(field: &Field, core: &TokenStream) -> Result<TokenStream> {
     let field_name = field.ident.as_ref().unwrap();
     let attr = parse_field_attr(field)?;
 
@@ -157,7 +161,7 @@ fn generate_column_def(field: &Field) -> Result<TokenStream> {
     let is_unique = is_pk || attr.unique; // PK implies unique
 
     // Map Rust field type to ColumnType
-    let col_type = map_field_type(inner_ty)?;
+    let col_type = map_field_type(inner_ty, core)?;
 
     // Validate: auto_now_add / auto_now only on date/time fields
     if attr.auto_now_add || attr.auto_now {
@@ -172,15 +176,15 @@ fn generate_column_def(field: &Field) -> Result<TokenStream> {
 
     // Default value
     let default_val = if attr.auto_now_add || attr.auto_now {
-        quote! { Some(::rango_core::DefaultValue::CurrentTimestamp) }
+        quote! { Some(#core::DefaultValue::CurrentTimestamp) }
     } else if let Some(d) = attr.default {
-        quote! { Some(::rango_core::DefaultValue::Literal(#d.to_string())) }
+        quote! { Some(#core::DefaultValue::Literal(#d.to_string())) }
     } else {
         quote! { None }
     };
 
     Ok(quote! {
-        ::rango_core::ColumnDef {
+        #core::ColumnDef {
             name: #col_name.to_string(),
             col_type: #col_type,
             nullable: #nullable,
@@ -210,81 +214,67 @@ fn extract_option(ty: &Type) -> (bool, &Type) {
 }
 
 /// Map a Rango field type path to a `ColumnType` token.
-fn map_field_type(ty: &Type) -> Result<TokenStream> {
+fn map_field_type(ty: &Type, core: &TokenStream) -> Result<TokenStream> {
     let type_str = quote!(#ty).to_string().replace(" ", "");
 
     let col_type = match type_str.as_str() {
-        "FieldBool"                 => quote! { ::rango_core::ColumnType::Bool },
-        "FieldSmallInt"             => quote! { ::rango_core::ColumnType::SmallInt },
-        "FieldInt"                  => quote! { ::rango_core::ColumnType::Int },
-        "FieldBigInt"               => quote! { ::rango_core::ColumnType::BigInt },
-        "FieldFloat"                => quote! { ::rango_core::ColumnType::Float },
-        "FieldDouble"               => quote! { ::rango_core::ColumnType::Double },
-        "FieldText"                 => quote! { ::rango_core::ColumnType::Text },
-        "FieldEmail"                => quote! { ::rango_core::ColumnType::Varchar(254) },
-        "FieldUrl"                  => quote! { ::rango_core::ColumnType::Varchar(2048) },
-        "FieldBytes"                => quote! { ::rango_core::ColumnType::Bytea },
-        "FieldUuid"                 => quote! { ::rango_core::ColumnType::Uuid },
-        "FieldDate"                 => quote! { ::rango_core::ColumnType::Date },
-        "FieldTime"                 => quote! { ::rango_core::ColumnType::Time },
-        "FieldDateTime"             => quote! { ::rango_core::ColumnType::DateTime },
-        "FieldJson"                 => quote! { ::rango_core::ColumnType::Jsonb },
-        s if s.starts_with("FieldVarchar<") => {
-            // FieldVarchar<MIN, MAX> → we only need MAX for the SQL type
-            parse_varchar(s)?
-        }
-        s if s.starts_with("FieldDecimal<") => {
-            parse_decimal(s)?
-        }
-        s if s.starts_with("FieldRange<") => {
-            // FieldRange stores as the base integer type
-            quote! { ::rango_core::ColumnType::BigInt }
-        }
-        s if s.starts_with("FieldPassword<") => {
-            parse_password(s)?
-        }
-        _ => {
-            return Err(syn::Error::new(
-                proc_macro2::Span::call_site(),
-                format!("Unknown Rango field type: `{}`. Use a FieldXxx type.", type_str),
-            ))
-        }
+        "FieldBool"       => quote! { #core::ColumnType::Bool },
+        "FieldSmallInt"   => quote! { #core::ColumnType::SmallInt },
+        "FieldInt"        => quote! { #core::ColumnType::Int },
+        "FieldBigInt"     => quote! { #core::ColumnType::BigInt },
+        "FieldFloat"      => quote! { #core::ColumnType::Float },
+        "FieldDouble"     => quote! { #core::ColumnType::Double },
+        "FieldText"       => quote! { #core::ColumnType::Text },
+        "FieldEmail"      => quote! { #core::ColumnType::Varchar(254) },
+        "FieldUrl"        => quote! { #core::ColumnType::Varchar(2048) },
+        "FieldBytes"      => quote! { #core::ColumnType::Bytea },
+        "FieldUuid"       => quote! { #core::ColumnType::Uuid },
+        "FieldDate"       => quote! { #core::ColumnType::Date },
+        "FieldTime"       => quote! { #core::ColumnType::Time },
+        "FieldDateTime"   => quote! { #core::ColumnType::DateTime },
+        "FieldJson"       => quote! { #core::ColumnType::Jsonb },
+        s if s.starts_with("FieldVarchar<")  => parse_varchar(s, core)?,
+        s if s.starts_with("FieldDecimal<")  => parse_decimal(s, core)?,
+        s if s.starts_with("FieldPassword<") => parse_password(s, core)?,
+        s if s.starts_with("FieldRange<")    => quote! { #core::ColumnType::BigInt },
+        _ => return Err(syn::Error::new(
+            proc_macro2::Span::call_site(),
+            format!("Unknown Rango field type: `{}`. Use a FieldXxx type.", type_str),
+        )),
     };
     Ok(col_type)
 }
 
-fn parse_varchar(s: &str) -> Result<TokenStream> {
-    // FieldVarchar<MIN,MAX> — extract MAX
+fn parse_varchar(s: &str, core: &TokenStream) -> Result<TokenStream> {
     let inner = s.trim_start_matches("FieldVarchar<").trim_end_matches('>');
     let parts: Vec<&str> = inner.split(',').collect();
     if parts.len() == 2 {
         if let Ok(max) = parts[1].trim().parse::<u32>() {
-            return Ok(quote! { ::rango_core::ColumnType::Varchar(#max) });
+            return Ok(quote! { #core::ColumnType::Varchar(#max) });
         }
     }
     Err(syn::Error::new(proc_macro2::Span::call_site(),
         format!("Invalid FieldVarchar syntax: `{}`", s)))
 }
 
-fn parse_decimal(s: &str) -> Result<TokenStream> {
+fn parse_decimal(s: &str, core: &TokenStream) -> Result<TokenStream> {
     let inner = s.trim_start_matches("FieldDecimal<").trim_end_matches('>');
     let parts: Vec<&str> = inner.split(',').collect();
     if parts.len() == 2 {
         if let (Ok(p), Ok(sc)) = (parts[0].trim().parse::<u8>(), parts[1].trim().parse::<u8>()) {
-            return Ok(quote! { ::rango_core::ColumnType::Decimal { precision: #p, scale: #sc } });
+            return Ok(quote! { #core::ColumnType::Decimal { precision: #p, scale: #sc } });
         }
     }
     Err(syn::Error::new(proc_macro2::Span::call_site(),
         format!("Invalid FieldDecimal syntax: `{}`", s)))
 }
 
-fn parse_password(s: &str) -> Result<TokenStream> {
-    // FieldPassword<MIN, MAX> → VARCHAR(MAX)
+fn parse_password(s: &str, core: &TokenStream) -> Result<TokenStream> {
     let inner = s.trim_start_matches("FieldPassword<").trim_end_matches('>');
     let parts: Vec<&str> = inner.split(',').collect();
     if parts.len() == 2 {
         if let Ok(max) = parts[1].trim().parse::<u32>() {
-            return Ok(quote! { ::rango_core::ColumnType::Varchar(#max) });
+            return Ok(quote! { #core::ColumnType::Varchar(#max) });
         }
     }
     Err(syn::Error::new(proc_macro2::Span::call_site(),
