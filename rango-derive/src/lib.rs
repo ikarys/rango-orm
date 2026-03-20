@@ -1,9 +1,26 @@
 use proc_macro::TokenStream;
+use proc_macro2::TokenStream as TokenStream2;
+use quote::quote;
 use syn::{parse_macro_input, DeriveInput};
 
 mod model;
 mod mixin;
 mod utils;
+
+/// Returns the path to rango_core — either via `rango` umbrella or directly.
+pub(crate) fn rango_core_path() -> TokenStream2 {
+    match proc_macro_crate::crate_name("rango") {
+        Ok(proc_macro_crate::FoundCrate::Itself) => quote! { ::rango_core },
+        Ok(proc_macro_crate::FoundCrate::Name(name)) => {
+            let ident = proc_macro2::Ident::new(&name, proc_macro2::Span::call_site());
+            quote! { ::#ident::rango_core }
+        }
+        Err(_) => {
+            // Fallback: try rango_core directly
+            quote! { ::rango_core }
+        }
+    }
+}
 
 /// Derive macro for Rango models.
 ///

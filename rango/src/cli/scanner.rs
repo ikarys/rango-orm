@@ -12,6 +12,10 @@ pub fn scan_models(src_dir: &str) -> Result<Vec<TableSchema>> {
         .into_iter()
         .filter_map(|e| e.ok())
         .filter(|e| e.path().extension().map(|x| x == "rs").unwrap_or(false))
+        .filter(|e| {
+            let name = e.path().file_name().unwrap_or_default();
+            !matches!(name.to_str().unwrap_or(""), "mod.rs" | "main.rs" | "lib.rs")
+        })
     {
         let path = entry.path();
         let content = std::fs::read_to_string(path)

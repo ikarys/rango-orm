@@ -11,6 +11,7 @@ path = "src/cli/main.rs"
 # Internal crates
 rango-core = { path = "../rango-core" }
 rango-derive = { path = "../rango-derive" }
+rango-postgres = { path = "../rango-postgres" }
 
 # CLI
 clap = { version = "4", features = ["derive", "env"] }

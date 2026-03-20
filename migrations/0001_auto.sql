@@ -1,0 +1,10 @@
+CREATE TABLE IF NOT EXISTS user (
+    id UUID PRIMARY KEY,
+    email VARCHAR NOT NULL UNIQUE,
+    password VARCHAR NOT NULL,
+    username VARCHAR NOT NULL,
+    bio TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
