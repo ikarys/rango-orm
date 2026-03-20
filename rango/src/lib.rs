@@ -27,6 +27,7 @@ pub use rango_postgres::PgPool;
 pub use rango_postgres::{
     all, atomic, delete, get, get_or_create,
     insert, update, update_or_create,
+    M2M,
 };
 pub use rango_postgres::QueryBuilder;
 pub use rango_postgres::RangoFilterExt;
@@ -49,7 +50,7 @@ pub mod prelude {
     pub use rango_postgres::{
         all, atomic, delete, get, get_or_create,
         insert, update, update_or_create,
-        PgPool, QueryBuilder, RangoFilterExt,
+        PgPool, QueryBuilder, RangoFilterExt, M2M,
     };
     pub use rango_core::ModelHooks;
 }

@@ -2,7 +2,7 @@ use anyhow::{bail, Context, Result};
 use rango_core::{ColumnDef, ColumnType, DefaultValue, TableSchema};
 use std::fs;
 
-use crate::scanner::scan_models;
+use crate::scanner::{scan_models, M2MRelation};
 use crate::snapshot::{diff, Snapshot, SchemaDiff};
 
 pub fn run(src_dir: &str, output_dir: &str, prefix: Option<&str>) -> Result<()> {
@@ -14,22 +14,36 @@ pub fn run(src_dir: &str, output_dir: &str, prefix: Option<&str>) -> Result<()> 
     };
     println!("📦 Table prefix: {}", prefix);
 
-    let mut schemas = scan_models(src_dir)?;
+    let (mut schemas, m2m_relations) = scan_models(src_dir)?;
 
     if schemas.is_empty() {
         println!("No models found.");
         return Ok(());
     }
 
-    // Apply prefix
+    // Apply prefix to model tables
     for schema in &mut schemas {
         schema.table_name = format!("{}_{}", prefix, schema.table_name);
     }
+
+    // Generate M2M pivot tables (also prefixed)
+    let pivot_schemas: Vec<TableSchema> = m2m_relations.iter()
+        .map(|rel| generate_pivot_table(rel, &prefix))
+        .collect();
 
     println!("Found {} model(s):", schemas.len());
     for s in &schemas {
         println!("  - {} ({} columns)", s.table_name, s.columns.len());
     }
+    if !pivot_schemas.is_empty() {
+        println!("Found {} M2M relation(s):", pivot_schemas.len());
+        for s in &pivot_schemas {
+            println!("  - {} (pivot)", s.table_name);
+        }
+    }
+
+    // Merge pivot tables into schemas for diff
+    schemas.extend(pivot_schemas);
 
     fs::create_dir_all(output_dir)?;
 
@@ -119,6 +133,18 @@ fn generate_create_table(schema: &TableSchema) -> String {
     for col in &schema.columns {
         lines.push(format!("    {}", column_definition(col)));
     }
+
+    // Detect pivot table: 2 UUID NOT NULL non-PK columns → composite PK
+    let is_pivot = schema.columns.len() == 2
+        && schema.columns.iter().all(|c| !c.primary_key && !c.nullable
+            && c.col_type == rango_core::ColumnType::Uuid);
+
+    if is_pivot {
+        let col1 = &schema.columns[0].name;
+        let col2 = &schema.columns[1].name;
+        lines.push(format!("    PRIMARY KEY (\"{}\", \"{}\")", col1, col2));
+    }
+
     format!(
         "CREATE TABLE IF NOT EXISTS \"{}\" (\n{}\n);\n",
         schema.table_name,
@@ -198,6 +224,37 @@ fn next_migration_number(dir: &str) -> Result<u32> {
         }
     }
     Ok(max + 1)
+}
+
+/// Generate a pivot table schema for a M2M relation.
+fn generate_pivot_table(rel: &M2MRelation, prefix: &str) -> TableSchema {
+    let from_table = format!("{}_{}", prefix, rel.from_table);
+    let to_table = format!("{}_{}", prefix, rel.to_table);
+    let pivot_name = format!("{}_{}", from_table, to_table);
+
+    TableSchema {
+        table_name: pivot_name,
+        columns: vec![
+            rango_core::ColumnDef {
+                name: format!("{}_id", from_table),
+                col_type: rango_core::ColumnType::Uuid,
+                nullable: false,
+                primary_key: false,
+                unique: false,
+                default: None,
+                references: None,
+            },
+            rango_core::ColumnDef {
+                name: format!("{}_id", to_table),
+                col_type: rango_core::ColumnType::Uuid,
+                nullable: false,
+                primary_key: false,
+                unique: false,
+                default: None,
+                references: None,
+            },
+        ],
+    }
 }
 
 fn detect_project_name() -> Result<String> {
