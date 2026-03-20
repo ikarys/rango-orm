@@ -77,6 +77,50 @@ This is by design — Rango should be portable.
 L'objectif : ne plus jamais avoir à retourner sur la doc de `pg_dump` / `mysqldump`.
 Une commande, ça marche pareil quel que soit le backend.
 
+## Model Hooks
+
+Opt-in trait `ModelHooks` — implement only what you need.
+
+```rust
+#[derive(Model)]
+struct User {
+    id: FieldUuid,
+    name: FieldVarchar<1, 100>,
+    slug: FieldVarchar<1, 100>,
+}
+
+impl ModelHooks for User {
+    async fn before_save(&mut self) -> Result<()> {
+        self.slug = slugify(&self.name);
+        Ok(())
+    }
+
+    async fn after_save(&self) -> Result<()> {
+        send_welcome_email(self).await?;
+        Ok(())
+    }
+}
+```
+
+Available hooks (all have a no-op default impl):
+
+| Hook | Triggered |
+|---|---|
+| `before_save` | Before INSERT or UPDATE |
+| `after_save` | After INSERT or UPDATE |
+| `before_create` | Before INSERT only |
+| `after_create` | After INSERT only |
+| `before_update` | Before UPDATE only |
+| `after_update` | After UPDATE only |
+| `before_delete` | Before DELETE |
+| `after_delete` | After DELETE |
+
+Design rules:
+- All hooks are `async`
+- All hooks return `Result<()>` — returning `Err` cancels the operation
+- Hooks run inside the same transaction as the DB operation
+- `ModelHooks` is opt-in — no impl needed if unused
+
 ## Non-goals (for now)
 
 - Async streaming / cursors
