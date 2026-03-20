@@ -1,5 +1,5 @@
 use rango_core::{FromRow, Model, ModelValues, SqlValue};
-use sqlx::PgPool;
+use sqlx::{PgPool, query::Query, postgres::{Postgres, PgArguments}};
 use anyhow::{Context, Result};
 
 use crate::row::PgRangoRow;
@@ -24,6 +24,17 @@ macro_rules! bind {
             SqlValue::Json(v)      => $q.bind(sqlx::types::Json(v)),
         }
     };
+}
+
+/// Bind a Vec<SqlValue> to a query — used by QueryBuilder.
+pub fn bind_sql_values<'q>(
+    mut q: Query<'q, Postgres, PgArguments>,
+    values: Vec<SqlValue>,
+) -> Query<'q, Postgres, PgArguments> {
+    for val in values {
+        q = bind!(q, val);
+    }
+    q
 }
 
 /// INSERT → returns the model as stored.

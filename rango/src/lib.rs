@@ -25,6 +25,8 @@ pub use rango_derive::ModelMixin;
 // Re-export database pool type and operations
 pub use rango_postgres::PgPool;
 pub use rango_postgres::{all, delete, get, get_or_create, insert, update, update_or_create};
+pub use rango_postgres::QueryBuilder;
+pub use rango_postgres::RangoFilterExt;
 
 /// Connect to a PostgreSQL database.
 ///
@@ -41,6 +43,6 @@ pub async fn connect(config: &DatabaseConfig) -> Result<PgPool, sqlx::Error> {
 pub mod prelude {
     pub use rango_core::*;
     pub use rango_derive::{Model, ModelMixin};
-    pub use rango_postgres::{all, delete, get, get_or_create, insert, update, update_or_create, PgPool};
+    pub use rango_postgres::{all, delete, get, get_or_create, insert, update, update_or_create, PgPool, QueryBuilder, RangoFilterExt};
     pub use rango_core::ModelHooks;
 }

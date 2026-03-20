@@ -10,7 +10,7 @@ pub use config::{BackendKind, DatabaseConfig};
 pub use fields::*;
 pub use hooks::ModelHooks;
 pub use model::{Model, ModelMixin};
-pub use query::{ModelValues, SqlValue, ToSqlValue};
+pub use query::{Filterable, ModelValues, SqlValue, ToSqlValue};
 pub use row::{FromRow, RangoRow, RowError};
 pub use schema::{ColumnDef, ColumnType, DefaultValue, ForeignKey, ReferentialAction, TableSchema};
 

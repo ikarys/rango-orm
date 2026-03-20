@@ -113,6 +113,8 @@ pub fn expand(input: DeriveInput) -> Result<TokenStream> {
             }
         }
 
+        impl #core2::Filterable for #struct_name {}
+
         impl #core2::ModelValues for #struct_name {
             fn field_values(&self) -> Vec<(&'static str, #core2::SqlValue)> {
                 vec![#(#field_value_entries),*]

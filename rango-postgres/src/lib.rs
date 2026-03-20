@@ -1,4 +1,5 @@
 mod ops;
+mod query_builder;
 mod row;
 
 use rango_core::DatabaseConfig;
@@ -7,6 +8,21 @@ use std::time::Duration;
 
 pub use sqlx::PgPool;
 pub use ops::{all, delete, get, get_or_create, insert, update, update_or_create};
+pub use query_builder::QueryBuilder;
+
+use rango_core::{Filterable, FromRow, Model, ModelValues};
+
+/// Extension trait — adds .filter(&pool) to any Model.
+pub trait RangoFilterExt: Model + ModelValues + FromRow + Filterable + Sized {
+    fn filter(pool: &PgPool) -> QueryBuilder<Self> {
+        QueryBuilder::new(pool)
+    }
+}
+
+/// Blanket impl — any Model that implements the required traits gets .filter() for free.
+impl<M> RangoFilterExt for M where M: Model + ModelValues + FromRow + Filterable {}
+
+pub use self::RangoFilterExt as FilterExt;
 
 /// Connect to a PostgreSQL database and return a connection pool.
 /// Applies `after_connect` SQL statements on every new connection if configured.
