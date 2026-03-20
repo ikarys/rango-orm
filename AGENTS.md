@@ -127,6 +127,39 @@ Design rules:
 - Hooks run inside the same transaction as the DB operation
 - `ModelHooks` is opt-in — no impl needed if unused
 
+## Roadmap
+
+### À implémenter (par ordre de priorité)
+
+| Feature | Description |
+|---|---|
+| **Query builder** | `.filter().eq().or().order_by().limit().offset()` |
+| **Relations FK** | `ForeignKey<User>` → vrai `ON DELETE CASCADE` SQL |
+| **ManyToMany** | Table pivot auto-générée, `.add()` `.remove()` `.all()` |
+| **Contraintes** | `#[model(unique_together(field1, field2))]`, `CHECK` constraints |
+| **Sous-requêtes** | Rango détecte quand une sous-requête est plus efficace qu'un JOIN ou N+1 |
+| **select_related** | Charge les FK en un seul JOIN au lieu de N requêtes |
+| **Transactions** | `rango::transaction(&pool, \|tx\| async { ... }).await?` |
+| **Bulk ops** | `rango::bulk_insert(&pool, vec![...]).await?` |
+| **Aggregations** | `.count()` `.sum()` `.avg()` `.min()` `.max()` |
+| **Raw SQL escape hatch** | `rango::raw(&pool, "SELECT ...", params).await?` |
+
+### Sous-requêtes — philosophie
+
+Rango doit être **intelligent** sur le SQL généré :
+- Détecter les N+1 et les remplacer automatiquement par des sous-requêtes ou JOINs
+- Pour les `filter()` sur des relations, utiliser `EXISTS (subquery)` plutôt que des JOINs quand c'est plus efficace
+- Exposer `.explain()` pour que le dev puisse voir le SQL généré
+
+```rust
+// Rango génère automatiquement une sous-requête efficace
+let active_users = User::filter(&pool)
+    .exists(Article::filter().eq("published", true))  // sous-requête
+    .all()
+    .await?;
+// → SELECT * FROM "user" WHERE EXISTS (SELECT 1 FROM "article" WHERE published = true AND user_id = "user".id)
+```
+
 ## Non-goals (for now)
 
 - Async streaming / cursors
