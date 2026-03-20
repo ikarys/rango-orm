@@ -48,18 +48,20 @@ pub fn expand(input: DeriveInput) -> Result<TokenStream> {
 
     let core = rango_core_path();
 
-    // Generate one ColumnDef per field
+    // Generate one ColumnDef per field (skip ManyToMany — not a DB column)
     let column_defs: Vec<TokenStream> = fields
         .iter()
+        .filter(|f| !is_many_to_many(&f.ty))
         .map(|f| generate_column_def(f, &core))
         .collect::<Result<Vec<_>>>()?;
 
-    // Generate ModelValues impl
+    // Generate ModelValues impl (skip ManyToMany)
     let mut field_value_entries = Vec::new();
     let mut pk_value_expr = quote! { #core::SqlValue::Null };
     let mut pk_col_name = "id".to_string();
 
     for f in fields.iter() {
+        if is_many_to_many(&f.ty) { continue; }
         let fname = f.ident.as_ref().unwrap();
         let is_pk = fname == "id" || parse_field_attr(f)?.primary_key;
         let col_name = fname.to_string();
@@ -76,9 +78,14 @@ pub fn expand(input: DeriveInput) -> Result<TokenStream> {
         }
     }
 
-    // Generate FromRow impl
+    // Generate FromRow impl (ManyToMany fields are always empty — loaded separately)
     let mut from_row_fields = Vec::new();
     for f in fields.iter() {
+        if is_many_to_many(&f.ty) {
+            let fname = f.ident.as_ref().unwrap();
+            from_row_fields.push(quote! { #fname: #core::ManyToMany::empty() });
+            continue;
+        }
         let fname = f.ident.as_ref().unwrap();
         let col_name = fname.to_string();
         let (nullable, inner_ty) = extract_option(&f.ty);
@@ -346,6 +353,12 @@ fn parse_two_generics_i64(s: &str, prefix: &str) -> (i64, i64) {
     } else {
         (i64::MIN, i64::MAX)
     }
+}
+
+/// Returns true if the type is ManyToMany<T>.
+fn is_many_to_many(ty: &Type) -> bool {
+    let s = quote!(#ty).to_string().replace(" ", "");
+    s.starts_with("ManyToMany<")
 }
 
 /// Returns (is_nullable, inner_type).

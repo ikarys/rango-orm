@@ -4,9 +4,10 @@ use std::path::Path;
 use syn::{visit::Visit, File, ItemStruct, Type};
 use walkdir::WalkDir;
 
-/// Scan a source directory and return all TableSchemas found.
-pub fn scan_models(src_dir: &str) -> Result<Vec<TableSchema>> {
+/// Scan a source directory and return (schemas, m2m_relations).
+pub fn scan_models(src_dir: &str) -> Result<(Vec<TableSchema>, Vec<M2MRelation>)> {
     let mut schemas = Vec::new();
+    let mut m2m_relations = Vec::new();
 
     for entry in WalkDir::new(src_dir)
         .into_iter()
@@ -31,9 +32,10 @@ pub fn scan_models(src_dir: &str) -> Result<Vec<TableSchema>> {
         let mut visitor = ModelVisitor::new(path);
         visitor.visit_file(&file);
         schemas.extend(visitor.schemas);
+        m2m_relations.extend(visitor.m2m_relations);
     }
 
-    Ok(schemas)
+    Ok((schemas, m2m_relations))
 }
 
 /// Quick check: does this file import rango?
@@ -43,14 +45,22 @@ fn uses_rango(content: &str) -> bool {
         || content.contains("use rango")
 }
 
+/// A detected M2M relation between two table names.
+#[derive(Debug, Clone)]
+pub struct M2MRelation {
+    pub from_table: String, // will be prefixed later
+    pub to_table: String,   // will be prefixed later
+}
+
 struct ModelVisitor<'a> {
     path: &'a Path,
     pub schemas: Vec<TableSchema>,
+    pub m2m_relations: Vec<M2MRelation>,
 }
 
 impl<'a> ModelVisitor<'a> {
     fn new(path: &'a Path) -> Self {
-        Self { path, schemas: Vec::new() }
+        Self { path, schemas: Vec::new(), m2m_relations: Vec::new() }
     }
 }
 
@@ -65,6 +75,21 @@ impl<'ast> Visit<'ast> for ModelVisitor<'_> {
 
         if let syn::Fields::Named(fields) = &node.fields {
             for field in &fields.named {
+                // Detect ManyToMany<T> — record relation, skip column
+                let type_str = quote::quote!(#(field.ty)).to_string().replace(" ", "");
+                if type_str.starts_with("ManyToMany<") {
+                    let to_model = type_str
+                        .trim_start_matches("ManyToMany<")
+                        .trim_end_matches('>')
+                        .to_string();
+                    let to_table = to_snake_case(&to_model);
+                    self.m2m_relations.push(M2MRelation {
+                        from_table: table_name.clone(),
+                        to_table,
+                    });
+                    continue;
+                }
+
                 match build_column_def(field) {
                     Ok(col) => columns.push(col),
                     Err(e) => eprintln!(
