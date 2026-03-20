@@ -3,6 +3,74 @@ use sqlx::PgPool;
 use anyhow::Result;
 
 use crate::row::PgRangoRow;
+use crate::PgRangoRow2;
+
+/// A prefixed row adapter — reads columns like "t1_email", "t1_id" etc.
+struct PrefixedRow<'a> {
+    row: &'a sqlx::postgres::PgRow,
+    prefix: &'a str,
+}
+
+impl rango_core::RangoRow for PrefixedRow<'_> {
+    fn get_bool(&self, col: &str) -> Result<bool, rango_core::RowError> {
+        self.row.try_get(&format!("{}_{}", self.prefix, col)[..])
+            .map_err(|e| rango_core::RowError(format!("{}_{}: {}", self.prefix, col, e)))
+    }
+    fn get_i16(&self, col: &str) -> Result<i16, rango_core::RowError> {
+        self.row.try_get(&format!("{}_{}", self.prefix, col)[..])
+            .map_err(|e| rango_core::RowError(format!("{}", e)))
+    }
+    fn get_i32(&self, col: &str) -> Result<i32, rango_core::RowError> {
+        self.row.try_get(&format!("{}_{}", self.prefix, col)[..])
+            .map_err(|e| rango_core::RowError(format!("{}", e)))
+    }
+    fn get_i64(&self, col: &str) -> Result<i64, rango_core::RowError> {
+        self.row.try_get(&format!("{}_{}", self.prefix, col)[..])
+            .map_err(|e| rango_core::RowError(format!("{}", e)))
+    }
+    fn get_f32(&self, col: &str) -> Result<f32, rango_core::RowError> {
+        self.row.try_get(&format!("{}_{}", self.prefix, col)[..])
+            .map_err(|e| rango_core::RowError(format!("{}", e)))
+    }
+    fn get_f64(&self, col: &str) -> Result<f64, rango_core::RowError> {
+        self.row.try_get(&format!("{}_{}", self.prefix, col)[..])
+            .map_err(|e| rango_core::RowError(format!("{}", e)))
+    }
+    fn get_string(&self, col: &str) -> Result<String, rango_core::RowError> {
+        self.row.try_get(&format!("{}_{}", self.prefix, col)[..])
+            .map_err(|e| rango_core::RowError(format!("{}", e)))
+    }
+    fn get_bytes(&self, col: &str) -> Result<Vec<u8>, rango_core::RowError> {
+        self.row.try_get(&format!("{}_{}", self.prefix, col)[..])
+            .map_err(|e| rango_core::RowError(format!("{}", e)))
+    }
+    fn get_uuid(&self, col: &str) -> Result<uuid::Uuid, rango_core::RowError> {
+        self.row.try_get(&format!("{}_{}", self.prefix, col)[..])
+            .map_err(|e| rango_core::RowError(format!("{}", e)))
+    }
+    fn get_datetime(&self, col: &str) -> Result<chrono::DateTime<chrono::Utc>, rango_core::RowError> {
+        self.row.try_get(&format!("{}_{}", self.prefix, col)[..])
+            .map_err(|e| rango_core::RowError(format!("{}", e)))
+    }
+    fn get_date(&self, col: &str) -> Result<chrono::NaiveDate, rango_core::RowError> {
+        self.row.try_get(&format!("{}_{}", self.prefix, col)[..])
+            .map_err(|e| rango_core::RowError(format!("{}", e)))
+    }
+    fn get_time(&self, col: &str) -> Result<chrono::NaiveTime, rango_core::RowError> {
+        self.row.try_get(&format!("{}_{}", self.prefix, col)[..])
+            .map_err(|e| rango_core::RowError(format!("{}", e)))
+    }
+    fn get_json(&self, col: &str) -> Result<serde_json::Value, rango_core::RowError> {
+        self.row.try_get::<sqlx::types::Json<serde_json::Value>, _>(&format!("{}_{}", self.prefix, col)[..])
+            .map(|j| j.0)
+            .map_err(|e| rango_core::RowError(format!("{}", e)))
+    }
+    fn is_null(&self, col: &str) -> bool {
+        self.row.try_get::<Option<String>, _>(&format!("{}_{}", self.prefix, col)[..])
+            .map(|v| v.is_none())
+            .unwrap_or(true)
+    }
+}
 
 /// Comparison operators
 #[derive(Debug, Clone)]
@@ -218,6 +286,56 @@ where
         let mut idx = 1usize;
         let expr = build_conditions(&self.conditions, &mut binds, &mut idx);
         (format!("WHERE {}", expr), binds)
+    }
+
+    /// Execute with a JOIN and return (M, R) tuples.
+    ///
+    /// ```rust
+    /// let results: Vec<(Article, User)> = Article::filter(&pool)
+    ///     .select_related::<User>("author_id")
+    ///     .await?;
+    /// ```
+    pub async fn select_related<R>(self, fk_col: &str) -> Result<Vec<(M, R)>>
+    where
+        R: Model + ModelValues + FromRow,
+    {
+        let t1 = M::table_name();
+        let t2 = R::table_name();
+
+        // Build explicit column aliases for t2: t2.id AS t2_id, t2.email AS t2_email ...
+        let r_schema = R::schema();
+        let t2_aliases: Vec<String> = r_schema.columns.iter()
+            .map(|c| format!("t2.\"{}\" AS \"t2_{}\"", c.name, c.name))
+            .collect();
+
+        let (where_clause, binds) = self.build_where();
+
+        let mut sql = format!(
+            "SELECT t1.*, {} FROM \"{}\" t1 INNER JOIN \"{}\" t2 ON t1.\"{}\" = t2.\"{}\"",
+            t2_aliases.join(", "),
+            t1, t2, fk_col,
+            R::pk_column(),
+        );
+        if !where_clause.is_empty() {
+            sql.push(' ');
+            // Prefix ambiguous WHERE columns with t1.
+            sql.push_str(&where_clause.replace("\"", "t1.\"").replacen("WHERE t1.", "WHERE ", 1));
+        }
+        if !self.order_by.is_empty() {
+            sql.push_str(&format!(" ORDER BY {}", self.order_by.join(", ")));
+        }
+        if let Some(l) = self.limit  { sql.push_str(&format!(" LIMIT {}", l)); }
+        if let Some(o) = self.offset { sql.push_str(&format!(" OFFSET {}", o)); }
+
+        let rows = bind_and_fetch_all(&self.pool, &sql, binds).await?;
+
+        rows.into_iter().map(|row| {
+            let m = M::from_row(&PgRangoRow2::new(&row))
+                .map_err(|e| anyhow::anyhow!("Main model: {}", e))?;
+            let r = R::from_row(&PrefixedRow { row: &row, prefix: "t2" })
+                .map_err(|e| anyhow::anyhow!("Related model: {}", e))?;
+            Ok((m, r))
+        }).collect()
     }
 
     /// Execute and return all matching rows.

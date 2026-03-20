@@ -215,6 +215,44 @@ impl<T: ToSqlValue> ToSqlValue for Option<T> {
     }
 }
 
+// ─── Foreign Key ─────────────────────────────────────────────────────────────
+
+/// A foreign key reference — stores the PK value of the related model.
+/// The related model type `M` is used for type safety and select_related.
+///
+/// # Example
+/// ```rust
+/// #[derive(Model)]
+/// struct Article {
+///     id: FieldUuid,
+///     author_id: ForeignKey<User>,
+/// }
+/// ```
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ForeignKey<M>(pub uuid::Uuid, std::marker::PhantomData<M>);
+
+impl<M> ForeignKey<M> {
+    pub fn new(id: uuid::Uuid) -> Self {
+        Self(id, std::marker::PhantomData)
+    }
+
+    pub fn id(&self) -> uuid::Uuid {
+        self.0
+    }
+}
+
+impl<M> From<uuid::Uuid> for ForeignKey<M> {
+    fn from(id: uuid::Uuid) -> Self {
+        Self::new(id)
+    }
+}
+
+impl<M> ToSqlValue for ForeignKey<M> {
+    fn to_sql_value(&self) -> SqlValue {
+        SqlValue::Uuid(self.0)
+    }
+}
+
 // ─── From<T> conversions (ergonomics) ────────────────────────────────────────
 
 impl From<bool> for FieldBool { fn from(v: bool) -> Self { Self(v) } }
