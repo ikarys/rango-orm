@@ -144,7 +144,7 @@ Design rules:
 | **values** | `.values(&["id", "email"])` → `Vec<HashMap<String, SqlValue>>` |
 | **Contraintes** ✅ | `#[model(constraints = [CheckConstraint::new("age >= 18").name("chk_age"), UniqueConstraint::on(&["room", "date"]).name("uniq_booking")])]` — `CHECK (...)` inline dans `CREATE TABLE`; `UNIQUE (cols)` inline; `UNIQUE ... WHERE cond` → `CREATE UNIQUE INDEX ... WHERE ...` (partial index PostgreSQL). `managed = false` → table ignorée par les migrations. `ordering = [asc("col"), desc("other")]` → ordre par défaut injecté dans `schema()`. |
 | **Transactions** ✅ | `rango::atomic/transaction(&pool, \|tx\| async { ... }).await?` — `get/all/insert/update/delete` accept any `Executor`; `get_or_create` is atomic via `INSERT … ON CONFLICT DO NOTHING RETURNING *` and accepts any `Acquire` (pool or transaction, no `atomic()` needed); `update_or_create` accepts `&mut RangoExecutor`; `QueryBuilder::transaction()` available |
-| **Bulk ops** | `rango::bulk_insert(&pool, vec![...]).await?` |
+| **Bulk ops** ✅ | `rango::bulk_create/update/upsert(&pool, &models, ...)` — multi-row INSERT, `UPDATE … FROM (VALUES …)`, INSERT ON CONFLICT; auto-chunked at 65 535 params; accept pool or transaction via `Acquire` |
 | **Aggregations** | `.count()` `.sum()` `.avg()` `.min()` `.max()` |
 | **Raw SQL escape hatch** | `rango::raw(&pool, "SELECT ...", params).await?` |
 | **Stored procedures** | `rango::call(&pool, "proc_name", params).await?` — MySQL/PG stored procs. À évaluer : utilité dans un ORM ? |
