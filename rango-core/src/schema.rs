@@ -1,8 +1,27 @@
+use crate::constraints::{Constraint, OrderBy};
+
 /// Represents the schema of a single table, as declared by a Model.
 #[derive(Debug, Clone)]
 pub struct TableSchema {
     pub table_name: String,
     pub columns: Vec<ColumnDef>,
+    pub constraints: Vec<Constraint>,
+    pub ordering: Vec<OrderBy>,
+    pub managed: bool,
+    pub comment: Option<String>,
+}
+
+impl Default for TableSchema {
+    fn default() -> Self {
+        Self {
+            table_name: String::new(),
+            columns: Vec::new(),
+            constraints: Vec::new(),
+            ordering: Vec::new(),
+            managed: true,
+            comment: None,
+        }
+    }
 }
 
 /// Definition of a single column.

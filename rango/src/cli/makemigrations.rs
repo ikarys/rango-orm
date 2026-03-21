@@ -1,5 +1,5 @@
 use anyhow::{bail, Context, Result};
-use rango_core::{ColumnDef, ColumnType, DefaultValue, TableSchema};
+use rango_core::{ColumnDef, ColumnType, Constraint, DefaultValue, TableSchema};
 use std::fs;
 
 use crate::scanner::{scan_models, M2MRelation};
@@ -15,6 +15,9 @@ pub fn run(src_dir: &str, output_dir: &str, prefix: Option<&str>) -> Result<()> 
     println!("📦 Table prefix: {}", prefix);
 
     let (mut schemas, m2m_relations) = scan_models(src_dir)?;
+
+    // Drop unmanaged models — they are not owned by Rango migrations
+    schemas.retain(|s| s.managed);
 
     if schemas.is_empty() {
         println!("No models found.");
@@ -130,6 +133,8 @@ fn generate_sql_from_diff(diffs: &[SchemaDiff]) -> String {
 
 fn generate_create_table(schema: &TableSchema) -> String {
     let mut lines = Vec::new();
+    let mut post_stmts: Vec<String> = Vec::new();
+
     for col in &schema.columns {
         lines.push(format!("    {}", column_definition(col)));
     }
@@ -145,11 +150,61 @@ fn generate_create_table(schema: &TableSchema) -> String {
         lines.push(format!("    PRIMARY KEY (\"{}\", \"{}\")", col1, col2));
     }
 
-    format!(
+    // Table-level constraints
+    for constraint in &schema.constraints {
+        match constraint {
+            Constraint::Check(cc) => {
+                let name = if cc.name.is_empty() {
+                    format!("{}_check", schema.table_name)
+                } else {
+                    cc.name.clone()
+                };
+                lines.push(format!("    CONSTRAINT \"{}\" CHECK ({})", name, cc.sql));
+            }
+            Constraint::Unique(uc) if uc.condition.is_none() => {
+                let cols = uc.fields.iter()
+                    .map(|f| format!("\"{}\"", f))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let name = if uc.name.is_empty() {
+                    format!("{}_{}_unique", schema.table_name, uc.fields.join("_"))
+                } else {
+                    uc.name.clone()
+                };
+                lines.push(format!("    CONSTRAINT \"{}\" UNIQUE ({})", name, cols));
+            }
+            Constraint::Unique(uc) => {
+                // Partial unique constraint → separate CREATE UNIQUE INDEX (PostgreSQL)
+                let cols = uc.fields.iter()
+                    .map(|f| format!("\"{}\"", f))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let name = if uc.name.is_empty() {
+                    format!("{}_{}_unique", schema.table_name, uc.fields.join("_"))
+                } else {
+                    uc.name.clone()
+                };
+                let cond = uc.condition.as_deref().unwrap_or("");
+                post_stmts.push(format!(
+                    "CREATE UNIQUE INDEX \"{}\" ON \"{}\" ({}) WHERE {};\n",
+                    name, schema.table_name, cols, cond
+                ));
+            }
+        }
+    }
+
+    let mut sql = format!(
         "CREATE TABLE IF NOT EXISTS \"{}\" (\n{}\n);\n",
         schema.table_name,
         lines.join(",\n")
-    )
+    );
+
+    for stmt in post_stmts {
+        sql.push('\n');
+        sql.push_str(&stmt);
+    }
+
+    sql
 }
 
 fn column_definition(col: &ColumnDef) -> String {
@@ -254,6 +309,7 @@ fn generate_pivot_table(rel: &M2MRelation, prefix: &str) -> TableSchema {
                 references: None,
             },
         ],
+        ..Default::default()
     }
 }
 

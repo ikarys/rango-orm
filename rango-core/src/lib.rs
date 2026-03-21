@@ -1,4 +1,5 @@
 pub mod config;
+pub mod constraints;
 pub mod fields;
 pub mod hooks;
 pub mod model;
@@ -7,6 +8,10 @@ pub mod row;
 pub mod schema;
 
 pub use config::{BackendKind, DatabaseConfig};
+pub use constraints::{
+    asc, desc,
+    CheckConstraint, Constraint, IndexDef, OrderBy, OrderDir, UniqueConstraint,
+};
 pub use fields::*;
 pub use hooks::ModelHooks;
 pub use model::{Model, ModelMixin};
