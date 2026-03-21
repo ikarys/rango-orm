@@ -1,5 +1,5 @@
 use rango_core::{FromRow, Model, ModelValues, SqlValue};
-use sqlx::{Executor, Postgres};
+use sqlx::{Acquire, Executor, Postgres};
 use sqlx::postgres::PgArguments;
 use sqlx::query::Query;
 use anyhow::{Context, Result};
@@ -130,43 +130,54 @@ where
 
 // ─── Compound ops — require RangoExecutor (pool or transaction, sequential queries) ─
 
-/// GET OR CREATE — returns (model, created: bool).
+/// GET OR CREATE — atomic, race-free. Returns `(model, created: bool)`.
 ///
-/// Accepts `&mut pool` (for standalone use) or `tx` (inside `atomic()`).
+/// Uses `INSERT ... ON CONFLICT (lookup_cols) DO NOTHING RETURNING *` in a single
+/// round-trip. If the row already exists (conflict), falls back to a SELECT on the
+/// same connection. No need to wrap in `atomic()`.
 ///
-/// Note: to guarantee atomicity (no race between SELECT and INSERT), wrap in `atomic()`.
+/// Accepts `&PgPool`, `&mut Transaction<'_, Postgres>`, or any type implementing
+/// `sqlx::Acquire`.
 ///
 /// # Example
 /// ```rust
-/// // Standalone (not atomic — races possible under high concurrency)
-/// let (user, created) = rango::get_or_create(&mut pool, lookup, defaults).await?;
+/// // Standalone — atomic without wrapping in rango::atomic()
+/// let (user, created) = rango::get_or_create(&pool, lookup, defaults).await?;
 ///
-/// // Atomic
+/// // Inside a transaction
 /// let (user, created) = rango::atomic(&pool, |tx| async move {
-///     rango::get_or_create(tx, lookup, defaults).await
+///     rango::get_or_create(&mut *tx, lookup, defaults).await
 /// }).await?;
 /// ```
-pub async fn get_or_create<E, M>(
-    exec: &mut E,
+pub async fn get_or_create<'a, A, M>(
+    executor: A,
     lookup: Vec<(&'static str, SqlValue)>,
     defaults: M,
 ) -> Result<(M, bool)>
 where
-    E: RangoExecutor,
+    A: Acquire<'a, Database = Postgres>,
     M: Model + ModelValues + FromRow,
 {
-    let (lookup_sql, lookup_vals) = build_lookup_sql::<M>(&lookup);
-    let q = bind_sql_values(sqlx::query(&lookup_sql), lookup_vals);
-    let row = exec.fetch_optional_query(q).await
-        .with_context(|| format!("GET_OR_CREATE lookup on {} failed", M::table_name()))?;
-    if let Some(r) = row {
-        return Ok((M::from_row(&PgRangoRow(r)).map_err(|e| anyhow::anyhow!("{}", e))?, false));
-    }
-    let (insert_sql, insert_vals) = build_insert_sql::<M>(&defaults);
+    let mut conn = executor.acquire().await
+        .with_context(|| format!("get_or_create: failed to acquire connection for {}", M::table_name()))?;
+
+    let conflict_cols: Vec<&str> = lookup.iter().map(|(col, _)| *col).collect();
+    let (insert_sql, insert_vals) = build_get_or_create_sql(&defaults, &conflict_cols);
     let q = bind_sql_values(sqlx::query(&insert_sql), insert_vals);
-    let row = exec.fetch_one_query(q).await
-        .with_context(|| format!("GET_OR_CREATE insert on {} failed", M::table_name()))?;
-    Ok((M::from_row(&PgRangoRow(row)).map_err(|e| anyhow::anyhow!("{}", e))?, true))
+    let row = q.fetch_optional(&mut *conn).await
+        .with_context(|| format!("get_or_create INSERT on {} failed", M::table_name()))?;
+
+    if let Some(r) = row {
+        return Ok((M::from_row(&PgRangoRow(r)).map_err(|e| anyhow::anyhow!("{}", e))?, true));
+    }
+
+    // Conflict — row already exists; fetch it
+    let (select_sql, select_vals) = build_lookup_sql::<M>(&lookup);
+    let q = bind_sql_values(sqlx::query(&select_sql), select_vals);
+    let row = q.fetch_one(&mut *conn).await
+        .with_context(|| format!("get_or_create SELECT fallback on {} failed", M::table_name()))?;
+
+    Ok((M::from_row(&PgRangoRow(row)).map_err(|e| anyhow::anyhow!("{}", e))?, false))
 }
 
 /// UPDATE OR CREATE.
@@ -240,6 +251,29 @@ fn build_delete_sql<M: Model + ModelValues>(model: &M) -> (String, Vec<SqlValue>
         format!("DELETE FROM \"{}\" WHERE \"{}\" = $1", M::table_name(), M::pk_column()),
         vec![model.pk_value()],
     )
+}
+
+fn build_get_or_create_sql<M: Model + ModelValues>(
+    model: &M,
+    conflict_cols: &[&str],
+) -> (String, Vec<SqlValue>) {
+    let fields = model.field_values();
+    let pk_col = M::pk_column();
+    let pk_val = model.pk_value();
+    let mut cols = vec![format!("\"{}\"", pk_col)];
+    cols.extend(fields.iter().map(|(c, _)| format!("\"{}\"", c)));
+    let placeholders: Vec<String> = (1..=cols.len()).map(|i| format!("${}", i)).collect();
+    let conflict_clause = conflict_cols.iter()
+        .map(|c| format!("\"{}\"", c))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let sql = format!(
+        "INSERT INTO \"{}\" ({}) VALUES ({}) ON CONFLICT ({}) DO NOTHING RETURNING *",
+        M::table_name(), cols.join(", "), placeholders.join(", "), conflict_clause
+    );
+    let mut values = vec![pk_val];
+    values.extend(fields.into_iter().map(|(_, v)| v));
+    (sql, values)
 }
 
 fn build_lookup_sql<M: Model + ModelValues>(
