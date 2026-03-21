@@ -2,10 +2,28 @@ use sqlx::{PgPool, Postgres, Transaction};
 use anyhow::Result;
 use std::future::Future;
 
+/// Type alias for a Rango/sqlx transaction — use this in function signatures
+/// instead of the verbose `Transaction<'_, Postgres>`.
+///
+/// # Example
+/// ```rust
+/// async fn create_user_with_profile(tx: &mut RangoTransaction<'_>, ...) -> Result<User> {
+///     let user = rango::insert(tx, ...).await?;
+///     rango::insert(tx, profile).await?;
+///     Ok(user)
+/// }
+///
+/// rango::atomic(&pool, |tx| async move {
+///     create_user_with_profile(tx, ...).await
+/// }).await?;
+/// ```
+pub type RangoTransaction<'a> = Transaction<'a, Postgres>;
+
 /// Execute a closure atomically — commits on Ok, rolls back on Err.
 ///
-/// All Rango ops (`insert`, `update`, `delete`) accept both `&PgPool`
-/// and `&mut Transaction` — no separate `insert_tx` needed.
+/// All Rango ops (`insert`, `update`, `delete`, `get`, `all`) accept both `&PgPool`
+/// and `&mut Transaction` — no separate `_tx` variants needed.
+/// For compound ops (`get_or_create`, `update_or_create`), pass `tx` directly.
 ///
 /// # Example
 /// ```rust
@@ -20,7 +38,7 @@ use std::future::Future;
 /// ```
 pub async fn atomic<F, Fut, T>(pool: &PgPool, f: F) -> Result<T>
 where
-    F: FnOnce(&mut Transaction<'_, Postgres>) -> Fut,
+    F: FnOnce(&mut RangoTransaction<'_>) -> Fut,
     Fut: Future<Output = Result<T>>,
 {
     let mut tx = pool.begin().await
@@ -37,4 +55,13 @@ where
             Err(e)
         }
     }
+}
+
+/// Alias for [`atomic`] — same semantics, alternative name.
+pub async fn transaction<F, Fut, T>(pool: &PgPool, f: F) -> Result<T>
+where
+    F: FnOnce(&mut RangoTransaction<'_>) -> Fut,
+    Fut: Future<Output = Result<T>>,
+{
+    atomic(pool, f).await
 }

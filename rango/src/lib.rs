@@ -25,12 +25,12 @@ pub use rango_derive::ModelMixin;
 // Re-export database pool type and operations
 pub use rango_postgres::PgPool;
 pub use rango_postgres::{
-    all, atomic, delete, get, get_or_create,
+    all, atomic, transaction, delete, get, get_or_create,
     insert, update, update_or_create,
     M2M,
 };
-pub use rango_postgres::QueryBuilder;
-pub use rango_postgres::RangoFilterExt;
+pub use rango_postgres::{QueryBuilder, RangoFilterExt};
+pub use rango_postgres::{RangoExecutor, RangoTransaction};
 
 /// Connect to a PostgreSQL database.
 ///
@@ -48,9 +48,10 @@ pub mod prelude {
     pub use rango_core::*;
     pub use rango_derive::{Model, ModelMixin};
     pub use rango_postgres::{
-        all, atomic, delete, get, get_or_create,
+        all, atomic, transaction, delete, get, get_or_create,
         insert, update, update_or_create,
         PgPool, QueryBuilder, RangoFilterExt, M2M,
+        RangoExecutor, RangoTransaction,
     };
     pub use rango_core::ModelHooks;
 }

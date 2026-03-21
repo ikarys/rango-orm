@@ -142,7 +142,7 @@ Design rules:
 | **prefetch_related** | Charge les M2M en une requête séparée optimisée |
 | **only / defer** | `.only(&["id", "email"])` / `.defer(&["password"])` → retourne type partiel ou `HashMap` |
 | **values** | `.values(&["id", "email"])` → `Vec<HashMap<String, SqlValue>>` |
-| **Transactions** | `rango::transaction(&pool, \|tx\| async { ... }).await?` |
+| **Transactions** ✅ | `rango::atomic/transaction(&pool, \|tx\| async { ... }).await?` — `get/all/insert/update/delete` accept any executor; `get_or_create/update_or_create` accept `&mut RangoExecutor`; `QueryBuilder::transaction()` available |
 | **Bulk ops** | `rango::bulk_insert(&pool, vec![...]).await?` |
 | **Aggregations** | `.count()` `.sum()` `.avg()` `.min()` `.max()` |
 | **Raw SQL escape hatch** | `rango::raw(&pool, "SELECT ...", params).await?` |

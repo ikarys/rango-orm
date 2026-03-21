@@ -389,6 +389,29 @@ where
     pub async fn exists(self) -> Result<bool> {
         Ok(self.count().await? > 0)
     }
+
+    /// Execute a closure within a transaction, using this builder's pool.
+    ///
+    /// Equivalent to `rango::atomic(&pool, f)` — convenience for code that already
+    /// has a `QueryBuilder` in scope.
+    ///
+    /// # Example
+    /// ```rust
+    /// User::filter(&pool)
+    ///     .transaction(|tx| async move {
+    ///         rango::insert(tx, user).await?;
+    ///         rango::insert(tx, profile).await?;
+    ///         Ok(())
+    ///     })
+    ///     .await?;
+    /// ```
+    pub async fn transaction<F, Fut, T>(&self, f: F) -> Result<T>
+    where
+        F: FnOnce(&mut crate::transaction::RangoTransaction<'_>) -> Fut,
+        Fut: std::future::Future<Output = Result<T>>,
+    {
+        crate::transaction::atomic(&self.pool, f).await
+    }
 }
 
 // ─── SQL builder helpers ──────────────────────────────────────────────────────
