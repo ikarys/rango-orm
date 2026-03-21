@@ -136,12 +136,13 @@ Design rules:
 | **Query builder** | `.filter().eq().or().order_by().limit().offset()` |
 | **Relations FK** | `ForeignKey<User>` → vrai `ON DELETE CASCADE` SQL |
 | **ManyToMany** | Table pivot auto-générée, `.add()` `.remove()` `.all()` |
-| **Contraintes** | `#[model(unique_together(field1, field2))]`, `CHECK` constraints |
+| **Contraintes** ✅ | `CheckConstraint`, `UniqueConstraint` (simple et partial), `managed`, `ordering` — voir ci-dessous |
 | **Sous-requêtes** | Rango détecte quand une sous-requête est plus efficace qu'un JOIN ou N+1 |
 | **select_related** | Charge les FK en un seul JOIN au lieu de N requêtes |
 | **prefetch_related** | Charge les M2M en une requête séparée optimisée |
 | **only / defer** | `.only(&["id", "email"])` / `.defer(&["password"])` → retourne type partiel ou `HashMap` |
 | **values** | `.values(&["id", "email"])` → `Vec<HashMap<String, SqlValue>>` |
+| **Contraintes** ✅ | `#[model(constraints = [CheckConstraint::new("age >= 18").name("chk_age"), UniqueConstraint::on(&["room", "date"]).name("uniq_booking")])]` — `CHECK (...)` inline dans `CREATE TABLE`; `UNIQUE (cols)` inline; `UNIQUE ... WHERE cond` → `CREATE UNIQUE INDEX ... WHERE ...` (partial index PostgreSQL). `managed = false` → table ignorée par les migrations. `ordering = [asc("col"), desc("other")]` → ordre par défaut injecté dans `schema()`. |
 | **Transactions** ✅ | `rango::atomic/transaction(&pool, \|tx\| async { ... }).await?` — `get/all/insert/update/delete` accept any `Executor`; `get_or_create` is atomic via `INSERT … ON CONFLICT DO NOTHING RETURNING *` and accepts any `Acquire` (pool or transaction, no `atomic()` needed); `update_or_create` accepts `&mut RangoExecutor`; `QueryBuilder::transaction()` available |
 | **Bulk ops** | `rango::bulk_insert(&pool, vec![...]).await?` |
 | **Aggregations** | `.count()` `.sum()` `.avg()` `.min()` `.max()` |

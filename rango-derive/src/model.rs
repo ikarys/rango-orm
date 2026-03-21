@@ -27,6 +27,9 @@ struct FieldAttr {
 struct ModelAttr {
     table: Option<String>,
     comment: Option<String>,
+    managed: Option<bool>,
+    ordering: Vec<syn::Expr>,
+    constraints: Vec<syn::Expr>,
 }
 
 pub fn expand(input: DeriveInput) -> Result<TokenStream> {
@@ -37,6 +40,10 @@ pub fn expand(input: DeriveInput) -> Result<TokenStream> {
     let table_name = model_attr
         .table
         .unwrap_or_else(|| to_snake_case(&struct_name.to_string()));
+
+    let managed = model_attr.managed.unwrap_or(true);
+    let ordering_exprs = &model_attr.ordering;
+    let constraints_exprs = &model_attr.constraints;
 
     let fields = match &input.data {
         Data::Struct(s) => match &s.fields {
@@ -95,6 +102,11 @@ pub fn expand(input: DeriveInput) -> Result<TokenStream> {
         from_row_fields.push(quote! { #fname: #getter });
     }
 
+    let comment_expr = match &model_attr.comment {
+        Some(c) => quote! { Some(#c.to_string()) },
+        None    => quote! { None },
+    };
+
     let core2 = rango_core_path();
     Ok(quote! {
         impl #core2::Model for #struct_name {
@@ -103,11 +115,20 @@ pub fn expand(input: DeriveInput) -> Result<TokenStream> {
             }
 
             fn schema() -> #core2::TableSchema {
+                use #core2::{CheckConstraint, UniqueConstraint, asc, desc};
                 #core2::TableSchema {
                     table_name: #table_name.to_string(),
                     columns: vec![
                         #(#column_defs),*
                     ],
+                    constraints: vec![
+                        #((#constraints_exprs).into()),*
+                    ],
+                    ordering: vec![
+                        #(#ordering_exprs),*
+                    ],
+                    managed: #managed,
+                    comment: #comment_expr,
                 }
             }
         }
@@ -162,6 +183,23 @@ fn parse_model_attr(input: &DeriveInput) -> Result<ModelAttr> {
                         if let Lit::Str(s) = &expr_lit.lit {
                             attr.comment = Some(s.value());
                         }
+                    }
+                }
+                Meta::NameValue(nv) if nv.path.is_ident("managed") => {
+                    if let syn::Expr::Lit(expr_lit) = &nv.value {
+                        if let Lit::Bool(b) = &expr_lit.lit {
+                            attr.managed = Some(b.value);
+                        }
+                    }
+                }
+                Meta::NameValue(nv) if nv.path.is_ident("ordering") => {
+                    if let syn::Expr::Array(arr) = &nv.value {
+                        attr.ordering = arr.elems.iter().cloned().collect();
+                    }
+                }
+                Meta::NameValue(nv) if nv.path.is_ident("constraints") => {
+                    if let syn::Expr::Array(arr) = &nv.value {
+                        attr.constraints = arr.elems.iter().cloned().collect();
                     }
                 }
                 _ => {}
