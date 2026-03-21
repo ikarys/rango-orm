@@ -1,9 +1,10 @@
 use rango_core::{FromRow, Model, ModelValues, SqlValue};
-use sqlx::{Executor, PgPool, Postgres, Transaction};
-use sqlx::postgres::{PgArguments, PgRow};
+use sqlx::{Executor, Postgres};
+use sqlx::postgres::PgArguments;
 use sqlx::query::Query;
 use anyhow::{Context, Result};
 
+use crate::executor::RangoExecutor;
 use crate::row::PgRangoRow;
 
 // ─── Bind macro ───────────────────────────────────────────────────────────────
@@ -37,10 +38,10 @@ pub fn bind_sql_values<'q>(
     q
 }
 
-// ─── Core ops — transparent over PgPool and Transaction ──────────────────────
+// ─── Single-query ops — transparent over PgPool, Transaction, and any connection ─
 
 /// INSERT → returns the model as stored.
-/// Accepts `&PgPool` or `&mut Transaction<'_, Postgres>` transparently.
+/// Accepts `&PgPool`, `&mut Transaction<'_, Postgres>`, or any sqlx `Executor`.
 ///
 /// # Example
 /// ```rust
@@ -93,8 +94,10 @@ where
 }
 
 /// GET by primary key.
-pub async fn get<M>(pool: &PgPool, pk: &SqlValue) -> Result<Option<M>>
+/// Accepts `&PgPool`, `&mut Transaction<'_, Postgres>`, or any sqlx `Executor`.
+pub async fn get<'e, E, M>(executor: E, pk: &SqlValue) -> Result<Option<M>>
 where
+    E: Executor<'e, Database = Postgres>,
     M: Model + ModelValues + FromRow,
 {
     let sql = format!(
@@ -102,7 +105,7 @@ where
         M::table_name(), M::pk_column()
     );
     let q = bind_sql_values(sqlx::query(&sql), vec![pk.clone()]);
-    let row = q.fetch_optional(pool).await
+    let row = q.fetch_optional(executor).await
         .with_context(|| format!("GET from {} failed", M::table_name()))?;
     match row {
         Some(r) => Ok(Some(M::from_row(&PgRangoRow(r)).map_err(|e| anyhow::anyhow!("{}", e))?)),
@@ -111,51 +114,91 @@ where
 }
 
 /// GET ALL rows.
-pub async fn all<M>(pool: &PgPool) -> Result<Vec<M>>
+/// Accepts `&PgPool`, `&mut Transaction<'_, Postgres>`, or any sqlx `Executor`.
+pub async fn all<'e, E, M>(executor: E) -> Result<Vec<M>>
 where
+    E: Executor<'e, Database = Postgres>,
     M: Model + ModelValues + FromRow,
 {
     let sql = format!("SELECT * FROM \"{}\"", M::table_name());
-    let rows = sqlx::query(&sql).fetch_all(pool).await
+    let rows = sqlx::query(&sql).fetch_all(executor).await
         .with_context(|| format!("ALL from {} failed", M::table_name()))?;
     rows.into_iter()
         .map(|r| M::from_row(&PgRangoRow(r)).map_err(|e| anyhow::anyhow!("{}", e)))
         .collect()
 }
 
+// ─── Compound ops — require RangoExecutor (pool or transaction, sequential queries) ─
+
 /// GET OR CREATE — returns (model, created: bool).
-pub async fn get_or_create<M>(
-    pool: &PgPool,
+///
+/// Accepts `&mut pool` (for standalone use) or `tx` (inside `atomic()`).
+///
+/// Note: to guarantee atomicity (no race between SELECT and INSERT), wrap in `atomic()`.
+///
+/// # Example
+/// ```rust
+/// // Standalone (not atomic — races possible under high concurrency)
+/// let (user, created) = rango::get_or_create(&mut pool, lookup, defaults).await?;
+///
+/// // Atomic
+/// let (user, created) = rango::atomic(&pool, |tx| async move {
+///     rango::get_or_create(tx, lookup, defaults).await
+/// }).await?;
+/// ```
+pub async fn get_or_create<E, M>(
+    exec: &mut E,
     lookup: Vec<(&'static str, SqlValue)>,
     defaults: M,
 ) -> Result<(M, bool)>
 where
+    E: RangoExecutor,
     M: Model + ModelValues + FromRow,
 {
-    let (sql, values) = build_lookup_sql::<M>(&lookup);
-    let q = bind_sql_values(sqlx::query(&sql), values);
-    let row = q.fetch_optional(pool).await
+    let (lookup_sql, lookup_vals) = build_lookup_sql::<M>(&lookup);
+    let q = bind_sql_values(sqlx::query(&lookup_sql), lookup_vals);
+    let row = exec.fetch_optional_query(q).await
         .with_context(|| format!("GET_OR_CREATE lookup on {} failed", M::table_name()))?;
     if let Some(r) = row {
         return Ok((M::from_row(&PgRangoRow(r)).map_err(|e| anyhow::anyhow!("{}", e))?, false));
     }
-    Ok((insert(pool, defaults).await?, true))
+    let (insert_sql, insert_vals) = build_insert_sql::<M>(&defaults);
+    let q = bind_sql_values(sqlx::query(&insert_sql), insert_vals);
+    let row = exec.fetch_one_query(q).await
+        .with_context(|| format!("GET_OR_CREATE insert on {} failed", M::table_name()))?;
+    Ok((M::from_row(&PgRangoRow(row)).map_err(|e| anyhow::anyhow!("{}", e))?, true))
 }
 
 /// UPDATE OR CREATE.
-pub async fn update_or_create<M>(
-    pool: &PgPool,
+///
+/// Accepts `&mut pool` (for standalone use) or `tx` (inside `atomic()`).
+/// For atomicity, wrap in `atomic()`.
+pub async fn update_or_create<E, M>(
+    exec: &mut E,
     lookup: Vec<(&'static str, SqlValue)>,
     values: M,
 ) -> Result<M>
 where
+    E: RangoExecutor,
     M: Model + ModelValues + FromRow,
 {
-    let (sql, bind_vals) = build_lookup_sql::<M>(&lookup);
-    let q = bind_sql_values(sqlx::query(&sql), bind_vals);
-    let row = q.fetch_optional(pool).await
+    let (lookup_sql, lookup_vals) = build_lookup_sql::<M>(&lookup);
+    let q = bind_sql_values(sqlx::query(&lookup_sql), lookup_vals);
+    let row = exec.fetch_optional_query(q).await
         .with_context(|| format!("UPDATE_OR_CREATE lookup on {} failed", M::table_name()))?;
-    if row.is_some() { update(pool, values).await } else { insert(pool, values).await }
+    if row.is_some() {
+        let (update_sql, update_vals) = build_update_sql::<M>(&values);
+        let q = bind_sql_values(sqlx::query(&update_sql), update_vals);
+        let row = exec.fetch_one_query(q).await
+            .with_context(|| format!("UPDATE_OR_CREATE update on {} failed", M::table_name()))?;
+        M::from_row(&PgRangoRow(row)).map_err(|e| anyhow::anyhow!("{}", e))
+    } else {
+        let (insert_sql, insert_vals) = build_insert_sql::<M>(&values);
+        let q = bind_sql_values(sqlx::query(&insert_sql), insert_vals);
+        let row = exec.fetch_one_query(q).await
+            .with_context(|| format!("UPDATE_OR_CREATE insert on {} failed", M::table_name()))?;
+        M::from_row(&PgRangoRow(row)).map_err(|e| anyhow::anyhow!("{}", e))
+    }
 }
 
 // ─── SQL builders ─────────────────────────────────────────────────────────────

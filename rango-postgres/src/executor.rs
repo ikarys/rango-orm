@@ -4,7 +4,11 @@ use sqlx::query::Query;
 use std::future::Future;
 use std::pin::Pin;
 
-/// Abstracts over PgPool and Transaction — allows all Rango ops to work in both contexts.
+/// Abstracts over PgPool and Transaction — allows compound Rango ops (get_or_create,
+/// update_or_create) to work transparently in both contexts.
+///
+/// For single-query ops (insert, update, delete, get, all), prefer sqlx's `Executor`
+/// trait directly — it accepts `&PgPool` and `&mut Transaction` without `&mut`.
 pub trait RangoExecutor: Send + Sync {
     fn execute_query<'e>(
         &'e mut self,
@@ -15,6 +19,11 @@ pub trait RangoExecutor: Send + Sync {
         &'e mut self,
         query: Query<'e, Postgres, PgArguments>,
     ) -> Pin<Box<dyn Future<Output = Result<Vec<sqlx::postgres::PgRow>, sqlx::Error>> + Send + 'e>>;
+
+    fn fetch_one_query<'e>(
+        &'e mut self,
+        query: Query<'e, Postgres, PgArguments>,
+    ) -> Pin<Box<dyn Future<Output = Result<sqlx::postgres::PgRow, sqlx::Error>> + Send + 'e>>;
 
     fn fetch_optional_query<'e>(
         &'e mut self,
@@ -35,6 +44,13 @@ impl RangoExecutor for PgPool {
         query: Query<'e, Postgres, PgArguments>,
     ) -> Pin<Box<dyn Future<Output = Result<Vec<sqlx::postgres::PgRow>, sqlx::Error>> + Send + 'e>> {
         Box::pin(async move { query.fetch_all(&*self).await })
+    }
+
+    fn fetch_one_query<'e>(
+        &'e mut self,
+        query: Query<'e, Postgres, PgArguments>,
+    ) -> Pin<Box<dyn Future<Output = Result<sqlx::postgres::PgRow, sqlx::Error>> + Send + 'e>> {
+        Box::pin(async move { query.fetch_one(&*self).await })
     }
 
     fn fetch_optional_query<'e>(
@@ -58,6 +74,13 @@ impl RangoExecutor for Transaction<'_, Postgres> {
         query: Query<'e, Postgres, PgArguments>,
     ) -> Pin<Box<dyn Future<Output = Result<Vec<sqlx::postgres::PgRow>, sqlx::Error>> + Send + 'e>> {
         Box::pin(async move { query.fetch_all(&mut **self).await })
+    }
+
+    fn fetch_one_query<'e>(
+        &'e mut self,
+        query: Query<'e, Postgres, PgArguments>,
+    ) -> Pin<Box<dyn Future<Output = Result<sqlx::postgres::PgRow, sqlx::Error>> + Send + 'e>> {
+        Box::pin(async move { query.fetch_one(&mut **self).await })
     }
 
     fn fetch_optional_query<'e>(

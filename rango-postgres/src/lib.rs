@@ -1,4 +1,4 @@
-mod executor;
+pub mod executor;
 pub mod m2m;
 mod ops;
 mod query_builder;
@@ -11,7 +11,8 @@ use std::time::Duration;
 
 pub use sqlx::PgPool;
 pub use ops::{all, delete, get, get_or_create, insert, update, update_or_create};
-pub use transaction::atomic;
+pub use transaction::{atomic, transaction, RangoTransaction};
+pub use executor::RangoExecutor;
 pub use m2m::M2M;
 pub(crate) use row::PgRangoRow2;
 pub use query_builder::QueryBuilder;
