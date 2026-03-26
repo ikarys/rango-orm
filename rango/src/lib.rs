@@ -39,6 +39,7 @@ pub use rango_postgres::{
     raw, raw_scalar, raw_execute,
     M2M, QueryBuilder, RangoFilterExt, WithRelated,
     RangoExecutor, RangoTransaction,
+    PgQueryExt, Pg,
 };
 
 pub async fn connect_postgres(config: &DatabaseConfig) -> Result<PgPool, sqlx::Error> {
@@ -80,6 +81,7 @@ pub mod prelude {
         raw, raw_scalar, raw_execute,
         PgPool, QueryBuilder, RangoFilterExt, WithRelated, M2M,
         RangoExecutor, RangoTransaction,
+        PgQueryExt, Pg,
     };
 
     #[cfg(feature = "sqlite")]
