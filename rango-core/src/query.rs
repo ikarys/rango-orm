@@ -2,7 +2,21 @@
 /// without requiring sqlx as a direct dependency of rango-core.
 #[derive(Debug, Clone)]
 pub enum SqlValue {
-    Null,
+    // Typed nulls — carry the column type so the DB can infer correctly.
+    NullBool,
+    NullSmallInt,
+    NullInt,
+    NullBigInt,
+    NullFloat,
+    NullDouble,
+    NullText,
+    NullBytes,
+    NullUuid,
+    NullDateTime,
+    NullDate,
+    NullTime,
+    NullJson,
+    // Non-null values
     Bool(bool),
     SmallInt(i16),
     Int(i32),

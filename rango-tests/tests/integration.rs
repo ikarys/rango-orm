@@ -41,6 +41,7 @@ async fn pool() -> PgPool {
 }
 
 async fn setup(pool: &PgPool) {
+    // Create tables and wipe any leftover data from previous runs
     sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS "rango_test_user" (
@@ -69,6 +70,12 @@ async fn setup(pool: &PgPool) {
     .execute(pool)
     .await
     .expect("setup: create rango_test_post");
+
+    // Wipe data — tests are isolated by content, not by schema
+    sqlx::query(r#"TRUNCATE "rango_test_post", "rango_test_user" RESTART IDENTITY CASCADE"#)
+        .execute(pool)
+        .await
+        .expect("setup: truncate tables");
 }
 
 async fn teardown(pool: &PgPool) {

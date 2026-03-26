@@ -517,7 +517,7 @@ where
     pub async fn sum(self, col: &str) -> Result<Option<f64>> {
         let table = M::table_name();
         let (where_clause, binds) = self.build_where();
-        let mut sql = format!("SELECT SUM(\"{}\") FROM \"{}\"", col, table);
+        let mut sql = format!("SELECT SUM(\"{}\")::float8 FROM \"{}\"", col, table);
         if !where_clause.is_empty() { sql.push(' '); sql.push_str(&where_clause); }
         let row = bind_and_fetch_one(&self.pool, &sql, binds).await?;
         Ok(row.try_get::<Option<f64>, _>(0).unwrap_or(None))
@@ -527,7 +527,7 @@ where
     pub async fn avg(self, col: &str) -> Result<Option<f64>> {
         let table = M::table_name();
         let (where_clause, binds) = self.build_where();
-        let mut sql = format!("SELECT AVG(\"{}\") FROM \"{}\"", col, table);
+        let mut sql = format!("SELECT AVG(\"{}\")::float8 FROM \"{}\"", col, table);
         if !where_clause.is_empty() { sql.push(' '); sql.push_str(&where_clause); }
         let row = bind_and_fetch_one(&self.pool, &sql, binds).await?;
         Ok(row.try_get::<Option<f64>, _>(0).unwrap_or(None))

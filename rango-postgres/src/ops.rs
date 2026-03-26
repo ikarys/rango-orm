@@ -16,7 +16,21 @@ use crate::row::PgRangoRow;
 macro_rules! bind {
     ($q:expr, $val:expr) => {
         match $val {
-            SqlValue::Null         => $q.bind(Option::<String>::None),
+            // Typed nulls — bind with the correct Rust type so Postgres infers the column type
+            SqlValue::NullBool     => $q.bind(Option::<bool>::None),
+            SqlValue::NullSmallInt => $q.bind(Option::<i16>::None),
+            SqlValue::NullInt      => $q.bind(Option::<i32>::None),
+            SqlValue::NullBigInt   => $q.bind(Option::<i64>::None),
+            SqlValue::NullFloat    => $q.bind(Option::<f32>::None),
+            SqlValue::NullDouble   => $q.bind(Option::<f64>::None),
+            SqlValue::NullText     => $q.bind(Option::<String>::None),
+            SqlValue::NullBytes    => $q.bind(Option::<Vec<u8>>::None),
+            SqlValue::NullUuid     => $q.bind(Option::<uuid::Uuid>::None),
+            SqlValue::NullDateTime => $q.bind(Option::<chrono::DateTime<chrono::Utc>>::None),
+            SqlValue::NullDate     => $q.bind(Option::<chrono::NaiveDate>::None),
+            SqlValue::NullTime     => $q.bind(Option::<chrono::NaiveTime>::None),
+            SqlValue::NullJson     => $q.bind(Option::<sqlx::types::Json<serde_json::Value>>::None),
+            // Non-null values
             SqlValue::Bool(v)      => $q.bind(v),
             SqlValue::SmallInt(v)  => $q.bind(v),
             SqlValue::Int(v)       => $q.bind(v),
@@ -402,7 +416,11 @@ where
 
 fn sql_type_cast(val: &SqlValue) -> &'static str {
     match val {
-        SqlValue::Null        => "::text",
+        SqlValue::NullBool | SqlValue::NullSmallInt | SqlValue::NullInt |
+        SqlValue::NullBigInt | SqlValue::NullFloat | SqlValue::NullDouble |
+        SqlValue::NullText | SqlValue::NullBytes | SqlValue::NullUuid |
+        SqlValue::NullDateTime | SqlValue::NullDate | SqlValue::NullTime |
+        SqlValue::NullJson    => "::text",
         SqlValue::Bool(_)     => "::bool",
         SqlValue::SmallInt(_) => "::int2",
         SqlValue::Int(_)      => "::int4",
@@ -472,7 +490,7 @@ fn build_bulk_update_sql<M: Model + ModelValues>(models: &[M], fields: &[&str]) 
             let val = model_fields.iter()
                 .find(|(c, _)| c == f)
                 .map(|(_, v)| v.clone())
-                .unwrap_or(SqlValue::Null);
+                .unwrap_or(SqlValue::NullText);
             let cast = if first { sql_type_cast(&val) } else { "" };
             ph.push(format!("${}{}", idx, cast));
             all_values.push(val);
