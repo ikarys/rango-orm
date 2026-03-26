@@ -33,7 +33,7 @@ pub struct ColumnDef {
     pub primary_key: bool,
     pub unique: bool,
     pub default: Option<DefaultValue>,
-    pub references: Option<ForeignKey>,
+    pub references: Option<FkReference>,
 }
 
 /// Common column types, backend-agnostic.
@@ -67,7 +67,7 @@ pub enum DefaultValue {
 
 /// Foreign key reference.
 #[derive(Debug, Clone)]
-pub struct ForeignKey {
+pub struct FkReference {
     pub table: String,
     pub column: String,
     pub on_delete: ReferentialAction,
