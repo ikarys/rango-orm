@@ -30,6 +30,14 @@ enum Command {
         /// Table prefix (default: auto-detected from Cargo.toml)
         #[arg(short, long)]
         prefix: Option<String>,
+
+        /// Print the SQL that would be generated without writing any files
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Exit with code 1 if there are pending migrations (useful in CI)
+        #[arg(long)]
+        check: bool,
     },
 
     /// Apply pending migrations to the database
@@ -48,12 +56,12 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Command::Makemigrations { path, output, prefix } => {
+        Command::Makemigrations { path, output, prefix, dry_run, check } => {
             let cfg = config::RangoConfig::load()?;
             let prefix = prefix
                 .or(cfg.models.prefix)
                 .map(|s| s.as_str().to_string());
-            makemigrations::run(&path, &output, prefix.as_deref())?;
+            makemigrations::run(&path, &output, prefix.as_deref(), dry_run, check)?;
         }
         Command::Migrate { database_url, migrations } => {
             let cfg = config::RangoConfig::load()?;
