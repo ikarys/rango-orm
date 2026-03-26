@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "rango",
+    "rango-bench",
     "rango-core",
     "rango-derive",
     "rango-postgres",
