@@ -16,6 +16,10 @@ pub struct RangoConfig {
 #[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 pub struct DatabaseConfig {
+    /// Database backend: "sqlite" or "postgres" (default: "postgres").
+    #[serde(default = "default_backend")]
+    pub backend: String,
+
     /// Database URL — read from rango.toml for CLI tools (makemigrations, migrate).
     /// In production, prefer DATABASE_URL env var to avoid committing credentials.
     #[serde(default)]
@@ -38,6 +42,7 @@ pub struct DatabaseConfig {
 impl Default for DatabaseConfig {
     fn default() -> Self {
         Self {
+            backend: default_backend(),
             url: None,
             max_connections: default_max_connections(),
             min_connections: default_min_connections(),
@@ -50,13 +55,10 @@ impl Default for DatabaseConfig {
 }
 
 impl DatabaseConfig {
-    /// Detect backend kind from the URL prefix.
     pub fn backend_kind(&self) -> rango_core::BackendKind {
-        let url = self.url.as_deref().unwrap_or("");
-        if url.starts_with("sqlite") {
-            rango_core::BackendKind::Sqlite
-        } else {
-            rango_core::BackendKind::Postgres // default
+        match self.backend.as_str() {
+            "sqlite" => rango_core::BackendKind::Sqlite,
+            _ => rango_core::BackendKind::Postgres,
         }
     }
 }
@@ -101,6 +103,7 @@ impl Default for ModelsConfig {
     }
 }
 
+fn default_backend() -> String { "postgres".to_string() }
 fn default_migrations_dir() -> String { "migrations".to_string() }
 fn default_migrations_table() -> String { "_rango_migrations".to_string() }
 fn default_src_dir() -> String { "src".to_string() }

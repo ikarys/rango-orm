@@ -15,7 +15,9 @@ pub fn run(backend: &str) -> Result<()> {
 
     let content = format!(
         r#"[database]
-url = "{url}"
+backend = "{backend}"
+# url = "{url}"
+# Tip: set DATABASE_URL env var instead of storing credentials here.
 
 [models]
 src = "src"
