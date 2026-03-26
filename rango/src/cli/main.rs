@@ -2,6 +2,8 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 
 mod config;
+mod export;
+mod import;
 mod init;
 mod makemigrations;
 mod migrate;
@@ -48,6 +50,43 @@ enum Command {
         check: bool,
     },
 
+    /// Export data to JSON or CSV
+    Export {
+        /// Table to export (default: all tables)
+        #[arg(short, long)]
+        table: Option<String>,
+
+        /// Output format: json (default) or csv
+        #[arg(short, long, default_value = "json")]
+        format: String,
+
+        /// Output file (default: stdout)
+        #[arg(short, long)]
+        output: Option<String>,
+
+        /// Database URL (overrides DATABASE_URL env var)
+        #[arg(short, long)]
+        database_url: Option<String>,
+    },
+
+    /// Import data from JSON or CSV
+    Import {
+        /// Input file path
+        input: String,
+
+        /// Table to import into (required for CSV without __table column)
+        #[arg(short, long)]
+        table: Option<String>,
+
+        /// Format: json or csv (auto-detected from extension)
+        #[arg(short, long)]
+        format: Option<String>,
+
+        /// Database URL (overrides DATABASE_URL env var)
+        #[arg(short, long)]
+        database_url: Option<String>,
+    },
+
     /// Apply pending migrations to the database
     Migrate {
         /// Database URL (overrides DATABASE_URL from .env)
@@ -74,6 +113,21 @@ fn main() -> Result<()> {
                 .map(|s| s.as_str().to_string());
             makemigrations::run(&path, &output, prefix.as_deref(), dry_run, check)?;
         }
+        Command::Export { table, format, output, database_url } => {
+            let cfg = config::RangoConfig::load()?;
+            let url = cfg.resolve_database_url(database_url.as_deref())?;
+            let fmt = export::Format::from_str(&format)?;
+            tokio::runtime::Runtime::new()?
+                .block_on(export::run(&url, table.as_deref(), fmt, output.as_deref()))?;
+        }
+
+        Command::Import { input, table, format, database_url } => {
+            let cfg = config::RangoConfig::load()?;
+            let url = cfg.resolve_database_url(database_url.as_deref())?;
+            tokio::runtime::Runtime::new()?
+                .block_on(import::run(&url, &input, table.as_deref(), format.as_deref()))?;
+        }
+
         Command::Migrate { database_url, migrations } => {
             let cfg = config::RangoConfig::load()?;
             let url = cfg.resolve_database_url(database_url.as_deref())?;
