@@ -22,7 +22,7 @@ test:
 
 # Run all tests including integration (starts DB if needed)
 test-all: db
-    DATABASE_URL={{database_url}} cargo test --workspace --features rango-tests/integration
+    DATABASE_URL={{database_url}} cargo test --workspace --features rango-tests/integration -- --test-threads=1
 
 # Generate coverage report with HTML output (starts DB if needed)
 coverage: db
