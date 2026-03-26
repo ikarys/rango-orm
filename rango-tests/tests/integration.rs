@@ -392,3 +392,31 @@ async fn test_raw_execute() {
 
     teardown(&pool).await;
 }
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration"), ignore)]
+async fn test_values_projection() {
+    let pool = pool().await;
+    setup(&pool).await;
+
+    insert(&pool, user("values@test.com")).await.unwrap();
+
+    let rows = TestUser::filter(&pool)
+        .eq("email", "values@test.com")
+        .values(&["email", "active"])
+        .await
+        .expect("values failed");
+
+    assert_eq!(rows.len(), 1);
+    assert!(rows[0].contains_key("email"));
+    assert!(rows[0].contains_key("active"));
+    assert!(!rows[0].contains_key("name")); // not requested
+
+    if let SqlValue::Text(email) = &rows[0]["email"] {
+        assert_eq!(email, "values@test.com");
+    } else {
+        panic!("email should be SqlValue::Text");
+    }
+
+    teardown(&pool).await;
+}
