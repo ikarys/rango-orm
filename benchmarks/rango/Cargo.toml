@@ -1,0 +1,19 @@
+[package]
+name = "bench-rango"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dev-dependencies]
+rango-core   = { path = "../../rango-core" }
+rango-derive = { path = "../../rango-derive" }
+rango-postgres = { path = "../../rango-postgres" }
+criterion = { version = "0.5", features = ["async_tokio"] }
+tokio = { version = "1", features = ["full"] }
+uuid = { version = "1", features = ["v4"] }
+chrono = "0.4"
+sqlx = { version = "0.8", features = ["postgres", "runtime-tokio-native-tls"] }
+
+[[bench]]
+name = "postgres"
+harness = false
