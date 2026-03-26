@@ -1,5 +1,6 @@
 pub mod executor;
 pub mod m2m;
+pub mod pg_ext;
 pub mod related;
 mod ops;
 mod query_builder;
@@ -17,6 +18,7 @@ pub use executor::RangoExecutor;
 pub use m2m::M2M;
 pub use query_builder::QueryBuilder;
 pub use related::WithRelated;
+pub use pg_ext::{PgQueryExt, Pg};
 
 use rango_core::{Filterable, FromRow, Model, ModelValues};
 
