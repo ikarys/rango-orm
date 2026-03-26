@@ -3,8 +3,6 @@ name: Docs
 on:
   push:
     branches: [main, wip]
-    paths:
-      - "docs/**"
 
 permissions:
   contents: read
