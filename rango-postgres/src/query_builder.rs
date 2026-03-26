@@ -9,6 +9,11 @@ use crate::ops::DEFAULT_QUERY_LIMIT;
 use crate::related::WithRelated;
 use crate::row::{PgRangoRow, PgRangoRow2};
 
+// ─── Type aliases ─────────────────────────────────────────────────────────────
+
+type FromRowFn = fn(&dyn rango_core::RangoRow) -> Result<Box<dyn Any + Send + Sync>, RowError>;
+type CollectVecFn = fn(Vec<Box<dyn Any + Send + Sync>>) -> Box<dyn Any + Send + Sync>;
+
 // ─── Filter types ─────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -53,7 +58,7 @@ struct SelectRelatedSpec {
     /// R's primary key column name.
     pk_col: &'static str,
     /// Type-erased `R::from_row`.
-    from_row: fn(&dyn rango_core::RangoRow) -> Result<Box<dyn Any + Send + Sync>, RowError>,
+    from_row: FromRowFn,
 }
 
 /// Spec for a `.prefetch_related::<R>(related_fk_col)` call.
@@ -66,9 +71,9 @@ struct PrefetchSpec {
     /// R's table name.
     table_name: &'static str,
     /// Type-erased `R::from_row`.
-    from_row: fn(&dyn rango_core::RangoRow) -> Result<Box<dyn Any + Send + Sync>, RowError>,
+    from_row: FromRowFn,
     /// Collects `Vec<Box<dyn Any>>` into a `Box<dyn Any>` containing `Vec<R>`.
-    collect_vec: fn(Vec<Box<dyn Any + Send + Sync>>) -> Box<dyn Any + Send + Sync>,
+    collect_vec: CollectVecFn,
 }
 
 // ─── QueryBuilder ─────────────────────────────────────────────────────────────
@@ -181,6 +186,7 @@ where
     }
 
     /// Next condition uses AND NOT
+    #[allow(clippy::should_implement_trait)]
     pub fn not(mut self) -> Self {
         self.next_connector = Connector::AndNot;
         self
@@ -225,8 +231,8 @@ where
 
     /// ORDER BY col ASC, or `-col` for DESC.
     pub fn order_by(mut self, col: &str) -> Self {
-        let order = if col.starts_with('-') {
-            format!("\"{}\" DESC", &col[1..])
+        let order = if let Some(stripped) = col.strip_prefix('-') {
+            format!("\"{}\" DESC", stripped)
         } else {
             format!("\"{}\" ASC", col)
         };
@@ -383,12 +389,11 @@ where
             let mut seen: Vec<String> = Vec::new();
             let mut unique_vals: Vec<SqlValue> = Vec::new();
             for (_, v) in &indexed_fks {
-                if let Some(k) = sql_value_key(v) {
-                    if !seen.contains(&k) {
+                if let Some(k) = sql_value_key(v)
+                    && !seen.contains(&k) {
                         seen.push(k);
                         unique_vals.push(v.clone());
                     }
-                }
             }
             if unique_vals.is_empty() { continue; }
 
@@ -412,13 +417,12 @@ where
             }
 
             for (i, fk_val) in &indexed_fks {
-                if let Some(fk_key) = sql_value_key(fk_val) {
-                    if let Some(row) = row_by_pk.get(&fk_key) {
+                if let Some(fk_key) = sql_value_key(fk_val)
+                    && let Some(row) = row_by_pk.get(&fk_key) {
                         let boxed = (spec.from_row)(&PgRangoRow2::new(row))
                             .map_err(|e| anyhow::anyhow!("select_related({}): {}", spec.fk_col, e))?;
                         results[*i].insert_raw(spec.type_id, boxed);
                     }
-                }
             }
         }
 
@@ -433,12 +437,11 @@ where
             let mut seen: Vec<String> = Vec::new();
             let mut unique_pks: Vec<SqlValue> = Vec::new();
             for (_, v) in &indexed_pks {
-                if let Some(k) = sql_value_key(v) {
-                    if !seen.contains(&k) {
+                if let Some(k) = sql_value_key(v)
+                    && !seen.contains(&k) {
                         seen.push(k);
                         unique_pks.push(v.clone());
                     }
-                }
             }
             if unique_pks.is_empty() { continue; }
 

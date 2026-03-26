@@ -1,4 +1,4 @@
-use rango_core::{FromRow, Model, ModelValues, SqlValue};
+use rango_core::{FromRow, Model, ModelValues};
 use sqlx::PgPool;
 use anyhow::{Context, Result};
 

@@ -74,11 +74,13 @@ impl<M> WithRelated<M> {
     }
 
     /// Attach a prefetched one-to-many collection (called by `QueryBuilder::all()`).
+    #[allow(dead_code)]
     pub(crate) fn set_prefetched<R: Any + Send + Sync + 'static>(&mut self, items: Vec<R>) {
         self.cache.insert(TypeId::of::<Vec<R>>(), Box::new(items));
     }
 
     /// Attach a single FK-related object (called by `QueryBuilder::all()`).
+    #[allow(dead_code)]
     pub(crate) fn set_related<R: Any + Send + Sync + 'static>(&mut self, item: R) {
         self.cache.insert(TypeId::of::<R>(), Box::new(item));
     }

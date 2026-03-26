@@ -181,25 +181,22 @@ fn parse_model_attr(input: &DeriveInput) -> Result<ModelAttr> {
         for meta in nested {
             match meta {
                 Meta::NameValue(nv) if nv.path.is_ident("table") => {
-                    if let syn::Expr::Lit(expr_lit) = &nv.value {
-                        if let Lit::Str(s) = &expr_lit.lit {
+                    if let syn::Expr::Lit(expr_lit) = &nv.value
+                        && let Lit::Str(s) = &expr_lit.lit {
                             attr.table = Some(s.value());
                         }
-                    }
                 }
                 Meta::NameValue(nv) if nv.path.is_ident("comment") => {
-                    if let syn::Expr::Lit(expr_lit) = &nv.value {
-                        if let Lit::Str(s) = &expr_lit.lit {
+                    if let syn::Expr::Lit(expr_lit) = &nv.value
+                        && let Lit::Str(s) = &expr_lit.lit {
                             attr.comment = Some(s.value());
                         }
-                    }
                 }
                 Meta::NameValue(nv) if nv.path.is_ident("managed") => {
-                    if let syn::Expr::Lit(expr_lit) = &nv.value {
-                        if let Lit::Bool(b) = &expr_lit.lit {
+                    if let syn::Expr::Lit(expr_lit) = &nv.value
+                        && let Lit::Bool(b) = &expr_lit.lit {
                             attr.managed = Some(b.value);
                         }
-                    }
                 }
                 Meta::NameValue(nv) if nv.path.is_ident("ordering") => {
                     if let syn::Expr::Array(arr) = &nv.value {
@@ -236,19 +233,16 @@ fn parse_field_attr(field: &Field) -> Result<FieldAttr> {
                 Meta::Path(p) if p.is_ident("auto_now_add") => attr.auto_now_add = true,
                 Meta::Path(p) if p.is_ident("auto_now")     => attr.auto_now = true,
                 Meta::NameValue(nv) if nv.path.is_ident("column") => {
-                    if let syn::Expr::Lit(expr_lit) = &nv.value {
-                        if let Lit::Str(s) = &expr_lit.lit { attr.column = Some(s.value()); }
-                    }
+                    if let syn::Expr::Lit(expr_lit) = &nv.value
+                        && let Lit::Str(s) = &expr_lit.lit { attr.column = Some(s.value()); }
                 }
                 Meta::NameValue(nv) if nv.path.is_ident("default") => {
-                    if let syn::Expr::Lit(expr_lit) = &nv.value {
-                        if let Lit::Str(s) = &expr_lit.lit { attr.default = Some(s.value()); }
-                    }
+                    if let syn::Expr::Lit(expr_lit) = &nv.value
+                        && let Lit::Str(s) = &expr_lit.lit { attr.default = Some(s.value()); }
                 }
                 Meta::NameValue(nv) if nv.path.is_ident("comment") => {
-                    if let syn::Expr::Lit(expr_lit) = &nv.value {
-                        if let Lit::Str(s) = &expr_lit.lit { attr.comment = Some(s.value()); }
-                    }
+                    if let syn::Expr::Lit(expr_lit) = &nv.value
+                        && let Lit::Str(s) = &expr_lit.lit { attr.comment = Some(s.value()); }
                 }
                 _ => {}
             }
@@ -411,17 +405,13 @@ fn is_many_to_many(ty: &Type) -> bool {
 /// Returns (is_nullable, inner_type).
 /// `Option<T>` → (true, T), anything else → (false, original_type)
 fn extract_option(ty: &Type) -> (bool, &Type) {
-    if let Type::Path(tp) = ty {
-        if let Some(seg) = tp.path.segments.last() {
-            if seg.ident == "Option" {
-                if let syn::PathArguments::AngleBracketed(args) = &seg.arguments {
-                    if let Some(syn::GenericArgument::Type(inner)) = args.args.first() {
+    if let Type::Path(tp) = ty
+        && let Some(seg) = tp.path.segments.last()
+            && seg.ident == "Option"
+                && let syn::PathArguments::AngleBracketed(args) = &seg.arguments
+                    && let Some(syn::GenericArgument::Type(inner)) = args.args.first() {
                         return (true, inner);
                     }
-                }
-            }
-        }
-    }
     (false, ty)
 }
 
@@ -461,11 +451,10 @@ fn map_field_type(ty: &Type, core: &TokenStream) -> Result<TokenStream> {
 fn parse_varchar(s: &str, core: &TokenStream) -> Result<TokenStream> {
     let inner = s.trim_start_matches("FieldVarchar<").trim_end_matches('>');
     let parts: Vec<&str> = inner.split(',').collect();
-    if parts.len() == 2 {
-        if let Ok(max) = parts[1].trim().parse::<u32>() {
+    if parts.len() == 2
+        && let Ok(max) = parts[1].trim().parse::<u32>() {
             return Ok(quote! { #core::ColumnType::Varchar(#max) });
         }
-    }
     Err(syn::Error::new(proc_macro2::Span::call_site(),
         format!("Invalid FieldVarchar syntax: `{}`", s)))
 }
@@ -473,11 +462,10 @@ fn parse_varchar(s: &str, core: &TokenStream) -> Result<TokenStream> {
 fn parse_decimal(s: &str, core: &TokenStream) -> Result<TokenStream> {
     let inner = s.trim_start_matches("FieldDecimal<").trim_end_matches('>');
     let parts: Vec<&str> = inner.split(',').collect();
-    if parts.len() == 2 {
-        if let (Ok(p), Ok(sc)) = (parts[0].trim().parse::<u8>(), parts[1].trim().parse::<u8>()) {
+    if parts.len() == 2
+        && let (Ok(p), Ok(sc)) = (parts[0].trim().parse::<u8>(), parts[1].trim().parse::<u8>()) {
             return Ok(quote! { #core::ColumnType::Decimal { precision: #p, scale: #sc } });
         }
-    }
     Err(syn::Error::new(proc_macro2::Span::call_site(),
         format!("Invalid FieldDecimal syntax: `{}`", s)))
 }
@@ -485,11 +473,10 @@ fn parse_decimal(s: &str, core: &TokenStream) -> Result<TokenStream> {
 fn parse_password(s: &str, core: &TokenStream) -> Result<TokenStream> {
     let inner = s.trim_start_matches("FieldPassword<").trim_end_matches('>');
     let parts: Vec<&str> = inner.split(',').collect();
-    if parts.len() == 2 {
-        if let Ok(max) = parts[1].trim().parse::<u32>() {
+    if parts.len() == 2
+        && let Ok(max) = parts[1].trim().parse::<u32>() {
             return Ok(quote! { #core::ColumnType::Varchar(#max) });
         }
-    }
     Err(syn::Error::new(proc_macro2::Span::call_site(),
         format!("Invalid FieldPassword syntax: `{}`", s)))
 }

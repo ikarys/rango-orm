@@ -288,11 +288,10 @@ fn next_migration_number(dir: &str) -> Result<u32> {
         for entry in entries.flatten() {
             let name = entry.file_name();
             let name = name.to_string_lossy();
-            if let Some(num_str) = name.split('_').next() {
-                if let Ok(n) = num_str.parse::<u32>() {
+            if let Some(num_str) = name.split('_').next()
+                && let Ok(n) = num_str.parse::<u32>() {
                     max = max.max(n);
                 }
-            }
         }
     }
     Ok(max + 1)
@@ -486,11 +485,10 @@ fn detect_project_name() -> Result<String> {
         .context("Could not find Cargo.toml — run from project root or use --prefix")?;
     for line in cargo_toml.lines() {
         let line = line.trim();
-        if line.starts_with("name") {
-            if let Some(val) = line.splitn(2, '=').nth(1) {
+        if line.starts_with("name")
+            && let Some(val) = line.split_once('=').map(|x| x.1) {
                 return Ok(val.trim().trim_matches('"').to_string());
             }
-        }
     }
     bail!("Could not detect project name from Cargo.toml — use --prefix")
 }

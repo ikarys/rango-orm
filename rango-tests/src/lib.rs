@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use rango_core::*;
 use rango_derive::{Model, ModelMixin};
 
