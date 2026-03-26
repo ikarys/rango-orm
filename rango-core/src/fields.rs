@@ -205,14 +205,35 @@ impl<const P: u8, const S: u8> ToSqlValue for FieldDecimal<P, S> {
     fn to_sql_value(&self) -> SqlValue { SqlValue::Double(self.0) }
 }
 
-// Option<T> support
-impl<T: ToSqlValue> ToSqlValue for Option<T> {
-    fn to_sql_value(&self) -> SqlValue {
-        match self {
-            Some(v) => v.to_sql_value(),
-            None => SqlValue::Null,
-        }
-    }
+// Option<T> support — typed nulls so Postgres knows the column type
+impl ToSqlValue for Option<FieldBool>     { fn to_sql_value(&self) -> SqlValue { self.as_ref().map_or(SqlValue::NullBool,     |v| v.to_sql_value()) } }
+impl ToSqlValue for Option<FieldSmallInt> { fn to_sql_value(&self) -> SqlValue { self.as_ref().map_or(SqlValue::NullSmallInt, |v| v.to_sql_value()) } }
+impl ToSqlValue for Option<FieldInt>      { fn to_sql_value(&self) -> SqlValue { self.as_ref().map_or(SqlValue::NullInt,      |v| v.to_sql_value()) } }
+impl ToSqlValue for Option<FieldBigInt>   { fn to_sql_value(&self) -> SqlValue { self.as_ref().map_or(SqlValue::NullBigInt,   |v| v.to_sql_value()) } }
+impl ToSqlValue for Option<FieldFloat>    { fn to_sql_value(&self) -> SqlValue { self.as_ref().map_or(SqlValue::NullFloat,    |v| v.to_sql_value()) } }
+impl ToSqlValue for Option<FieldDouble>   { fn to_sql_value(&self) -> SqlValue { self.as_ref().map_or(SqlValue::NullDouble,   |v| v.to_sql_value()) } }
+impl ToSqlValue for Option<FieldText>     { fn to_sql_value(&self) -> SqlValue { self.as_ref().map_or(SqlValue::NullText,     |v| v.to_sql_value()) } }
+impl ToSqlValue for Option<FieldEmail>    { fn to_sql_value(&self) -> SqlValue { self.as_ref().map_or(SqlValue::NullText,     |v| v.to_sql_value()) } }
+impl ToSqlValue for Option<FieldUrl>      { fn to_sql_value(&self) -> SqlValue { self.as_ref().map_or(SqlValue::NullText,     |v| v.to_sql_value()) } }
+impl ToSqlValue for Option<FieldBytes>    { fn to_sql_value(&self) -> SqlValue { self.as_ref().map_or(SqlValue::NullBytes,    |v| v.to_sql_value()) } }
+impl ToSqlValue for Option<FieldUuid>     { fn to_sql_value(&self) -> SqlValue { self.as_ref().map_or(SqlValue::NullUuid,     |v| v.to_sql_value()) } }
+impl ToSqlValue for Option<FieldDateTime> { fn to_sql_value(&self) -> SqlValue { self.as_ref().map_or(SqlValue::NullDateTime, |v| v.to_sql_value()) } }
+impl ToSqlValue for Option<FieldDate>     { fn to_sql_value(&self) -> SqlValue { self.as_ref().map_or(SqlValue::NullDate,     |v| v.to_sql_value()) } }
+impl ToSqlValue for Option<FieldTime>     { fn to_sql_value(&self) -> SqlValue { self.as_ref().map_or(SqlValue::NullTime,     |v| v.to_sql_value()) } }
+impl ToSqlValue for Option<FieldJson>     { fn to_sql_value(&self) -> SqlValue { self.as_ref().map_or(SqlValue::NullJson,     |v| v.to_sql_value()) } }
+
+// Parametric types
+impl<const MIN: usize, const MAX: usize> ToSqlValue for Option<FieldVarchar<MIN, MAX>> {
+    fn to_sql_value(&self) -> SqlValue { self.as_ref().map_or(SqlValue::NullText, |v| v.to_sql_value()) }
+}
+impl<const MIN: usize, const MAX: usize> ToSqlValue for Option<FieldPassword<MIN, MAX>> {
+    fn to_sql_value(&self) -> SqlValue { self.as_ref().map_or(SqlValue::NullText, |v| v.to_sql_value()) }
+}
+impl<const MIN: i64, const MAX: i64> ToSqlValue for Option<FieldRange<MIN, MAX>> {
+    fn to_sql_value(&self) -> SqlValue { self.as_ref().map_or(SqlValue::NullBigInt, |v| v.to_sql_value()) }
+}
+impl<M> ToSqlValue for Option<ForeignKey<M>> {
+    fn to_sql_value(&self) -> SqlValue { self.as_ref().map_or(SqlValue::NullUuid, |v| v.to_sql_value()) }
 }
 
 // ─── Many to Many ────────────────────────────────────────────────────────────

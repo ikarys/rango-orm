@@ -64,7 +64,7 @@ pub fn expand(input: DeriveInput) -> Result<TokenStream> {
 
     // Generate ModelValues impl (skip ManyToMany)
     let mut field_value_entries = Vec::new();
-    let mut pk_value_expr = quote! { #core::SqlValue::Null };
+    let mut pk_value_expr = quote! { #core::SqlValue::NullUuid }; // placeholder — overwritten when PK field is found
     let mut pk_col_name = "id".to_string();
     let mut pk_found = false;
 

@@ -1,4 +1,5 @@
-database_url := "postgres://postgres:postgres@localhost:5432/rango_test"
+# Uses the Geekizz Postgres on 5432, or the rango docker-compose on 5433
+database_url := "postgres://geekizz:geekizz@localhost:5432/rango_test"
 
 # Show available commands
 help:
