@@ -5,7 +5,7 @@ use std::fs;
 use crate::scanner::{scan_models, M2MRelation};
 use crate::snapshot::{diff, Snapshot, SchemaDiff};
 
-pub fn run(src_dir: &str, output_dir: &str, prefix: Option<&str>) -> Result<()> {
+pub fn run(src_dir: &str, output_dir: &str, prefix: Option<&str>, dry_run: bool, check: bool) -> Result<()> {
     println!("🔍 Scanning models in {}...", src_dir);
 
     let prefix = match prefix {
@@ -48,8 +48,6 @@ pub fn run(src_dir: &str, output_dir: &str, prefix: Option<&str>) -> Result<()> 
     // Merge pivot tables into schemas for diff
     schemas.extend(pivot_schemas);
 
-    fs::create_dir_all(output_dir)?;
-
     // Load previous snapshot
     let old_snapshot = Snapshot::load(output_dir)?;
 
@@ -63,6 +61,23 @@ pub fn run(src_dir: &str, output_dir: &str, prefix: Option<&str>) -> Result<()> 
 
     // Generate SQL from diff
     let sql = generate_sql_from_diff(&diffs);
+
+    // --dry-run: print SQL, do not write files
+    if dry_run {
+        println!("\n--- SQL (dry run) ---\n{}\n--- end ---", sql);
+        return Ok(());
+    }
+
+    // --check: exit 1 if migrations are pending (CI guard)
+    if check {
+        let next_num = next_migration_number(output_dir)?;
+        let label = migration_label(&diffs);
+        eprintln!("❌ Pending migration detected: {:04}_{}.sql", next_num, label);
+        eprintln!("   Run `rango makemigrations` to generate it.");
+        std::process::exit(1);
+    }
+
+    fs::create_dir_all(output_dir)?;
 
     let next_num = next_migration_number(output_dir)?;
     let label = migration_label(&diffs);
