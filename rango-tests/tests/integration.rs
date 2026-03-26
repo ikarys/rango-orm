@@ -8,6 +8,7 @@
 use rango_core::*;
 use rango_derive::Model;
 use rango_postgres::*;
+use rango_postgres::PgQueryExt;
 use uuid::Uuid;
 
 // ── Test models ───────────────────────────────────────────────────────────────
@@ -30,6 +31,15 @@ struct TestPost {
     author_id: ForeignKey<TestUser>,
     title: FieldVarchar<1, 255>,
     published: FieldBool,
+}
+
+#[derive(Model, Debug, Clone)]
+#[model(table = "rango_test_article")]
+struct TestArticle {
+    id: FieldUuid,
+    title: FieldVarchar<1, 255>,
+    content: FieldText,
+    metadata: FieldJson,
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -71,16 +81,38 @@ async fn setup(pool: &PgPool) {
     .await
     .expect("setup: create rango_test_post");
 
+    sqlx::query(
+        r#"CREATE TABLE IF NOT EXISTS "rango_test_article" (
+            "id"       UUID PRIMARY KEY,
+            "title"    VARCHAR(255) NOT NULL,
+            "content"  TEXT NOT NULL,
+            "metadata" JSONB NOT NULL DEFAULT '{}'
+        )"#,
+    )
+    .execute(pool)
+    .await
+    .expect("setup: create rango_test_article");
+
     // Wipe data — tests are isolated by content, not by schema
-    sqlx::query(r#"TRUNCATE "rango_test_post", "rango_test_user" RESTART IDENTITY CASCADE"#)
+    sqlx::query(r#"TRUNCATE "rango_test_post", "rango_test_user", "rango_test_article" RESTART IDENTITY CASCADE"#)
         .execute(pool)
         .await
         .expect("setup: truncate tables");
 }
 
 async fn teardown(pool: &PgPool) {
+    sqlx::query(r#"DROP TABLE IF EXISTS "rango_test_article""#).execute(pool).await.ok();
     sqlx::query(r#"DROP TABLE IF EXISTS "rango_test_post""#).execute(pool).await.ok();
     sqlx::query(r#"DROP TABLE IF EXISTS "rango_test_user""#).execute(pool).await.ok();
+}
+
+fn article(title: &str, content: &str, metadata: serde_json::Value) -> TestArticle {
+    TestArticle {
+        id: FieldUuid(Uuid::new_v4()),
+        title: FieldVarchar(title.to_string()),
+        content: FieldText(content.to_string()),
+        metadata: FieldJson(metadata),
+    }
 }
 
 fn user(email: &str) -> TestUser {
@@ -417,6 +449,100 @@ async fn test_values_projection() {
     } else {
         panic!("email should be SqlValue::Text");
     }
+
+    teardown(&pool).await;
+}
+
+// ── PgQueryExt ────────────────────────────────────────────────────────────────
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration"), ignore)]
+async fn test_pg_fts() {
+    let pool = pool().await;
+    setup(&pool).await;
+
+    insert(&pool, article(
+        "Rust ORM guide",
+        "Rango is a Django-inspired ORM for Rust with async support",
+        serde_json::json!({}),
+    )).await.unwrap();
+    insert(&pool, article(
+        "Python tutorial",
+        "Flask is a lightweight web framework for Python developers",
+        serde_json::json!({}),
+    )).await.unwrap();
+
+    let results = TestArticle::filter(&pool)
+        .fts("content", "Rust ORM async")
+        .all()
+        .await
+        .expect("fts failed");
+
+    assert_eq!(results.len(), 1);
+    assert!(results[0].title.0.contains("Rust"));
+
+    teardown(&pool).await;
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration"), ignore)]
+async fn test_pg_json_contains() {
+    let pool = pool().await;
+    setup(&pool).await;
+
+    insert(&pool, article("Draft post", "content", serde_json::json!({"status": "draft"}))).await.unwrap();
+    insert(&pool, article("Published post", "content", serde_json::json!({"status": "published"}))).await.unwrap();
+
+    let results = TestArticle::filter(&pool)
+        .json_contains("metadata", serde_json::json!({"status": "published"}))
+        .all()
+        .await
+        .expect("json_contains failed");
+
+    assert_eq!(results.len(), 1);
+    assert!(results[0].title.0.contains("Published"));
+
+    teardown(&pool).await;
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration"), ignore)]
+async fn test_pg_json_has_key() {
+    let pool = pool().await;
+    setup(&pool).await;
+
+    insert(&pool, article("With views", "content", serde_json::json!({"views": 42}))).await.unwrap();
+    insert(&pool, article("No views key", "content", serde_json::json!({"status": "draft"}))).await.unwrap();
+
+    let results = TestArticle::filter(&pool)
+        .json_has_key("metadata", "views")
+        .all()
+        .await
+        .expect("json_has_key failed");
+
+    assert_eq!(results.len(), 1);
+    assert!(results[0].title.0.contains("With views"));
+
+    teardown(&pool).await;
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration"), ignore)]
+async fn test_pg_json_field_eq() {
+    let pool = pool().await;
+    setup(&pool).await;
+
+    insert(&pool, article("Active", "content", serde_json::json!({"status": "active"}))).await.unwrap();
+    insert(&pool, article("Inactive", "content", serde_json::json!({"status": "inactive"}))).await.unwrap();
+
+    let results = TestArticle::filter(&pool)
+        .json_field_eq("metadata", "status", "active")
+        .all()
+        .await
+        .expect("json_field_eq failed");
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].title.0, "Active");
 
     teardown(&pool).await;
 }

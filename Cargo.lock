@@ -1244,6 +1244,7 @@ dependencies = [
  "rango-derive",
  "rango-postgres",
  "rango-sqlite",
+ "serde_json",
  "sqlx",
  "tokio",
  "uuid",

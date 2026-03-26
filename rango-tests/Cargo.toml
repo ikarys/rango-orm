@@ -16,6 +16,7 @@ rango-derive   = { path = "../rango-derive" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 uuid = { version = "1", features = ["v4"] }
 anyhow = "1"
+serde_json = "1"
 sqlx = { version = "0.8", features = ["postgres", "sqlite", "runtime-tokio-native-tls"] }
 
 [features]
