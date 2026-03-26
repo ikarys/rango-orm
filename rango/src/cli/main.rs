@@ -82,6 +82,10 @@ enum Command {
         #[arg(short, long)]
         format: Option<String>,
 
+        /// Replace existing rows on conflict (default: skip)
+        #[arg(long)]
+        replace: bool,
+
         /// Database URL (overrides DATABASE_URL env var)
         #[arg(short, long)]
         database_url: Option<String>,
@@ -121,11 +125,11 @@ fn main() -> Result<()> {
                 .block_on(export::run(&url, table.as_deref(), fmt, output.as_deref()))?;
         }
 
-        Command::Import { input, table, format, database_url } => {
+        Command::Import { input, table, format, replace, database_url } => {
             let cfg = config::RangoConfig::load()?;
             let url = cfg.resolve_database_url(database_url.as_deref())?;
             tokio::runtime::Runtime::new()?
-                .block_on(import::run(&url, &input, table.as_deref(), format.as_deref()))?;
+                .block_on(import::run(&url, &input, table.as_deref(), format.as_deref(), replace))?;
         }
 
         Command::Migrate { database_url, migrations } => {

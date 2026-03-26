@@ -7,6 +7,7 @@ pub async fn run(
     input: &str,
     table: Option<&str>,
     format: Option<&str>,
+    replace: bool,
 ) -> Result<()> {
     let cfg = crate::config::RangoConfig::load().unwrap_or_default();
     let backend = cfg.database.backend_kind();
@@ -36,8 +37,8 @@ pub async fn run(
     }
 
     let count = match backend {
-        BackendKind::Sqlite => import_sqlite(database_url, &rows, table).await?,
-        _                   => import_postgres(database_url, &rows, table).await?,
+        BackendKind::Sqlite => import_sqlite(database_url, &rows, table, replace).await?,
+        _                   => import_postgres(database_url, &rows, table, replace).await?,
     };
 
     println!("✅ Imported {} row(s) from {}", count, input);
@@ -108,6 +109,7 @@ async fn import_postgres(
     database_url: &str,
     rows: &[serde_json::Map<String, serde_json::Value>],
     table: Option<&str>,
+    replace: bool,
 ) -> Result<usize> {
     let pool = sqlx::PgPool::connect(database_url).await
         .context("Failed to connect to Postgres")?;
@@ -117,7 +119,7 @@ async fn import_postgres(
     let mut total = 0;
 
     for (table, table_rows) in groups {
-        total += insert_rows_postgres(&pool, &table, &table_rows).await?;
+        total += insert_rows_postgres(&pool, &table, &table_rows, replace).await?;
     }
     Ok(total)
 }
@@ -126,6 +128,7 @@ async fn insert_rows_postgres(
     pool: &sqlx::PgPool,
     table: &str,
     rows: &[&serde_json::Map<String, serde_json::Value>],
+    replace: bool,
 ) -> Result<usize> {
     if rows.is_empty() { return Ok(0); }
 
@@ -138,7 +141,16 @@ async fn insert_rows_postgres(
     for row in rows {
         let col_list = cols.iter().map(|c| format!("\"{}\"", c)).collect::<Vec<_>>().join(", ");
         let placeholders = (1..=cols.len()).map(|i| format!("${}", i)).collect::<Vec<_>>().join(", ");
-        let sql = format!("INSERT INTO \"{}\" ({}) VALUES ({}) ON CONFLICT DO NOTHING", table, col_list, placeholders);
+        let conflict = if replace {
+            let updates = cols.iter()
+                .map(|c| format!("\"{}\" = EXCLUDED.\"{}\"", c, c))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("ON CONFLICT DO UPDATE SET {}", updates)
+        } else {
+            "ON CONFLICT DO NOTHING".to_string()
+        };
+        let sql = format!("INSERT INTO \"{}\" ({}) VALUES ({}) {}", table, col_list, placeholders, conflict);
 
         let mut q = sqlx::query(&sql);
         for col in &cols {
@@ -175,6 +187,7 @@ async fn import_sqlite(
     database_url: &str,
     rows: &[serde_json::Map<String, serde_json::Value>],
     table: Option<&str>,
+    replace: bool,
 ) -> Result<usize> {
     let pool = sqlx::SqlitePool::connect(database_url).await
         .context("Failed to connect to SQLite")?;
@@ -183,7 +196,7 @@ async fn import_sqlite(
     let mut total = 0;
 
     for (table, table_rows) in groups {
-        total += insert_rows_sqlite(&pool, &table, &table_rows).await?;
+        total += insert_rows_sqlite(&pool, &table, &table_rows, replace).await?;
     }
     Ok(total)
 }
@@ -192,6 +205,7 @@ async fn insert_rows_sqlite(
     pool: &sqlx::SqlitePool,
     table: &str,
     rows: &[&serde_json::Map<String, serde_json::Value>],
+    replace: bool,
 ) -> Result<usize> {
     if rows.is_empty() { return Ok(0); }
 
@@ -204,7 +218,9 @@ async fn insert_rows_sqlite(
     for row in rows {
         let col_list = cols.iter().map(|c| format!("\"{}\"", c)).collect::<Vec<_>>().join(", ");
         let placeholders = cols.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
-        let sql = format!("INSERT OR IGNORE INTO \"{}\" ({}) VALUES ({})", table, col_list, placeholders);
+        // SQLite: INSERT OR REPLACE replaces the whole row, INSERT OR IGNORE skips on conflict
+        let verb = if replace { "INSERT OR REPLACE" } else { "INSERT OR IGNORE" };
+        let sql = format!("{} INTO \"{}\" ({}) VALUES ({})", verb, table, col_list, placeholders);
 
         let mut q = sqlx::query(&sql);
         for col in &cols {
