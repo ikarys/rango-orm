@@ -330,6 +330,157 @@ fn generate_pivot_table(rel: &M2MRelation, prefix: &str) -> TableSchema {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::{generate_sql_from_diff, migration_label};
+    use rango_core::{ColumnDef, ColumnType, TableSchema};
+    use crate::snapshot::SchemaDiff;
+
+    fn uuid_col(name: &str, pk: bool) -> ColumnDef {
+        ColumnDef {
+            name: name.to_string(),
+            col_type: ColumnType::Uuid,
+            nullable: false,
+            primary_key: pk,
+            unique: pk,
+            default: None,
+            references: None,
+        }
+    }
+
+    fn text_col(name: &str) -> ColumnDef {
+        ColumnDef {
+            name: name.to_string(),
+            col_type: ColumnType::Text,
+            nullable: false,
+            primary_key: false,
+            unique: false,
+            default: None,
+            references: None,
+        }
+    }
+
+    fn simple_table(name: &str) -> TableSchema {
+        TableSchema {
+            table_name: name.to_string(),
+            columns: vec![uuid_col("id", true), text_col("name")],
+            ..Default::default()
+        }
+    }
+
+    // ── CreateTable ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_create_table_sql() {
+        let diff = SchemaDiff::CreateTable(simple_table("users"));
+        let sql = generate_sql_from_diff(&[diff]);
+        assert!(sql.contains("CREATE TABLE IF NOT EXISTS"), "got: {}", sql);
+        assert!(sql.contains("\"users\""), "got: {}", sql);
+    }
+
+    #[test]
+    fn test_create_table_has_columns() {
+        let diff = SchemaDiff::CreateTable(simple_table("orders"));
+        let sql = generate_sql_from_diff(&[diff]);
+        assert!(sql.contains("\"id\""), "got: {}", sql);
+        assert!(sql.contains("\"name\""), "got: {}", sql);
+    }
+
+    // ── AddColumn ─────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_add_column_sql() {
+        let diff = SchemaDiff::AddColumn {
+            table: "x".to_string(),
+            column: text_col("title"),
+        };
+        let sql = generate_sql_from_diff(&[diff]);
+        assert!(sql.contains("ALTER TABLE \"x\" ADD COLUMN"), "got: {}", sql);
+        assert!(sql.contains("\"title\""), "got: {}", sql);
+    }
+
+    // ── DropColumn ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_drop_column_sql() {
+        let diff = SchemaDiff::DropColumn {
+            table: "x".to_string(),
+            column: "old_col".to_string(),
+        };
+        let sql = generate_sql_from_diff(&[diff]);
+        assert!(sql.contains("ALTER TABLE \"x\" DROP COLUMN"), "got: {}", sql);
+        assert!(sql.contains("\"old_col\""), "got: {}", sql);
+    }
+
+    // ── AlterColumnNullable ───────────────────────────────────────────────────
+
+    #[test]
+    fn test_alter_nullable_true() {
+        let diff = SchemaDiff::AlterColumnNullable {
+            table: "t".to_string(),
+            column: "c".to_string(),
+            nullable: true,
+        };
+        let sql = generate_sql_from_diff(&[diff]);
+        assert!(sql.contains("DROP NOT NULL"), "got: {}", sql);
+    }
+
+    #[test]
+    fn test_alter_nullable_false() {
+        let diff = SchemaDiff::AlterColumnNullable {
+            table: "t".to_string(),
+            column: "c".to_string(),
+            nullable: false,
+        };
+        let sql = generate_sql_from_diff(&[diff]);
+        assert!(sql.contains("SET NOT NULL"), "got: {}", sql);
+    }
+
+    // ── DropTable ─────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_drop_table_sql() {
+        let diff = SchemaDiff::DropTable("old_table".to_string());
+        let sql = generate_sql_from_diff(&[diff]);
+        assert!(sql.contains("DROP TABLE IF EXISTS"), "got: {}", sql);
+        assert!(sql.contains("\"old_table\""), "got: {}", sql);
+    }
+
+    // ── Empty diff ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_empty_diff_produces_empty_string() {
+        let sql = generate_sql_from_diff(&[]);
+        assert!(sql.is_empty(), "empty diff should produce empty string; got: {:?}", sql);
+    }
+
+    // ── migration_label ───────────────────────────────────────────────────────
+
+    #[test]
+    fn test_migration_label_single_table() {
+        let diffs = vec![SchemaDiff::CreateTable(simple_table("users"))];
+        assert_eq!(migration_label(&diffs), "users");
+    }
+
+    #[test]
+    fn test_migration_label_multiple_tables_sorted() {
+        let diffs = vec![
+            SchemaDiff::CreateTable(simple_table("posts")),
+            SchemaDiff::CreateTable(simple_table("articles")),
+        ];
+        // tables are deduplicated, sorted, and joined
+        assert_eq!(migration_label(&diffs), "articles_posts");
+    }
+
+    #[test]
+    fn test_migration_label_long_falls_back_to_auto() {
+        let diffs: Vec<SchemaDiff> = (0..10)
+            .map(|i| SchemaDiff::DropTable(format!("very_long_table_name_{:02}", i)))
+            .collect();
+        assert_eq!(migration_label(&diffs), "auto");
+    }
+}
+
 fn detect_project_name() -> Result<String> {
     let cargo_toml = fs::read_to_string("Cargo.toml")
         .context("Could not find Cargo.toml — run from project root or use --prefix")?;

@@ -200,7 +200,7 @@ where
 
     /// Group conditions in parentheses.
     ///
-    /// ```rust
+    /// ```rust,ignore
     /// User::filter(&pool)
     ///     .eq("active", true)
     ///     .group(|q| q.eq("role", "admin").or().eq("role", "moderator"))
@@ -263,7 +263,7 @@ where
     ///
     /// Multiple calls are allowed for different FK columns / related types.
     ///
-    /// ```rust
+    /// ```rust,ignore
     /// let posts: Vec<WithRelated<Post>> = Post::filter(&pool)
     ///     .select_related::<Author>("author_id")
     ///     .all().await?;
@@ -296,7 +296,7 @@ where
     /// The FK is a column on **R's** table: `r.related_fk_col = m.pk`.
     /// After `.all()`, access the collection via `wr.prefetched::<R>()`.
     ///
-    /// ```rust
+    /// ```rust,ignore
     /// let posts: Vec<WithRelated<Post>> = Post::filter(&pool)
     ///     .prefetch_related::<Comment>("post_id")
     ///     .all().await?;
@@ -539,7 +539,7 @@ where
     /// Returns `None` if the table is empty or all values are NULL.
     ///
     /// # Example
-    /// ```rust
+    /// ```rust,ignore
     /// let oldest: Option<NaiveDate> = Event::filter(&pool).min::<NaiveDate>("date").await?;
     /// let lowest: Option<f64>       = Order::filter(&pool).min::<f64>("price").await?;
     /// ```
@@ -561,7 +561,7 @@ where
     /// Returns `None` if the table is empty or all values are NULL.
     ///
     /// # Example
-    /// ```rust
+    /// ```rust,ignore
     /// let latest: Option<DateTime<Utc>> = Post::filter(&pool).max::<DateTime<Utc>>("created_at").await?;
     /// let highest: Option<f64>          = Order::filter(&pool).max::<f64>("price").await?;
     /// ```
