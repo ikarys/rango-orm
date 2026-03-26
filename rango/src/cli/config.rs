@@ -16,6 +16,10 @@ pub struct RangoConfig {
 #[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 pub struct DatabaseConfig {
+    /// Database URL — read from rango.toml for CLI tools (makemigrations, migrate).
+    /// In production, prefer DATABASE_URL env var to avoid committing credentials.
+    #[serde(default)]
+    pub url: Option<String>,
     #[serde(default = "default_max_connections")]
     pub max_connections: u32,
     #[serde(default = "default_min_connections")]
@@ -34,11 +38,25 @@ pub struct DatabaseConfig {
 impl Default for DatabaseConfig {
     fn default() -> Self {
         Self {
+            url: None,
             max_connections: default_max_connections(),
             min_connections: default_min_connections(),
             connect_timeout: default_connect_timeout(),
             idle_timeout: default_idle_timeout(),
             after_connect: Vec::new(),
+        }
+    }
+
+}
+
+impl DatabaseConfig {
+    /// Detect backend kind from the URL prefix.
+    pub fn backend_kind(&self) -> rango_core::BackendKind {
+        let url = self.url.as_deref().unwrap_or("");
+        if url.starts_with("sqlite") {
+            rango_core::BackendKind::Sqlite
+        } else {
+            rango_core::BackendKind::Postgres // default
         }
     }
 }

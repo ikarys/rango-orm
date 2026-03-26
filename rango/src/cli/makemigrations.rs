@@ -1,12 +1,16 @@
 use anyhow::{bail, Context, Result};
-use rango_core::{ColumnDef, ColumnType, Constraint, DefaultValue, TableSchema};
+use rango_core::{BackendKind, ColumnDef, ColumnType, Constraint, DefaultValue, TableSchema};
 use std::fs;
 
 use crate::scanner::{scan_models, M2MRelation};
 use crate::snapshot::{diff, Snapshot, SchemaDiff};
 
 pub fn run(src_dir: &str, output_dir: &str, prefix: Option<&str>, dry_run: bool, check: bool) -> Result<()> {
-    println!("🔍 Scanning models in {}...", src_dir);
+    // Detect backend from rango.toml
+    let cfg = crate::config::RangoConfig::load().unwrap_or_default();
+    let backend = cfg.database.backend_kind();
+    let backend_label = match backend { BackendKind::Sqlite => "sqlite", _ => "postgres" };
+    println!("🔍 Scanning models in {}... (backend: {})", src_dir, backend_label);
 
     let prefix = match prefix {
         Some(p) => p.to_string(),
@@ -62,7 +66,7 @@ pub fn run(src_dir: &str, output_dir: &str, prefix: Option<&str>, dry_run: bool,
     }
 
     // Generate SQL from diff
-    let sql = generate_sql_from_diff(&diffs);
+    let sql = generate_sql_from_diff(&diffs, backend);
 
     // --dry-run: print SQL, do not write files
     if dry_run {
@@ -95,19 +99,19 @@ pub fn run(src_dir: &str, output_dir: &str, prefix: Option<&str>, dry_run: bool,
     Ok(())
 }
 
-fn generate_sql_from_diff(diffs: &[SchemaDiff]) -> String {
+fn generate_sql_from_diff(diffs: &[SchemaDiff], backend: BackendKind) -> String {
     let mut sql = String::new();
     for d in diffs {
         match d {
             SchemaDiff::CreateTable(schema) => {
-                sql.push_str(&generate_create_table(schema));
+                sql.push_str(&generate_create_table(schema, backend));
                 sql.push('\n');
             }
             SchemaDiff::DropTable(name) => {
                 sql.push_str(&format!("DROP TABLE IF EXISTS \"{}\";\n\n", name));
             }
             SchemaDiff::AddColumn { table, column } => {
-                let def = column_definition(column);
+                let def = column_definition(column, backend);
                 sql.push_str(&format!(
                     "ALTER TABLE \"{}\" ADD COLUMN {};\n\n", table, def
                 ));
@@ -118,23 +122,43 @@ fn generate_sql_from_diff(diffs: &[SchemaDiff]) -> String {
                 ));
             }
             SchemaDiff::AlterColumnType { table, column, new_type } => {
-                sql.push_str(&format!(
-                    "ALTER TABLE \"{}\" ALTER COLUMN \"{}\" TYPE {};\n\n",
-                    table, column, sql_type(new_type)
-                ));
+                // SQLite doesn't support ALTER COLUMN TYPE — emit a comment
+                if backend == BackendKind::Sqlite {
+                    sql.push_str(&format!(
+                        "-- SQLite does not support ALTER COLUMN TYPE on \"{}\".\"{}\" → recreate the table manually.\n\n",
+                        table, column
+                    ));
+                } else {
+                    sql.push_str(&format!(
+                        "ALTER TABLE \"{}\" ALTER COLUMN \"{}\" TYPE {};\n\n",
+                        table, column, sql_type(new_type, backend)
+                    ));
+                }
             }
             SchemaDiff::AlterColumnNullable { table, column, nullable } => {
-                let op = if *nullable { "DROP NOT NULL" } else { "SET NOT NULL" };
-                sql.push_str(&format!(
-                    "ALTER TABLE \"{}\" ALTER COLUMN \"{}\" {};\n\n",
-                    table, column, op
-                ));
+                if backend == BackendKind::Sqlite {
+                    sql.push_str(&format!(
+                        "-- SQLite does not support SET/DROP NOT NULL on \"{}\".\"{}\" → recreate the table manually.\n\n",
+                        table, column
+                    ));
+                } else {
+                    let op = if *nullable { "DROP NOT NULL" } else { "SET NOT NULL" };
+                    sql.push_str(&format!(
+                        "ALTER TABLE \"{}\" ALTER COLUMN \"{}\" {};\n\n",
+                        table, column, op
+                    ));
+                }
             }
             SchemaDiff::AlterColumnUnique { table, column, unique } => {
                 if *unique {
                     sql.push_str(&format!(
                         "ALTER TABLE \"{}\" ADD CONSTRAINT \"{}_{}_unique\" UNIQUE (\"{}\");\n\n",
                         table, table, column, column
+                    ));
+                } else if backend == BackendKind::Sqlite {
+                    sql.push_str(&format!(
+                        "DROP INDEX IF EXISTS \"{}_{}_unique\";\n\n",
+                        table, column
                     ));
                 } else {
                     sql.push_str(&format!(
@@ -148,12 +172,12 @@ fn generate_sql_from_diff(diffs: &[SchemaDiff]) -> String {
     sql
 }
 
-fn generate_create_table(schema: &TableSchema) -> String {
+fn generate_create_table(schema: &TableSchema, backend: BackendKind) -> String {
     let mut lines = Vec::new();
     let mut post_stmts: Vec<String> = Vec::new();
 
     for col in &schema.columns {
-        lines.push(format!("    {}", column_definition(col)));
+        lines.push(format!("    {}", column_definition(col, backend)));
     }
 
     // Detect pivot table: 2 UUID NOT NULL non-PK columns → composite PK
@@ -224,8 +248,8 @@ fn generate_create_table(schema: &TableSchema) -> String {
     sql
 }
 
-fn column_definition(col: &ColumnDef) -> String {
-    let mut def = format!("\"{}\" {}", col.name, sql_type(&col.col_type));
+fn column_definition(col: &ColumnDef, backend: BackendKind) -> String {
+    let mut def = format!("\"{}\" {}", col.name, sql_type(&col.col_type, backend));
     if col.primary_key {
         def.push_str(" PRIMARY KEY");
     } else {
@@ -246,24 +270,43 @@ fn column_definition(col: &ColumnDef) -> String {
     def
 }
 
-fn sql_type(col_type: &ColumnType) -> &'static str {
-    match col_type {
-        ColumnType::Bool           => "BOOLEAN",
-        ColumnType::SmallInt       => "SMALLINT",
-        ColumnType::Int            => "INTEGER",
-        ColumnType::BigInt         => "BIGINT",
-        ColumnType::Float          => "REAL",
-        ColumnType::Double         => "DOUBLE PRECISION",
-        ColumnType::Text           => "TEXT",
-        ColumnType::Bytea          => "BYTEA",
-        ColumnType::Uuid           => "UUID",
-        ColumnType::Date           => "DATE",
-        ColumnType::Time           => "TIME",
-        ColumnType::DateTime       => "TIMESTAMPTZ",
-        ColumnType::Json           => "JSON",
-        ColumnType::Jsonb          => "JSONB",
-        ColumnType::Varchar(_)     => "VARCHAR",
-        ColumnType::Decimal { .. } => "NUMERIC",
+fn sql_type(col_type: &ColumnType, backend: BackendKind) -> &'static str {
+    match backend {
+        BackendKind::Sqlite => match col_type {
+            ColumnType::Bool                      => "INTEGER",  // 0/1
+            ColumnType::SmallInt                  => "INTEGER",
+            ColumnType::Int                       => "INTEGER",
+            ColumnType::BigInt                    => "INTEGER",
+            ColumnType::Float                     => "REAL",
+            ColumnType::Double                    => "REAL",
+            ColumnType::Decimal { .. }            => "REAL",
+            ColumnType::Text                      => "TEXT",
+            ColumnType::Bytea                     => "BLOB",
+            ColumnType::Uuid                      => "TEXT",    // stored as UUID string
+            ColumnType::Date                      => "TEXT",    // ISO 8601
+            ColumnType::Time                      => "TEXT",
+            ColumnType::DateTime                  => "TEXT",    // ISO 8601
+            ColumnType::Json | ColumnType::Jsonb  => "TEXT",    // serialized JSON
+            ColumnType::Varchar(_)                => "TEXT",
+        },
+        _ => match col_type {
+            ColumnType::Bool           => "BOOLEAN",
+            ColumnType::SmallInt       => "SMALLINT",
+            ColumnType::Int            => "INTEGER",
+            ColumnType::BigInt         => "BIGINT",
+            ColumnType::Float          => "REAL",
+            ColumnType::Double         => "DOUBLE PRECISION",
+            ColumnType::Text           => "TEXT",
+            ColumnType::Bytea          => "BYTEA",
+            ColumnType::Uuid           => "UUID",
+            ColumnType::Date           => "DATE",
+            ColumnType::Time           => "TIME",
+            ColumnType::DateTime       => "TIMESTAMPTZ",
+            ColumnType::Json           => "JSON",
+            ColumnType::Jsonb          => "JSONB",
+            ColumnType::Varchar(_)     => "VARCHAR",
+            ColumnType::Decimal { .. } => "NUMERIC",
+        },
     }
 }
 
@@ -372,7 +415,7 @@ mod tests {
     #[test]
     fn test_create_table_sql() {
         let diff = SchemaDiff::CreateTable(simple_table("users"));
-        let sql = generate_sql_from_diff(&[diff]);
+        let sql = generate_sql_from_diff(&[diff], rango_core::BackendKind::Postgres);
         assert!(sql.contains("CREATE TABLE IF NOT EXISTS"), "got: {}", sql);
         assert!(sql.contains("\"users\""), "got: {}", sql);
     }
@@ -380,7 +423,7 @@ mod tests {
     #[test]
     fn test_create_table_has_columns() {
         let diff = SchemaDiff::CreateTable(simple_table("orders"));
-        let sql = generate_sql_from_diff(&[diff]);
+        let sql = generate_sql_from_diff(&[diff], rango_core::BackendKind::Postgres);
         assert!(sql.contains("\"id\""), "got: {}", sql);
         assert!(sql.contains("\"name\""), "got: {}", sql);
     }
@@ -393,7 +436,7 @@ mod tests {
             table: "x".to_string(),
             column: text_col("title"),
         };
-        let sql = generate_sql_from_diff(&[diff]);
+        let sql = generate_sql_from_diff(&[diff], rango_core::BackendKind::Postgres);
         assert!(sql.contains("ALTER TABLE \"x\" ADD COLUMN"), "got: {}", sql);
         assert!(sql.contains("\"title\""), "got: {}", sql);
     }
@@ -406,7 +449,7 @@ mod tests {
             table: "x".to_string(),
             column: "old_col".to_string(),
         };
-        let sql = generate_sql_from_diff(&[diff]);
+        let sql = generate_sql_from_diff(&[diff], rango_core::BackendKind::Postgres);
         assert!(sql.contains("ALTER TABLE \"x\" DROP COLUMN"), "got: {}", sql);
         assert!(sql.contains("\"old_col\""), "got: {}", sql);
     }
@@ -420,7 +463,7 @@ mod tests {
             column: "c".to_string(),
             nullable: true,
         };
-        let sql = generate_sql_from_diff(&[diff]);
+        let sql = generate_sql_from_diff(&[diff], rango_core::BackendKind::Postgres);
         assert!(sql.contains("DROP NOT NULL"), "got: {}", sql);
     }
 
@@ -431,7 +474,7 @@ mod tests {
             column: "c".to_string(),
             nullable: false,
         };
-        let sql = generate_sql_from_diff(&[diff]);
+        let sql = generate_sql_from_diff(&[diff], rango_core::BackendKind::Postgres);
         assert!(sql.contains("SET NOT NULL"), "got: {}", sql);
     }
 
@@ -440,7 +483,7 @@ mod tests {
     #[test]
     fn test_drop_table_sql() {
         let diff = SchemaDiff::DropTable("old_table".to_string());
-        let sql = generate_sql_from_diff(&[diff]);
+        let sql = generate_sql_from_diff(&[diff], rango_core::BackendKind::Postgres);
         assert!(sql.contains("DROP TABLE IF EXISTS"), "got: {}", sql);
         assert!(sql.contains("\"old_table\""), "got: {}", sql);
     }
@@ -449,7 +492,7 @@ mod tests {
 
     #[test]
     fn test_empty_diff_produces_empty_string() {
-        let sql = generate_sql_from_diff(&[]);
+        let sql = generate_sql_from_diff(&[], rango_core::BackendKind::Postgres);
         assert!(sql.is_empty(), "empty diff should produce empty string; got: {:?}", sql);
     }
 
