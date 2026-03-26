@@ -21,6 +21,7 @@ test:
     cargo test --workspace
 
 # Run all tests including integration (starts DB if needed)
+# Run unit tests + integration tests (integration tests run sequentially to avoid DB conflicts)
 test-all: db
     DATABASE_URL={{database_url}} cargo test --workspace --features rango-tests/integration -- --test-threads=1
 
