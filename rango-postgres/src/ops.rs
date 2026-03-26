@@ -1,5 +1,9 @@
 use rango_core::{FromRow, Model, ModelValues, SqlValue};
 use sqlx::{Acquire, Executor, Postgres};
+
+/// Default maximum rows returned by [`QueryBuilder::all()`].
+/// Override with `.limit(n)` or `.unlimited()`.
+pub const DEFAULT_QUERY_LIMIT: i64 = 1000;
 use sqlx::postgres::PgArguments;
 use sqlx::query::Query;
 use anyhow::{Context, Result};
