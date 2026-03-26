@@ -424,6 +424,20 @@ fn generate_pivot_table(rel: &M2MRelation, prefix: &str) -> TableSchema {
     }
 }
 
+fn detect_project_name() -> Result<String> {
+    let cargo_toml = fs::read_to_string("Cargo.toml")
+        .context("Could not find Cargo.toml — run from project root or use --prefix")?;
+    for line in cargo_toml.lines() {
+        let line = line.trim();
+        if line.starts_with("name")
+            && let Some(val) = line.split_once('=').map(|x| x.1)
+        {
+            return Ok(val.trim().trim_matches('"').to_string());
+        }
+    }
+    bail!("Could not detect project name from Cargo.toml — use --prefix")
+}
+
 #[cfg(test)]
 mod tests {
     use super::{generate_sql_from_diff, migration_label};
@@ -581,18 +595,4 @@ mod tests {
             .collect();
         assert_eq!(migration_label(&diffs), "auto");
     }
-}
-
-fn detect_project_name() -> Result<String> {
-    let cargo_toml = fs::read_to_string("Cargo.toml")
-        .context("Could not find Cargo.toml — run from project root or use --prefix")?;
-    for line in cargo_toml.lines() {
-        let line = line.trim();
-        if line.starts_with("name")
-            && let Some(val) = line.split_once('=').map(|x| x.1)
-        {
-            return Ok(val.trim().trim_matches('"').to_string());
-        }
-    }
-    bail!("Could not detect project name from Cargo.toml — use --prefix")
 }
