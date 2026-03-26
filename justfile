@@ -1,5 +1,4 @@
-# Uses the Geekizz Postgres on 5432, or the rango docker-compose on 5433
-database_url := "postgres://geekizz:geekizz@localhost:5432/rango_test"
+database_url := "postgres://postgres:postgres@localhost:5433/rango_test"
 
 # Show available commands
 help:
@@ -21,9 +20,13 @@ test:
     cargo test --workspace
 
 # Run all tests including integration (starts DB if needed)
-# Run unit tests + integration tests (integration tests run sequentially to avoid DB conflicts)
-test-all: db
-    DATABASE_URL={{database_url}} cargo test --workspace --features rango-tests/integration -- --test-threads=1
+# Run unit tests + integration tests — spins up a dedicated Postgres, runs all tests, tears it down
+test-all:
+    docker compose up -d
+    @echo "Waiting for Postgres..."
+    @until docker compose exec postgres pg_isready -U postgres > /dev/null 2>&1; do sleep 1; done
+    DATABASE_URL={{database_url}} cargo test --workspace --features rango-tests/integration -- --test-threads=1; \
+    docker compose down -v
 
 # Generate coverage report with HTML output (starts DB if needed)
 coverage: db
