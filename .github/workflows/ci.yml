@@ -93,7 +93,7 @@ jobs:
           key: ${{ runner.os }}-cargo-integration-${{ hashFiles('**/Cargo.lock') }}
 
       - name: cargo test (integration)
-        run: cargo test --workspace --features rango-tests/integration
+        run: cargo test --workspace --features rango-tests/integration -- --test-threads=1
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/rango_test
 
