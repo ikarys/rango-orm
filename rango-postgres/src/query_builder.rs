@@ -96,6 +96,9 @@ pub struct QueryBuilder<M> {
     pub prefetch_specs: Vec<(String, String, String)>,
     select_related: Vec<SelectRelatedSpec>,
     prefetch_related: Vec<PrefetchSpec>,
+    /// Raw WHERE clauses injected by backend-specific extensions (e.g. PgQueryExt).
+    /// Each entry is (sql_fragment, bind_values) where `$__` is replaced by `$N`.
+    pub(crate) raw_conditions: Vec<(String, Vec<SqlValue>)>,
     _phantom: std::marker::PhantomData<M>,
 }
 
@@ -116,8 +119,22 @@ where
             prefetch_specs: Vec::new(),
             select_related: Vec::new(),
             prefetch_related: Vec::new(),
+            raw_conditions: Vec::new(),
             _phantom: std::marker::PhantomData,
         }
+    }
+
+    /// Add a raw WHERE clause — for use by backend-specific extensions only.
+    /// Use `$__` as a placeholder; it will be replaced by `$N` at build time.
+    pub(crate) fn raw_where(mut self, sql: String, binds: Vec<SqlValue>) -> Self {
+        self.raw_conditions.push((sql, binds));
+        self
+    }
+
+    /// Add a raw WHERE clause with no bind parameters.
+    pub(crate) fn raw_where_no_bind(mut self, sql: String) -> Self {
+        self.raw_conditions.push((sql, vec![]));
+        self
     }
 
     // ── Filter methods ────────────────────────────────────────────────────────
@@ -675,13 +692,34 @@ where
     }
 
     fn build_where(&self) -> (String, Vec<SqlValue>) {
-        if self.conditions.is_empty() {
+        let has_conditions = !self.conditions.is_empty();
+        let has_raw = !self.raw_conditions.is_empty();
+
+        if !has_conditions && !has_raw {
             return (String::new(), Vec::new());
         }
+
         let mut binds = Vec::new();
         let mut idx = 1usize;
-        let expr = build_conditions(&self.conditions, &mut binds, &mut idx);
-        (format!("WHERE {}", expr), binds)
+        let mut parts: Vec<String> = Vec::new();
+
+        if has_conditions {
+            parts.push(build_conditions(&self.conditions, &mut binds, &mut idx));
+        }
+
+        // Append raw conditions — replace $__ with the current $N
+        for (sql, raw_binds) in &self.raw_conditions {
+            let mut fragment = sql.clone();
+            for bind in raw_binds {
+                let placeholder = format!("${}", idx);
+                fragment = fragment.replacen("$__", &placeholder, 1);
+                binds.push(bind.clone());
+                idx += 1;
+            }
+            parts.push(fragment);
+        }
+
+        (format!("WHERE {}", parts.join(" AND ")), binds)
     }
 }
 
