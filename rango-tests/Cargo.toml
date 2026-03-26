@@ -10,4 +10,12 @@ rango-derive = { path = "../rango-derive" }
 
 [dev-dependencies]
 rango-postgres = { path = "../rango-postgres" }
+rango-core = { path = "../rango-core" }
+rango-derive = { path = "../rango-derive" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+uuid = { version = "1", features = ["v4"] }
+anyhow = "1"
+sqlx = { version = "0.8", features = ["postgres", "runtime-tokio-native-tls"] }
+
+[features]
+integration = []
