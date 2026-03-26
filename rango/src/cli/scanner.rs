@@ -280,6 +280,7 @@ fn map_field_type(ty: &Type) -> Result<ColumnType> {
         s if s.starts_with("FieldPassword<") => parse_password(s)?,
         s if s.starts_with("FieldDecimal<") => parse_decimal(s)?,
         s if s.starts_with("FieldRange<") => ColumnType::BigInt,
+        s if s.starts_with("ForeignKey<") => ColumnType::Uuid,
         _ => anyhow::bail!("Unknown field type: {}", s),
     };
     Ok(col)

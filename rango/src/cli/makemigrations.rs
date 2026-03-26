@@ -12,6 +12,8 @@ pub fn run(src_dir: &str, output_dir: &str, prefix: Option<&str>, dry_run: bool,
         Some(p) => p.to_string(),
         None => detect_project_name()?,
     };
+    // Normalize prefix: hyphens → underscores (Cargo names use hyphens, SQL identifiers don't)
+    let prefix = prefix.replace('-', "_");
     println!("📦 Table prefix: {}", prefix);
 
     let (mut schemas, m2m_relations) = scan_models(src_dir)?;
