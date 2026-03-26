@@ -1,8 +1,7 @@
 pub use sqlx::SqlitePool;
 
 pub use ops::{
-    all, delete, get, get_or_create, insert, update, bulk_create,
-    raw, raw_scalar, raw_execute,
+    all, bulk_create, delete, get, get_or_create, insert, raw, raw_execute, raw_scalar, update,
 };
 pub use query_builder::{QueryBuilder, RangoFilterExt};
 pub use transaction::{atomic, SqliteTransaction};
@@ -19,14 +18,22 @@ pub struct RangoSqlitePool(pub SqlitePool);
 
 impl std::ops::Deref for RangoSqlitePool {
     type Target = SqlitePool;
-    fn deref(&self) -> &SqlitePool { &self.0 }
+    fn deref(&self) -> &SqlitePool {
+        &self.0
+    }
 }
 
 impl rango_core::RangoBackend for RangoSqlitePool {
-    fn backend_kind(&self) -> rango_core::BackendKind { rango_core::BackendKind::Sqlite }
-    fn placeholder(&self, _n: usize) -> String { "?".to_string() }
+    fn backend_kind(&self) -> rango_core::BackendKind {
+        rango_core::BackendKind::Sqlite
+    }
+    fn placeholder(&self, _n: usize) -> String {
+        "?".to_string()
+    }
 }
 
 pub async fn connect(url: &str) -> anyhow::Result<SqlitePool> {
-    SqlitePool::connect(url).await.map_err(|e| anyhow::anyhow!(e))
+    SqlitePool::connect(url)
+        .await
+        .map_err(|e| anyhow::anyhow!(e))
 }

@@ -1,10 +1,10 @@
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
-use syn::{parse_macro_input, DeriveInput};
+use syn::{DeriveInput, parse_macro_input};
 
-mod model;
 mod mixin;
+mod model;
 mod utils;
 
 /// Returns the path to rango_core — either via `rango` umbrella or directly.

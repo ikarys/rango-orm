@@ -1,5 +1,5 @@
 use anyhow::Result;
-use sqlx::{SqlitePool, Sqlite};
+use sqlx::{Sqlite, SqlitePool};
 
 pub type SqliteTransaction<'a> = sqlx::Transaction<'a, Sqlite>;
 
@@ -10,7 +10,13 @@ where
 {
     let mut tx = pool.begin().await?;
     match f(&mut tx).await {
-        Ok(val) => { tx.commit().await?; Ok(val) }
-        Err(e)  => { tx.rollback().await.ok(); Err(e) }
+        Ok(val) => {
+            tx.commit().await?;
+            Ok(val)
+        }
+        Err(e) => {
+            tx.rollback().await.ok();
+            Err(e)
+        }
     }
 }

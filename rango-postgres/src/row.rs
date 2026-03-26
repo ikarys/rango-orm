@@ -1,6 +1,6 @@
 use rango_core::row::{RangoRow, RowError};
-use sqlx::postgres::PgRow;
 use sqlx::Row;
+use sqlx::postgres::PgRow;
 
 /// Owned row — used for simple queries
 pub struct PgRangoRow(pub PgRow);
@@ -9,13 +9,16 @@ pub struct PgRangoRow(pub PgRow);
 pub struct PgRangoRow2<'a>(pub &'a PgRow);
 
 impl<'a> PgRangoRow2<'a> {
-    pub fn new(row: &'a PgRow) -> Self { Self(row) }
+    pub fn new(row: &'a PgRow) -> Self {
+        Self(row)
+    }
 }
 
 macro_rules! impl_get {
     ($fn_name:ident, $t:ty) => {
         fn $fn_name(&self, col: &str) -> Result<$t, RowError> {
-            self.0.try_get::<$t, _>(col)
+            self.0
+                .try_get::<$t, _>(col)
                 .map_err(|e| RowError(format!("Column '{}': {}", col, e)))
         }
     };
@@ -38,13 +41,15 @@ macro_rules! impl_rangorow {
             impl_get!(get_time, chrono::NaiveTime);
 
             fn get_json(&self, col: &str) -> Result<serde_json::Value, RowError> {
-                self.0.try_get::<sqlx::types::Json<serde_json::Value>, _>(col)
+                self.0
+                    .try_get::<sqlx::types::Json<serde_json::Value>, _>(col)
                     .map(|j| j.0)
                     .map_err(|e| RowError(format!("Column '{}': {}", col, e)))
             }
 
             fn is_null(&self, col: &str) -> bool {
-                self.0.try_get::<Option<String>, _>(col)
+                self.0
+                    .try_get::<Option<String>, _>(col)
                     .map(|v| v.is_none())
                     .unwrap_or(true)
             }

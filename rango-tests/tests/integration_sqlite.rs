@@ -2,7 +2,6 @@
 ///
 /// Run with:
 ///   cargo test --test integration_sqlite --features rango-tests/integration-sqlite
-
 use rango_core::*;
 use rango_derive::Model;
 use rango_sqlite::*;
@@ -24,7 +23,8 @@ struct TestUser {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 async fn pool() -> SqlitePool {
-    SqlitePool::connect("sqlite::memory:").await
+    SqlitePool::connect("sqlite::memory:")
+        .await
         .expect("Failed to create in-memory SQLite pool")
 }
 
@@ -65,7 +65,8 @@ async fn test_sqlite_insert_and_get() {
     let inserted = insert(&pool, u.clone()).await.expect("insert failed");
     assert_eq!(inserted.email, u.email);
 
-    let fetched = get::<_, TestUser>(&pool, &u.id.to_sql_value()).await
+    let fetched = get::<_, TestUser>(&pool, &u.id.to_sql_value())
+        .await
         .expect("get failed")
         .expect("user not found");
     assert_eq!(fetched.email, u.email);
@@ -95,7 +96,9 @@ async fn test_sqlite_delete() {
     insert(&pool, u.clone()).await.unwrap();
     delete(&pool, &u).await.expect("delete failed");
 
-    let fetched = get::<_, TestUser>(&pool, &u.id.to_sql_value()).await.unwrap();
+    let fetched = get::<_, TestUser>(&pool, &u.id.to_sql_value())
+        .await
+        .unwrap();
     assert!(fetched.is_none());
 }
 
@@ -118,8 +121,16 @@ async fn test_sqlite_filter_eq() {
         .await
         .expect("filter failed");
 
-    assert!(results.iter().any(|u| u.email == FieldEmail("active@sqlite.com".to_string())));
-    assert!(!results.iter().any(|u| u.email == FieldEmail("inactive@sqlite.com".to_string())));
+    assert!(
+        results
+            .iter()
+            .any(|u| u.email == FieldEmail("active@sqlite.com".to_string()))
+    );
+    assert!(
+        !results
+            .iter()
+            .any(|u| u.email == FieldEmail("inactive@sqlite.com".to_string()))
+    );
 }
 
 #[tokio::test]
@@ -154,7 +165,9 @@ async fn test_sqlite_bulk_create() {
         .map(|i| user(&format!("bulk{}@sqlite.com", i)))
         .collect();
 
-    let n = bulk_create(&pool, &users).await.expect("bulk_create failed");
+    let n = bulk_create(&pool, &users)
+        .await
+        .expect("bulk_create failed");
     assert_eq!(n, 5);
 }
 
@@ -206,9 +219,12 @@ async fn test_sqlite_aggregations() {
     let pool = pool().await;
     setup(&pool).await;
 
-    let mut u1 = user("agg1@sqlite.com"); u1.score = Some(FieldInt(10));
-    let mut u2 = user("agg2@sqlite.com"); u2.score = Some(FieldInt(20));
-    let mut u3 = user("agg3@sqlite.com"); u3.score = Some(FieldInt(30));
+    let mut u1 = user("agg1@sqlite.com");
+    u1.score = Some(FieldInt(10));
+    let mut u2 = user("agg2@sqlite.com");
+    u2.score = Some(FieldInt(20));
+    let mut u3 = user("agg3@sqlite.com");
+    u3.score = Some(FieldInt(30));
     bulk_create(&pool, &[u1, u2, u3]).await.unwrap();
 
     let sum = TestUser::filter(&pool).sum("score").await.unwrap();
@@ -291,16 +307,26 @@ async fn test_sqlite_export_json() {
     assert_eq!(rows.len(), 2);
 
     // Serialize to JSON
-    let json = serde_json::to_string(&rows.iter().map(|r| {
-        r.iter().map(|(k, v)| {
-            let jv = match v {
-                rango_core::SqlValue::Text(s) => serde_json::Value::String(s.clone()),
-                rango_core::SqlValue::BigInt(n) => serde_json::Value::Number((*n).into()),
-                _ => serde_json::Value::Null,
-            };
-            (k.clone(), jv)
-        }).collect::<serde_json::Map<_,_>>()
-    }).collect::<Vec<_>>()).unwrap();
+    let json = serde_json::to_string(
+        &rows
+            .iter()
+            .map(|r| {
+                r.iter()
+                    .map(|(k, v)| {
+                        let jv = match v {
+                            rango_core::SqlValue::Text(s) => serde_json::Value::String(s.clone()),
+                            rango_core::SqlValue::BigInt(n) => {
+                                serde_json::Value::Number((*n).into())
+                            }
+                            _ => serde_json::Value::Null,
+                        };
+                        (k.clone(), jv)
+                    })
+                    .collect::<serde_json::Map<_, _>>()
+            })
+            .collect::<Vec<_>>(),
+    )
+    .unwrap();
 
     assert!(json.contains("export1@sqlite.com"));
     assert!(json.contains("export2@sqlite.com"));
@@ -325,7 +351,9 @@ async fn test_sqlite_roundtrip() {
     assert_eq!(rows.len(), 1);
     assert_eq!(
         rows[0].get("email"),
-        Some(&rango_core::SqlValue::Text("roundtrip@sqlite.com".to_string()))
+        Some(&rango_core::SqlValue::Text(
+            "roundtrip@sqlite.com".to_string()
+        ))
     );
     assert_eq!(
         rows[0].get("name"),

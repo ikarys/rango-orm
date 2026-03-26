@@ -1,10 +1,10 @@
 use anyhow::{Context, Result};
 use rango_core::{
-    CheckConstraint, ColumnDef, ColumnType, Constraint, DefaultValue,
-    OrderBy, OrderDir, TableSchema, UniqueConstraint,
+    CheckConstraint, ColumnDef, ColumnType, Constraint, DefaultValue, OrderBy, OrderDir,
+    TableSchema, UniqueConstraint,
 };
 use std::path::Path;
-use syn::{visit::Visit, File, ItemStruct, Type};
+use syn::{File, ItemStruct, Type, visit::Visit};
 use walkdir::WalkDir;
 
 /// Scan a source directory and return (schemas, m2m_relations).
@@ -63,7 +63,11 @@ struct ModelVisitor<'a> {
 
 impl<'a> ModelVisitor<'a> {
     fn new(path: &'a Path) -> Self {
-        Self { path, schemas: Vec::new(), m2m_relations: Vec::new() }
+        Self {
+            path,
+            schemas: Vec::new(),
+            m2m_relations: Vec::new(),
+        }
     }
 }
 
@@ -97,7 +101,9 @@ impl<'ast> Visit<'ast> for ModelVisitor<'_> {
                     Ok(col) => columns.push(col),
                     Err(e) => eprintln!(
                         "Warning: skipping field in {} ({}): {}",
-                        self.path.display(), node.ident, e
+                        self.path.display(),
+                        node.ident,
+                        e
                     ),
                 }
             }
@@ -128,7 +134,7 @@ fn has_derive_model(node: &ItemStruct) -> bool {
             continue;
         }
         if let Ok(list) = attr.parse_args_with(
-            syn::punctuated::Punctuated::<syn::Path, syn::Token![,]>::parse_terminated
+            syn::punctuated::Punctuated::<syn::Path, syn::Token![,]>::parse_terminated,
         ) {
             for path in list {
                 if path.is_ident("Model") {
@@ -147,15 +153,16 @@ fn extract_table_name(node: &ItemStruct) -> String {
             continue;
         }
         if let Ok(list) = attr.parse_args_with(
-            syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated
+            syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated,
         ) {
             for meta in list {
                 if let syn::Meta::NameValue(nv) = meta
                     && nv.path.is_ident("table")
-                        && let syn::Expr::Lit(expr_lit) = &nv.value
-                            && let syn::Lit::Str(s) = &expr_lit.lit {
-                                return s.value();
-                            }
+                    && let syn::Expr::Lit(expr_lit) = &nv.value
+                    && let syn::Lit::Str(s) = &expr_lit.lit
+                {
+                    return s.value();
+                }
             }
         }
     }
@@ -164,7 +171,9 @@ fn extract_table_name(node: &ItemStruct) -> String {
 
 /// Build a ColumnDef from a struct field
 fn build_column_def(field: &syn::Field) -> Result<ColumnDef> {
-    let field_name = field.ident.as_ref()
+    let field_name = field
+        .ident
+        .as_ref()
         .ok_or_else(|| anyhow::anyhow!("unnamed field"))?
         .to_string();
 
@@ -178,7 +187,9 @@ fn build_column_def(field: &syn::Field) -> Result<ColumnDef> {
 
     let default = if field_attrs.auto_now_add || field_attrs.auto_now {
         Some(DefaultValue::CurrentTimestamp)
-    } else { field_attrs.default.map(DefaultValue::Literal) };
+    } else {
+        field_attrs.default.map(DefaultValue::Literal)
+    };
 
     Ok(ColumnDef {
         name: col_name,
@@ -209,22 +220,28 @@ fn parse_field_attrs(field: &syn::Field) -> FieldAttrs {
             continue;
         }
         if let Ok(list) = attr.parse_args_with(
-            syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated
+            syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated,
         ) {
             for meta in list {
                 match &meta {
-                    syn::Meta::Path(p) if p.is_ident("unique")       => attrs.unique = true,
-                    syn::Meta::Path(p) if p.is_ident("index")        => attrs.index = true,
-                    syn::Meta::Path(p) if p.is_ident("primary_key")  => attrs.primary_key = true,
+                    syn::Meta::Path(p) if p.is_ident("unique") => attrs.unique = true,
+                    syn::Meta::Path(p) if p.is_ident("index") => attrs.index = true,
+                    syn::Meta::Path(p) if p.is_ident("primary_key") => attrs.primary_key = true,
                     syn::Meta::Path(p) if p.is_ident("auto_now_add") => attrs.auto_now_add = true,
-                    syn::Meta::Path(p) if p.is_ident("auto_now")     => attrs.auto_now = true,
+                    syn::Meta::Path(p) if p.is_ident("auto_now") => attrs.auto_now = true,
                     syn::Meta::NameValue(nv) if nv.path.is_ident("column") => {
                         if let syn::Expr::Lit(e) = &nv.value
-                            && let syn::Lit::Str(s) = &e.lit { attrs.column = Some(s.value()); }
+                            && let syn::Lit::Str(s) = &e.lit
+                        {
+                            attrs.column = Some(s.value());
+                        }
                     }
                     syn::Meta::NameValue(nv) if nv.path.is_ident("default") => {
                         if let syn::Expr::Lit(e) = &nv.value
-                            && let syn::Lit::Str(s) = &e.lit { attrs.default = Some(s.value()); }
+                            && let syn::Lit::Str(s) = &e.lit
+                        {
+                            attrs.default = Some(s.value());
+                        }
                     }
                     _ => {}
                 }
@@ -237,32 +254,33 @@ fn parse_field_attrs(field: &syn::Field) -> FieldAttrs {
 fn extract_option(ty: &Type) -> (bool, &Type) {
     if let Type::Path(tp) = ty
         && let Some(seg) = tp.path.segments.last()
-            && seg.ident == "Option"
-                && let syn::PathArguments::AngleBracketed(args) = &seg.arguments
-                    && let Some(syn::GenericArgument::Type(inner)) = args.args.first() {
-                        return (true, inner);
-                    }
+        && seg.ident == "Option"
+        && let syn::PathArguments::AngleBracketed(args) = &seg.arguments
+        && let Some(syn::GenericArgument::Type(inner)) = args.args.first()
+    {
+        return (true, inner);
+    }
     (false, ty)
 }
 
 fn map_field_type(ty: &Type) -> Result<ColumnType> {
     let s = quote::quote!(#ty).to_string().replace(" ", "");
     let col = match s.as_str() {
-        "FieldBool"       => ColumnType::Bool,
-        "FieldSmallInt"   => ColumnType::SmallInt,
-        "FieldInt"        => ColumnType::Int,
-        "FieldBigInt"     => ColumnType::BigInt,
-        "FieldFloat"      => ColumnType::Float,
-        "FieldDouble"     => ColumnType::Double,
-        "FieldText"       => ColumnType::Text,
-        "FieldEmail"      => ColumnType::Varchar(254),
-        "FieldUrl"        => ColumnType::Varchar(2048),
-        "FieldBytes"      => ColumnType::Bytea,
-        "FieldUuid"       => ColumnType::Uuid,
-        "FieldDate"       => ColumnType::Date,
-        "FieldTime"       => ColumnType::Time,
-        "FieldDateTime"   => ColumnType::DateTime,
-        "FieldJson"       => ColumnType::Jsonb,
+        "FieldBool" => ColumnType::Bool,
+        "FieldSmallInt" => ColumnType::SmallInt,
+        "FieldInt" => ColumnType::Int,
+        "FieldBigInt" => ColumnType::BigInt,
+        "FieldFloat" => ColumnType::Float,
+        "FieldDouble" => ColumnType::Double,
+        "FieldText" => ColumnType::Text,
+        "FieldEmail" => ColumnType::Varchar(254),
+        "FieldUrl" => ColumnType::Varchar(2048),
+        "FieldBytes" => ColumnType::Bytea,
+        "FieldUuid" => ColumnType::Uuid,
+        "FieldDate" => ColumnType::Date,
+        "FieldTime" => ColumnType::Time,
+        "FieldDateTime" => ColumnType::DateTime,
+        "FieldJson" => ColumnType::Jsonb,
         s if s.starts_with("FieldVarchar<") => parse_varchar(s)?,
         s if s.starts_with("FieldPassword<") => parse_password(s)?,
         s if s.starts_with("FieldDecimal<") => parse_decimal(s)?,
@@ -277,9 +295,10 @@ fn parse_varchar(s: &str) -> Result<ColumnType> {
     let inner = s.trim_start_matches("FieldVarchar<").trim_end_matches('>');
     let parts: Vec<&str> = inner.split(',').collect();
     if parts.len() == 2
-        && let Ok(max) = parts[1].trim().parse::<u32>() {
-            return Ok(ColumnType::Varchar(max));
-        }
+        && let Ok(max) = parts[1].trim().parse::<u32>()
+    {
+        return Ok(ColumnType::Varchar(max));
+    }
     anyhow::bail!("Invalid FieldVarchar: {}", s)
 }
 
@@ -287,9 +306,10 @@ fn parse_password(s: &str) -> Result<ColumnType> {
     let inner = s.trim_start_matches("FieldPassword<").trim_end_matches('>');
     let parts: Vec<&str> = inner.split(',').collect();
     if parts.len() == 2
-        && let Ok(max) = parts[1].trim().parse::<u32>() {
-            return Ok(ColumnType::Varchar(max));
-        }
+        && let Ok(max) = parts[1].trim().parse::<u32>()
+    {
+        return Ok(ColumnType::Varchar(max));
+    }
     anyhow::bail!("Invalid FieldPassword: {}", s)
 }
 
@@ -297,26 +317,33 @@ fn parse_decimal(s: &str) -> Result<ColumnType> {
     let inner = s.trim_start_matches("FieldDecimal<").trim_end_matches('>');
     let parts: Vec<&str> = inner.split(',').collect();
     if parts.len() == 2
-        && let (Ok(p), Ok(sc)) = (parts[0].trim().parse::<u8>(), parts[1].trim().parse::<u8>()) {
-            return Ok(ColumnType::Decimal { precision: p, scale: sc });
-        }
+        && let (Ok(p), Ok(sc)) = (parts[0].trim().parse::<u8>(), parts[1].trim().parse::<u8>())
+    {
+        return Ok(ColumnType::Decimal {
+            precision: p,
+            scale: sc,
+        });
+    }
     anyhow::bail!("Invalid FieldDecimal: {}", s)
 }
 
 /// Extract `managed = false` from `#[model(...)]`, defaults to `true`.
 fn extract_managed(node: &ItemStruct) -> bool {
     for attr in &node.attrs {
-        if !attr.path().is_ident("model") { continue; }
+        if !attr.path().is_ident("model") {
+            continue;
+        }
         if let Ok(list) = attr.parse_args_with(
-            syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated
+            syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated,
         ) {
             for meta in list {
                 if let syn::Meta::NameValue(nv) = meta
                     && nv.path.is_ident("managed")
-                        && let syn::Expr::Lit(expr_lit) = &nv.value
-                            && let syn::Lit::Bool(b) = &expr_lit.lit {
-                                return b.value;
-                            }
+                    && let syn::Expr::Lit(expr_lit) = &nv.value
+                    && let syn::Lit::Bool(b) = &expr_lit.lit
+                {
+                    return b.value;
+                }
             }
         }
     }
@@ -327,20 +354,23 @@ fn extract_managed(node: &ItemStruct) -> bool {
 fn extract_ordering(node: &ItemStruct) -> Vec<OrderBy> {
     let mut result = Vec::new();
     for attr in &node.attrs {
-        if !attr.path().is_ident("model") { continue; }
+        if !attr.path().is_ident("model") {
+            continue;
+        }
         if let Ok(list) = attr.parse_args_with(
-            syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated
+            syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated,
         ) {
             for meta in list {
                 if let syn::Meta::NameValue(nv) = meta
                     && nv.path.is_ident("ordering")
-                        && let syn::Expr::Array(arr) = &nv.value {
-                            for elem in &arr.elems {
-                                if let Some(ob) = parse_order_expr(elem) {
-                                    result.push(ob);
-                                }
-                            }
+                    && let syn::Expr::Array(arr) = &nv.value
+                {
+                    for elem in &arr.elems {
+                        if let Some(ob) = parse_order_expr(elem) {
+                            result.push(ob);
                         }
+                    }
+                }
             }
         }
     }
@@ -354,8 +384,18 @@ fn parse_order_expr(expr: &syn::Expr) -> Option<OrderBy> {
         let args: Vec<syn::Expr> = call.args.iter().cloned().collect();
         let col = extract_str_from_args(&args, 0)?;
         match func_str.as_str() {
-            "asc"  => return Some(OrderBy { column: col, dir: OrderDir::Asc }),
-            "desc" => return Some(OrderBy { column: col, dir: OrderDir::Desc }),
+            "asc" => {
+                return Some(OrderBy {
+                    column: col,
+                    dir: OrderDir::Asc,
+                });
+            }
+            "desc" => {
+                return Some(OrderBy {
+                    column: col,
+                    dir: OrderDir::Desc,
+                });
+            }
             _ => {}
         }
     }
@@ -366,20 +406,23 @@ fn parse_order_expr(expr: &syn::Expr) -> Option<OrderBy> {
 fn extract_constraints(node: &ItemStruct) -> Vec<Constraint> {
     let mut result = Vec::new();
     for attr in &node.attrs {
-        if !attr.path().is_ident("model") { continue; }
+        if !attr.path().is_ident("model") {
+            continue;
+        }
         if let Ok(list) = attr.parse_args_with(
-            syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated
+            syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated,
         ) {
             for meta in list {
                 if let syn::Meta::NameValue(nv) = meta
                     && nv.path.is_ident("constraints")
-                        && let syn::Expr::Array(arr) = &nv.value {
-                            for elem in &arr.elems {
-                                if let Some(c) = parse_constraint_expr(elem) {
-                                    result.push(c);
-                                }
-                            }
+                    && let syn::Expr::Array(arr) = &nv.value
+                {
+                    for elem in &arr.elems {
+                        if let Some(c) = parse_constraint_expr(elem) {
+                            result.push(c);
                         }
+                    }
+                }
             }
         }
     }
@@ -401,7 +444,8 @@ fn parse_constraint_expr(expr: &syn::Expr) -> Option<Constraint> {
 
         if func_str == "CheckConstraint::new" {
             let sql = extract_str_from_args(&args, 0).unwrap_or_default();
-            let name = methods.iter()
+            let name = methods
+                .iter()
                 .find(|(m, _)| m == "name")
                 .and_then(|(_, a)| extract_str_from_args(a, 0))
                 .unwrap_or_default();
@@ -410,14 +454,20 @@ fn parse_constraint_expr(expr: &syn::Expr) -> Option<Constraint> {
 
         if func_str == "UniqueConstraint::on" {
             let fields = extract_str_slice_from_args(&args, 0).unwrap_or_default();
-            let condition = methods.iter()
+            let condition = methods
+                .iter()
                 .find(|(m, _)| m == "condition")
                 .and_then(|(_, a)| extract_str_from_args(a, 0));
-            let name = methods.iter()
+            let name = methods
+                .iter()
                 .find(|(m, _)| m == "name")
                 .and_then(|(_, a)| extract_str_from_args(a, 0))
                 .unwrap_or_default();
-            return Some(Constraint::Unique(UniqueConstraint { fields, condition, name }));
+            return Some(Constraint::Unique(UniqueConstraint {
+                fields,
+                condition,
+                name,
+            }));
         }
     }
     None
@@ -437,22 +487,34 @@ fn flatten_method_chain(expr: &syn::Expr) -> (&syn::Expr, Vec<(String, Vec<syn::
 
 fn extract_str_from_args(args: &[syn::Expr], idx: usize) -> Option<String> {
     if let syn::Expr::Lit(expr_lit) = args.get(idx)?
-        && let syn::Lit::Str(s) = &expr_lit.lit {
-            return Some(s.value());
-        }
+        && let syn::Lit::Str(s) = &expr_lit.lit
+    {
+        return Some(s.value());
+    }
     None
 }
 
 fn extract_str_slice_from_args(args: &[syn::Expr], idx: usize) -> Option<Vec<String>> {
     let arg = args.get(idx)?;
     // Handle `&["a", "b"]` — a reference to an array literal
-    let inner = if let syn::Expr::Reference(r) = arg { &*r.expr } else { arg };
+    let inner = if let syn::Expr::Reference(r) = arg {
+        &*r.expr
+    } else {
+        arg
+    };
     if let syn::Expr::Array(arr) = inner {
-        let fields: Vec<String> = arr.elems.iter().filter_map(|e| {
-            if let syn::Expr::Lit(el) = e
-                && let syn::Lit::Str(s) = &el.lit { return Some(s.value()); }
-            None
-        }).collect();
+        let fields: Vec<String> = arr
+            .elems
+            .iter()
+            .filter_map(|e| {
+                if let syn::Expr::Lit(el) = e
+                    && let syn::Lit::Str(s) = &el.lit
+                {
+                    return Some(s.value());
+                }
+                None
+            })
+            .collect();
         return Some(fields);
     }
     None

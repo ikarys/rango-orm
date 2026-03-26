@@ -39,18 +39,66 @@ pub trait ToSqlValue {
 
 // ─── From<T> conversions for SqlValue ────────────────────────────────────────
 
-impl From<&str> for SqlValue { fn from(s: &str) -> Self { SqlValue::Text(s.to_string()) } }
-impl From<String> for SqlValue { fn from(s: String) -> Self { SqlValue::Text(s) } }
-impl From<bool> for SqlValue { fn from(v: bool) -> Self { SqlValue::Bool(v) } }
-impl From<i16> for SqlValue { fn from(v: i16) -> Self { SqlValue::SmallInt(v) } }
-impl From<i32> for SqlValue { fn from(v: i32) -> Self { SqlValue::Int(v) } }
-impl From<i64> for SqlValue { fn from(v: i64) -> Self { SqlValue::BigInt(v) } }
-impl From<f32> for SqlValue { fn from(v: f32) -> Self { SqlValue::Float(v) } }
-impl From<f64> for SqlValue { fn from(v: f64) -> Self { SqlValue::Double(v) } }
-impl From<uuid::Uuid> for SqlValue { fn from(v: uuid::Uuid) -> Self { SqlValue::Uuid(v) } }
-impl From<chrono::DateTime<chrono::Utc>> for SqlValue { fn from(v: chrono::DateTime<chrono::Utc>) -> Self { SqlValue::DateTime(v) } }
-impl From<Vec<u8>> for SqlValue { fn from(v: Vec<u8>) -> Self { SqlValue::Bytes(v) } }
-impl From<serde_json::Value> for SqlValue { fn from(v: serde_json::Value) -> Self { SqlValue::Json(v) } }
+impl From<&str> for SqlValue {
+    fn from(s: &str) -> Self {
+        SqlValue::Text(s.to_string())
+    }
+}
+impl From<String> for SqlValue {
+    fn from(s: String) -> Self {
+        SqlValue::Text(s)
+    }
+}
+impl From<bool> for SqlValue {
+    fn from(v: bool) -> Self {
+        SqlValue::Bool(v)
+    }
+}
+impl From<i16> for SqlValue {
+    fn from(v: i16) -> Self {
+        SqlValue::SmallInt(v)
+    }
+}
+impl From<i32> for SqlValue {
+    fn from(v: i32) -> Self {
+        SqlValue::Int(v)
+    }
+}
+impl From<i64> for SqlValue {
+    fn from(v: i64) -> Self {
+        SqlValue::BigInt(v)
+    }
+}
+impl From<f32> for SqlValue {
+    fn from(v: f32) -> Self {
+        SqlValue::Float(v)
+    }
+}
+impl From<f64> for SqlValue {
+    fn from(v: f64) -> Self {
+        SqlValue::Double(v)
+    }
+}
+impl From<uuid::Uuid> for SqlValue {
+    fn from(v: uuid::Uuid) -> Self {
+        SqlValue::Uuid(v)
+    }
+}
+impl From<chrono::DateTime<chrono::Utc>> for SqlValue {
+    fn from(v: chrono::DateTime<chrono::Utc>) -> Self {
+        SqlValue::DateTime(v)
+    }
+}
+impl From<Vec<u8>> for SqlValue {
+    fn from(v: Vec<u8>) -> Self {
+        SqlValue::Bytes(v)
+    }
+}
+impl From<serde_json::Value> for SqlValue {
+    fn from(v: serde_json::Value) -> Self {
+        SqlValue::Json(v)
+    }
+}
 
 /// Marker trait — implemented by #[derive(Model)] to enable filter() method.
 /// The actual QueryBuilder is in rango-postgres to avoid circular deps.

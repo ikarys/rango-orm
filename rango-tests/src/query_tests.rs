@@ -51,7 +51,11 @@ async fn test_or_connector() {
         .or()
         .eq("role", "mod")
         .explain();
-    assert!(sql.contains("WHERE \"role\" = $1 OR \"role\" = $2"), "got: {}", sql);
+    assert!(
+        sql.contains("WHERE \"role\" = $1 OR \"role\" = $2"),
+        "got: {}",
+        sql
+    );
 }
 
 // ── NOT modifier ──────────────────────────────────────────────────────────────
@@ -69,7 +73,11 @@ async fn test_group_parentheses() {
     let sql = TestQb::filter(&pool())
         .group(|q| q.eq("a", 1i32).or().eq("b", 2i32))
         .explain();
-    assert!(sql.contains("WHERE (\"a\" = $1 OR \"b\" = $2)"), "got: {}", sql);
+    assert!(
+        sql.contains("WHERE (\"a\" = $1 OR \"b\" = $2)"),
+        "got: {}",
+        sql
+    );
 }
 
 // ── ORDER BY ──────────────────────────────────────────────────────────────────
@@ -91,20 +99,32 @@ async fn test_order_by_desc() {
 #[tokio::test]
 async fn test_default_limit() {
     let sql = TestQb::filter(&pool()).explain();
-    assert!(sql.contains("LIMIT 1000"), "default cap should be LIMIT 1000; got: {}", sql);
+    assert!(
+        sql.contains("LIMIT 1000"),
+        "default cap should be LIMIT 1000; got: {}",
+        sql
+    );
 }
 
 #[tokio::test]
 async fn test_explicit_limit() {
     let sql = TestQb::filter(&pool()).limit(50).explain();
     assert!(sql.contains("LIMIT 50"), "got: {}", sql);
-    assert!(!sql.contains("LIMIT 1000"), "should not have default cap; got: {}", sql);
+    assert!(
+        !sql.contains("LIMIT 1000"),
+        "should not have default cap; got: {}",
+        sql
+    );
 }
 
 #[tokio::test]
 async fn test_unlimited_no_limit_clause() {
     let sql = TestQb::filter(&pool()).unlimited().explain();
-    assert!(!sql.contains("LIMIT"), "unlimited() should remove LIMIT clause; got: {}", sql);
+    assert!(
+        !sql.contains("LIMIT"),
+        "unlimited() should remove LIMIT clause; got: {}",
+        sql
+    );
 }
 
 #[tokio::test]
@@ -118,7 +138,11 @@ async fn test_offset() {
 #[tokio::test]
 async fn test_no_filter_no_where() {
     let sql = TestQb::filter(&pool()).explain();
-    assert!(!sql.contains("WHERE"), "no filter should produce no WHERE; got: {}", sql);
+    assert!(
+        !sql.contains("WHERE"),
+        "no filter should produce no WHERE; got: {}",
+        sql
+    );
 }
 
 // ── Full SQL structure ────────────────────────────────────────────────────────

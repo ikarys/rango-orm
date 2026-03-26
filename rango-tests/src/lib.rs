@@ -142,8 +142,16 @@ mod tests {
     #[test]
     fn test_foreign_key_column_type_is_uuid() {
         let schema = Comment::schema();
-        let col = schema.columns.iter().find(|c| c.name == "article_id").unwrap();
-        assert_eq!(col.col_type, ColumnType::Uuid, "FK should map to ColumnType::Uuid");
+        let col = schema
+            .columns
+            .iter()
+            .find(|c| c.name == "article_id")
+            .unwrap();
+        assert_eq!(
+            col.col_type,
+            ColumnType::Uuid,
+            "FK should map to ColumnType::Uuid"
+        );
         assert!(!col.nullable, "FK column should not be nullable");
     }
 
@@ -235,8 +243,15 @@ mod tests {
         assert!(email.unique);
         assert_eq!(email.col_type, ColumnType::Varchar(254));
 
-        let created = schema.columns.iter().find(|c| c.name == "created_at").unwrap();
-        assert!(matches!(created.default, Some(DefaultValue::CurrentTimestamp)));
+        let created = schema
+            .columns
+            .iter()
+            .find(|c| c.name == "created_at")
+            .unwrap();
+        assert!(matches!(
+            created.default,
+            Some(DefaultValue::CurrentTimestamp)
+        ));
     }
 
     // ── managed = false ────────────────────────────────────────────────────────
@@ -270,9 +285,16 @@ mod tests {
     #[test]
     fn test_check_constraint_in_schema() {
         let schema = RichModel::schema();
-        let has_check = schema.constraints.iter().any(|c| matches!(c, Constraint::Check(_)));
+        let has_check = schema
+            .constraints
+            .iter()
+            .any(|c| matches!(c, Constraint::Check(_)));
         assert!(has_check, "schema should contain a CheckConstraint");
-        if let Some(Constraint::Check(cc)) = schema.constraints.iter().find(|c| matches!(c, Constraint::Check(_))) {
+        if let Some(Constraint::Check(cc)) = schema
+            .constraints
+            .iter()
+            .find(|c| matches!(c, Constraint::Check(_)))
+        {
             assert_eq!(cc.sql, "score > 0");
             assert_eq!(cc.name, "score_positive");
         }
@@ -281,9 +303,16 @@ mod tests {
     #[test]
     fn test_unique_constraint_in_schema() {
         let schema = RichModel::schema();
-        let has_unique = schema.constraints.iter().any(|c| matches!(c, Constraint::Unique(_)));
+        let has_unique = schema
+            .constraints
+            .iter()
+            .any(|c| matches!(c, Constraint::Unique(_)));
         assert!(has_unique, "schema should contain a UniqueConstraint");
-        if let Some(Constraint::Unique(uc)) = schema.constraints.iter().find(|c| matches!(c, Constraint::Unique(_))) {
+        if let Some(Constraint::Unique(uc)) = schema
+            .constraints
+            .iter()
+            .find(|c| matches!(c, Constraint::Unique(_)))
+        {
             assert_eq!(uc.fields, vec!["name".to_string()]);
             assert_eq!(uc.name, "name_unique");
             assert!(uc.condition.is_none());
@@ -305,9 +334,16 @@ mod tests {
             schema.columns.iter().any(|c| c.name == "created_at"),
             "mixin-style field created_at should appear in schema",
         );
-        let created = schema.columns.iter().find(|c| c.name == "created_at").unwrap();
+        let created = schema
+            .columns
+            .iter()
+            .find(|c| c.name == "created_at")
+            .unwrap();
         assert_eq!(created.col_type, ColumnType::DateTime);
-        assert!(matches!(created.default, Some(DefaultValue::CurrentTimestamp)));
+        assert!(matches!(
+            created.default,
+            Some(DefaultValue::CurrentTimestamp)
+        ));
     }
 }
 

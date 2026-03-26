@@ -1,4 +1,4 @@
-use std::any::{type_name, Any, TypeId};
+use std::any::{Any, TypeId, type_name};
 use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
 
@@ -37,7 +37,10 @@ pub struct WithRelated<M> {
 
 impl<M> WithRelated<M> {
     pub(crate) fn new(inner: M) -> Self {
-        Self { inner, cache: HashMap::new() }
+        Self {
+            inner,
+            cache: HashMap::new(),
+        }
     }
 
     /// Returns the FK-related instance loaded by `select_related`.
@@ -49,11 +52,13 @@ impl<M> WithRelated<M> {
         self.cache
             .get(&TypeId::of::<R>())
             .and_then(|b| b.downcast_ref::<R>())
-            .unwrap_or_else(|| panic!(
-                "select_related<{ty}> was not loaded; \
+            .unwrap_or_else(|| {
+                panic!(
+                    "select_related<{ty}> was not loaded; \
                  add .select_related::<{ty}>(\"col\") to the QueryBuilder chain",
-                ty = type_name::<R>()
-            ))
+                    ty = type_name::<R>()
+                )
+            })
     }
 
     /// Returns the prefetched slice loaded by `prefetch_related`.
@@ -66,11 +71,13 @@ impl<M> WithRelated<M> {
             .get(&TypeId::of::<Vec<R>>())
             .and_then(|b| b.downcast_ref::<Vec<R>>())
             .map(Vec::as_slice)
-            .unwrap_or_else(|| panic!(
-                "prefetch_related<{ty}> was not loaded; \
+            .unwrap_or_else(|| {
+                panic!(
+                    "prefetch_related<{ty}> was not loaded; \
                  add .prefetch_related::<{ty}>(\"col\") to the QueryBuilder chain",
-                ty = type_name::<R>()
-            ))
+                    ty = type_name::<R>()
+                )
+            })
     }
 
     /// Attach a prefetched one-to-many collection (called by `QueryBuilder::all()`).
@@ -94,9 +101,13 @@ impl<M> WithRelated<M> {
 
 impl<M> Deref for WithRelated<M> {
     type Target = M;
-    fn deref(&self) -> &M { &self.inner }
+    fn deref(&self) -> &M {
+        &self.inner
+    }
 }
 
 impl<M> DerefMut for WithRelated<M> {
-    fn deref_mut(&mut self) -> &mut M { &mut self.inner }
+    fn deref_mut(&mut self) -> &mut M {
+        &mut self.inner
+    }
 }
