@@ -1,6 +1,6 @@
 # Rango ORM
 
-> A Django-inspired ORM for Rust — define structs, not schemas. Change your model, run one command, migrations write themselves.
+> A Django-inspired ORM for Rust. The goal is simple: abstract away the complexity of database queries and deliver a smooth, concise, and enjoyable experience — without sacrificing performance or security.
 
 [![CI](https://github.com/ikarys/rango-orm/actions/workflows/ci.yml/badge.svg)](https://github.com/ikarys/rango-orm/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/ikarys/rango-orm/graph/badge.svg)](https://codecov.io/gh/ikarys/rango-orm)
