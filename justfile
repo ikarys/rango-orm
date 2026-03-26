@@ -15,6 +15,11 @@ db:
 db-stop:
     docker compose down
 
+# Run fmt + clippy checks (same as pre-push hook)
+check:
+    cargo fmt --all -- --check
+    cargo clippy --workspace -- -D warnings
+
 # Run unit tests only (no DB required)
 test:
     cargo test --workspace
