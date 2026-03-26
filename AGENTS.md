@@ -192,6 +192,57 @@ let active_users = User::filter(&pool)
 
 Note : PostgreSQL, MySQL, SQLite passent par SQLx. MSSQL nécessitera un backend séparé basé sur `tiberius`.
 
+## Security Model
+
+### SQL Injection
+
+**Safe by default.** Every QueryBuilder operation uses prepared statements with bound parameters.
+Values are never interpolated into SQL strings — the database driver handles escaping.
+
+```rust
+// Safe — "email" is bound as a parameter, not interpolated
+User::filter(&pool).eq("email", user_input).all().await?;
+// → SELECT * FROM "user" WHERE "email" = $1  (Postgres)
+// → SELECT * FROM "user" WHERE "email" = ?   (SQLite)
+```
+
+**`raw()` is your responsibility.** When you write raw SQL, Rango cannot protect you:
+
+```rust
+// ❌ DANGEROUS — never do this
+let sql = format!("SELECT * FROM users WHERE name = '{}'", user_input);
+rango::raw_execute(&pool, &sql, vec![]).await?;
+
+// ✅ SAFE — always use parameters
+rango::raw_execute(&pool, "SELECT * FROM users WHERE name = $1",
+    vec![SqlValue::Text(user_input)]).await?;
+```
+
+### Credentials
+
+**Never store production credentials in `rango.toml`.**
+The `url` field is optional and intended for local development only.
+In production, always use the `DATABASE_URL` environment variable:
+
+```bash
+# .env (never commit this)
+DATABASE_URL=postgres://user:password@prod-host:5432/mydb
+```
+
+`rango.toml` should only contain the `backend` field in production:
+
+```toml
+[database]
+backend = "postgres"
+# url is read from DATABASE_URL env var
+```
+
+### Backend-specific features
+
+Some features are engine-specific (Postgres JSON operators, full-text search, etc.).
+These are exposed via backend-specific traits (`PgQueryExt`, `SqliteQueryExt`) — not the generic QueryBuilder.
+If you use them, your code is explicitly tied to that backend. No silent portability issues.
+
 ## Style
 
 - No unsafe
