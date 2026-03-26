@@ -34,12 +34,9 @@ pub use rango_derive::ModelMixin;
 
 pub use rango_postgres::PgPool;
 pub use rango_postgres::{
-    all, atomic, transaction, delete, get, get_or_create,
-    insert, update, update_or_create,
-    raw, raw_scalar, raw_execute,
-    M2M, QueryBuilder, RangoFilterExt, WithRelated,
-    RangoExecutor, RangoTransaction,
-    PgQueryExt, Pg,
+    M2M, Pg, PgQueryExt, QueryBuilder, RangoExecutor, RangoFilterExt, RangoTransaction,
+    WithRelated, all, atomic, delete, get, get_or_create, insert, raw, raw_execute, raw_scalar,
+    transaction, update, update_or_create,
 };
 
 pub async fn connect_postgres(config: &DatabaseConfig) -> Result<PgPool, sqlx::Error> {
@@ -56,10 +53,8 @@ pub use rango_sqlite::SqlitePool;
 #[cfg(feature = "sqlite")]
 pub mod sqlite {
     pub use rango_sqlite::{
-        all, delete, get, get_or_create, insert, update, bulk_create,
-        raw, raw_scalar, raw_execute,
-        QueryBuilder, RangoFilterExt,
-        atomic, SqliteTransaction,
+        QueryBuilder, RangoFilterExt, SqliteTransaction, all, atomic, bulk_create, delete, get,
+        get_or_create, insert, raw, raw_execute, raw_scalar, update,
     };
 }
 
@@ -71,21 +66,18 @@ pub async fn connect_sqlite(url: &str) -> anyhow::Result<SqlitePool> {
 // ─── Prelude ──────────────────────────────────────────────────────────────────
 
 pub mod prelude {
+    pub use rango_core::ModelHooks;
     pub use rango_core::*;
     pub use rango_derive::{Model, ModelMixin};
-    pub use rango_core::ModelHooks;
 
     pub use rango_postgres::{
-        all, atomic, transaction, delete, get, get_or_create,
-        insert, update, update_or_create,
-        raw, raw_scalar, raw_execute,
-        PgPool, QueryBuilder, RangoFilterExt, WithRelated, M2M,
-        RangoExecutor, RangoTransaction,
-        PgQueryExt, Pg,
+        M2M, Pg, PgPool, PgQueryExt, QueryBuilder, RangoExecutor, RangoFilterExt, RangoTransaction,
+        WithRelated, all, atomic, delete, get, get_or_create, insert, raw, raw_execute, raw_scalar,
+        transaction, update, update_or_create,
     };
 
     #[cfg(feature = "sqlite")]
-    pub use rango_sqlite::SqlitePool;
-    #[cfg(feature = "sqlite")]
     pub use crate::sqlite::*;
+    #[cfg(feature = "sqlite")]
+    pub use rango_sqlite::SqlitePool;
 }

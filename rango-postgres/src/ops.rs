@@ -4,9 +4,9 @@ use sqlx::{Acquire, Executor, Postgres};
 /// Default maximum rows returned by [`QueryBuilder::all()`].
 /// Override with `.limit(n)` or `.unlimited()`.
 pub const DEFAULT_QUERY_LIMIT: i64 = 1000;
+use anyhow::{Context, Result};
 use sqlx::postgres::PgArguments;
 use sqlx::query::Query;
-use anyhow::{Context, Result};
 
 use crate::executor::RangoExecutor;
 use crate::row::PgRangoRow;
@@ -17,33 +17,33 @@ macro_rules! bind {
     ($q:expr, $val:expr) => {
         match $val {
             // Typed nulls — bind with the correct Rust type so Postgres infers the column type
-            SqlValue::NullBool     => $q.bind(Option::<bool>::None),
+            SqlValue::NullBool => $q.bind(Option::<bool>::None),
             SqlValue::NullSmallInt => $q.bind(Option::<i16>::None),
-            SqlValue::NullInt      => $q.bind(Option::<i32>::None),
-            SqlValue::NullBigInt   => $q.bind(Option::<i64>::None),
-            SqlValue::NullFloat    => $q.bind(Option::<f32>::None),
-            SqlValue::NullDouble   => $q.bind(Option::<f64>::None),
-            SqlValue::NullText     => $q.bind(Option::<String>::None),
-            SqlValue::NullBytes    => $q.bind(Option::<Vec<u8>>::None),
-            SqlValue::NullUuid     => $q.bind(Option::<uuid::Uuid>::None),
+            SqlValue::NullInt => $q.bind(Option::<i32>::None),
+            SqlValue::NullBigInt => $q.bind(Option::<i64>::None),
+            SqlValue::NullFloat => $q.bind(Option::<f32>::None),
+            SqlValue::NullDouble => $q.bind(Option::<f64>::None),
+            SqlValue::NullText => $q.bind(Option::<String>::None),
+            SqlValue::NullBytes => $q.bind(Option::<Vec<u8>>::None),
+            SqlValue::NullUuid => $q.bind(Option::<uuid::Uuid>::None),
             SqlValue::NullDateTime => $q.bind(Option::<chrono::DateTime<chrono::Utc>>::None),
-            SqlValue::NullDate     => $q.bind(Option::<chrono::NaiveDate>::None),
-            SqlValue::NullTime     => $q.bind(Option::<chrono::NaiveTime>::None),
-            SqlValue::NullJson     => $q.bind(Option::<sqlx::types::Json<serde_json::Value>>::None),
+            SqlValue::NullDate => $q.bind(Option::<chrono::NaiveDate>::None),
+            SqlValue::NullTime => $q.bind(Option::<chrono::NaiveTime>::None),
+            SqlValue::NullJson => $q.bind(Option::<sqlx::types::Json<serde_json::Value>>::None),
             // Non-null values
-            SqlValue::Bool(v)      => $q.bind(v),
-            SqlValue::SmallInt(v)  => $q.bind(v),
-            SqlValue::Int(v)       => $q.bind(v),
-            SqlValue::BigInt(v)    => $q.bind(v),
-            SqlValue::Float(v)     => $q.bind(v),
-            SqlValue::Double(v)    => $q.bind(v),
-            SqlValue::Text(v)      => $q.bind(v),
-            SqlValue::Bytes(v)     => $q.bind(v),
-            SqlValue::Uuid(v)      => $q.bind(v),
-            SqlValue::DateTime(v)  => $q.bind(v),
-            SqlValue::Date(v)      => $q.bind(v),
-            SqlValue::Time(v)      => $q.bind(v),
-            SqlValue::Json(v)      => $q.bind(sqlx::types::Json(v)),
+            SqlValue::Bool(v) => $q.bind(v),
+            SqlValue::SmallInt(v) => $q.bind(v),
+            SqlValue::Int(v) => $q.bind(v),
+            SqlValue::BigInt(v) => $q.bind(v),
+            SqlValue::Float(v) => $q.bind(v),
+            SqlValue::Double(v) => $q.bind(v),
+            SqlValue::Text(v) => $q.bind(v),
+            SqlValue::Bytes(v) => $q.bind(v),
+            SqlValue::Uuid(v) => $q.bind(v),
+            SqlValue::DateTime(v) => $q.bind(v),
+            SqlValue::Date(v) => $q.bind(v),
+            SqlValue::Time(v) => $q.bind(v),
+            SqlValue::Json(v) => $q.bind(sqlx::types::Json(v)),
         }
     };
 }
@@ -52,7 +52,9 @@ pub fn bind_sql_values<'q>(
     mut q: Query<'q, Postgres, PgArguments>,
     values: Vec<SqlValue>,
 ) -> Query<'q, Postgres, PgArguments> {
-    for val in values { q = bind!(q, val); }
+    for val in values {
+        q = bind!(q, val);
+    }
     q
 }
 
@@ -80,7 +82,9 @@ where
 {
     let (sql, values) = build_insert_sql::<M>(&model);
     let q = bind_sql_values(sqlx::query(&sql), values);
-    let row = q.fetch_one(executor).await
+    let row = q
+        .fetch_one(executor)
+        .await
         .with_context(|| format!("INSERT into {} failed", M::table_name()))?;
     M::from_row(&PgRangoRow(row)).map_err(|e| anyhow::anyhow!("{}", e))
 }
@@ -93,7 +97,9 @@ where
 {
     let (sql, values) = build_update_sql::<M>(&model);
     let q = bind_sql_values(sqlx::query(&sql), values);
-    let row = q.fetch_one(executor).await
+    let row = q
+        .fetch_one(executor)
+        .await
         .with_context(|| format!("UPDATE {} failed", M::table_name()))?;
     M::from_row(&PgRangoRow(row)).map_err(|e| anyhow::anyhow!("{}", e))
 }
@@ -106,7 +112,8 @@ where
 {
     let (sql, values) = build_delete_sql::<M>(model);
     let q = bind_sql_values(sqlx::query(&sql), values);
-    q.execute(executor).await
+    q.execute(executor)
+        .await
         .map(|_| ())
         .with_context(|| format!("DELETE from {} failed", M::table_name()))
 }
@@ -120,13 +127,18 @@ where
 {
     let sql = format!(
         "SELECT * FROM \"{}\" WHERE \"{}\" = $1 LIMIT 1",
-        M::table_name(), M::pk_column()
+        M::table_name(),
+        M::pk_column()
     );
     let q = bind_sql_values(sqlx::query(&sql), vec![pk.clone()]);
-    let row = q.fetch_optional(executor).await
+    let row = q
+        .fetch_optional(executor)
+        .await
         .with_context(|| format!("GET from {} failed", M::table_name()))?;
     match row {
-        Some(r) => Ok(Some(M::from_row(&PgRangoRow(r)).map_err(|e| anyhow::anyhow!("{}", e))?)),
+        Some(r) => Ok(Some(
+            M::from_row(&PgRangoRow(r)).map_err(|e| anyhow::anyhow!("{}", e))?,
+        )),
         None => Ok(None),
     }
 }
@@ -139,7 +151,9 @@ where
     M: Model + ModelValues + FromRow,
 {
     let sql = format!("SELECT * FROM \"{}\"", M::table_name());
-    let rows = sqlx::query(&sql).fetch_all(executor).await
+    let rows = sqlx::query(&sql)
+        .fetch_all(executor)
+        .await
         .with_context(|| format!("ALL from {} failed", M::table_name()))?;
     rows.into_iter()
         .map(|r| M::from_row(&PgRangoRow(r)).map_err(|e| anyhow::anyhow!("{}", e)))
@@ -176,26 +190,42 @@ where
     A: Acquire<'a, Database = Postgres>,
     M: Model + ModelValues + FromRow,
 {
-    let mut conn = executor.acquire().await
-        .with_context(|| format!("get_or_create: failed to acquire connection for {}", M::table_name()))?;
+    let mut conn = executor.acquire().await.with_context(|| {
+        format!(
+            "get_or_create: failed to acquire connection for {}",
+            M::table_name()
+        )
+    })?;
 
     let conflict_cols: Vec<&str> = lookup.iter().map(|(col, _)| *col).collect();
     let (insert_sql, insert_vals) = build_get_or_create_sql(&defaults, &conflict_cols);
     let q = bind_sql_values(sqlx::query(&insert_sql), insert_vals);
-    let row = q.fetch_optional(&mut *conn).await
+    let row = q
+        .fetch_optional(&mut *conn)
+        .await
         .with_context(|| format!("get_or_create INSERT on {} failed", M::table_name()))?;
 
     if let Some(r) = row {
-        return Ok((M::from_row(&PgRangoRow(r)).map_err(|e| anyhow::anyhow!("{}", e))?, true));
+        return Ok((
+            M::from_row(&PgRangoRow(r)).map_err(|e| anyhow::anyhow!("{}", e))?,
+            true,
+        ));
     }
 
     // Conflict — row already exists; fetch it
     let (select_sql, select_vals) = build_lookup_sql::<M>(&lookup);
     let q = bind_sql_values(sqlx::query(&select_sql), select_vals);
-    let row = q.fetch_one(&mut *conn).await
-        .with_context(|| format!("get_or_create SELECT fallback on {} failed", M::table_name()))?;
+    let row = q.fetch_one(&mut *conn).await.with_context(|| {
+        format!(
+            "get_or_create SELECT fallback on {} failed",
+            M::table_name()
+        )
+    })?;
 
-    Ok((M::from_row(&PgRangoRow(row)).map_err(|e| anyhow::anyhow!("{}", e))?, false))
+    Ok((
+        M::from_row(&PgRangoRow(row)).map_err(|e| anyhow::anyhow!("{}", e))?,
+        false,
+    ))
 }
 
 /// UPDATE OR CREATE.
@@ -213,18 +243,24 @@ where
 {
     let (lookup_sql, lookup_vals) = build_lookup_sql::<M>(&lookup);
     let q = bind_sql_values(sqlx::query(&lookup_sql), lookup_vals);
-    let row = exec.fetch_optional_query(q).await
+    let row = exec
+        .fetch_optional_query(q)
+        .await
         .with_context(|| format!("UPDATE_OR_CREATE lookup on {} failed", M::table_name()))?;
     if row.is_some() {
         let (update_sql, update_vals) = build_update_sql::<M>(&values);
         let q = bind_sql_values(sqlx::query(&update_sql), update_vals);
-        let row = exec.fetch_one_query(q).await
+        let row = exec
+            .fetch_one_query(q)
+            .await
             .with_context(|| format!("UPDATE_OR_CREATE update on {} failed", M::table_name()))?;
         M::from_row(&PgRangoRow(row)).map_err(|e| anyhow::anyhow!("{}", e))
     } else {
         let (insert_sql, insert_vals) = build_insert_sql::<M>(&values);
         let q = bind_sql_values(sqlx::query(&insert_sql), insert_vals);
-        let row = exec.fetch_one_query(q).await
+        let row = exec
+            .fetch_one_query(q)
+            .await
             .with_context(|| format!("UPDATE_OR_CREATE insert on {} failed", M::table_name()))?;
         M::from_row(&PgRangoRow(row)).map_err(|e| anyhow::anyhow!("{}", e))
     }
@@ -241,7 +277,9 @@ fn build_insert_sql<M: Model + ModelValues>(model: &M) -> (String, Vec<SqlValue>
     let placeholders: Vec<String> = (1..=cols.len()).map(|i| format!("${}", i)).collect();
     let sql = format!(
         "INSERT INTO \"{}\" ({}) VALUES ({}) RETURNING *",
-        M::table_name(), cols.join(", "), placeholders.join(", ")
+        M::table_name(),
+        cols.join(", "),
+        placeholders.join(", ")
     );
     let mut values = vec![pk_val];
     values.extend(fields.into_iter().map(|(_, v)| v));
@@ -252,12 +290,17 @@ fn build_update_sql<M: Model + ModelValues>(model: &M) -> (String, Vec<SqlValue>
     let fields = model.field_values();
     let pk_col = M::pk_column();
     let pk_val = model.pk_value();
-    let set_clauses: Vec<String> = fields.iter().enumerate()
+    let set_clauses: Vec<String> = fields
+        .iter()
+        .enumerate()
         .map(|(i, (col, _))| format!("\"{}\" = ${}", col, i + 1))
         .collect();
     let sql = format!(
         "UPDATE \"{}\" SET {} WHERE \"{}\" = ${} RETURNING *",
-        M::table_name(), set_clauses.join(", "), pk_col, fields.len() + 1
+        M::table_name(),
+        set_clauses.join(", "),
+        pk_col,
+        fields.len() + 1
     );
     let mut values: Vec<SqlValue> = fields.into_iter().map(|(_, v)| v).collect();
     values.push(pk_val);
@@ -266,7 +309,11 @@ fn build_update_sql<M: Model + ModelValues>(model: &M) -> (String, Vec<SqlValue>
 
 fn build_delete_sql<M: Model + ModelValues>(model: &M) -> (String, Vec<SqlValue>) {
     (
-        format!("DELETE FROM \"{}\" WHERE \"{}\" = $1", M::table_name(), M::pk_column()),
+        format!(
+            "DELETE FROM \"{}\" WHERE \"{}\" = $1",
+            M::table_name(),
+            M::pk_column()
+        ),
         vec![model.pk_value()],
     )
 }
@@ -281,13 +328,17 @@ fn build_get_or_create_sql<M: Model + ModelValues>(
     let mut cols = vec![format!("\"{}\"", pk_col)];
     cols.extend(fields.iter().map(|(c, _)| format!("\"{}\"", c)));
     let placeholders: Vec<String> = (1..=cols.len()).map(|i| format!("${}", i)).collect();
-    let conflict_clause = conflict_cols.iter()
+    let conflict_clause = conflict_cols
+        .iter()
         .map(|c| format!("\"{}\"", c))
         .collect::<Vec<_>>()
         .join(", ");
     let sql = format!(
         "INSERT INTO \"{}\" ({}) VALUES ({}) ON CONFLICT ({}) DO NOTHING RETURNING *",
-        M::table_name(), cols.join(", "), placeholders.join(", "), conflict_clause
+        M::table_name(),
+        cols.join(", "),
+        placeholders.join(", "),
+        conflict_clause
     );
     let mut values = vec![pk_val];
     values.extend(fields.into_iter().map(|(_, v)| v));
@@ -297,12 +348,15 @@ fn build_get_or_create_sql<M: Model + ModelValues>(
 fn build_lookup_sql<M: Model + ModelValues>(
     lookup: &[(&'static str, SqlValue)],
 ) -> (String, Vec<SqlValue>) {
-    let conditions: Vec<String> = lookup.iter().enumerate()
+    let conditions: Vec<String> = lookup
+        .iter()
+        .enumerate()
         .map(|(i, (col, _))| format!("\"{}\" = ${}", col, i + 1))
         .collect();
     let sql = format!(
         "SELECT * FROM \"{}\" WHERE {} LIMIT 1",
-        M::table_name(), conditions.join(" AND ")
+        M::table_name(),
+        conditions.join(" AND ")
     );
     let values = lookup.iter().map(|(_, v)| v.clone()).collect();
     (sql, values)
@@ -324,10 +378,16 @@ where
     A: Acquire<'a, Database = Postgres>,
     M: Model + ModelValues,
 {
-    if models.is_empty() { return Ok(0); }
+    if models.is_empty() {
+        return Ok(0);
+    }
 
-    let mut conn = executor.acquire().await
-        .with_context(|| format!("bulk_create: failed to acquire connection for {}", M::table_name()))?;
+    let mut conn = executor.acquire().await.with_context(|| {
+        format!(
+            "bulk_create: failed to acquire connection for {}",
+            M::table_name()
+        )
+    })?;
 
     let n_cols = 1 + models[0].field_values().len();
     let chunk_size = (65535 / n_cols).max(1);
@@ -336,7 +396,9 @@ where
     for chunk in models.chunks(chunk_size) {
         let (sql, values) = build_bulk_create_sql::<M>(chunk);
         let q = bind_sql_values(sqlx::query(&sql), values);
-        let result = q.execute(&mut *conn).await
+        let result = q
+            .execute(&mut *conn)
+            .await
             .with_context(|| format!("bulk_create on {} failed", M::table_name()))?;
         total += result.rows_affected() as usize;
     }
@@ -358,10 +420,16 @@ where
     A: Acquire<'a, Database = Postgres>,
     M: Model + ModelValues,
 {
-    if models.is_empty() || fields.is_empty() { return Ok(0); }
+    if models.is_empty() || fields.is_empty() {
+        return Ok(0);
+    }
 
-    let mut conn = executor.acquire().await
-        .with_context(|| format!("bulk_update: failed to acquire connection for {}", M::table_name()))?;
+    let mut conn = executor.acquire().await.with_context(|| {
+        format!(
+            "bulk_update: failed to acquire connection for {}",
+            M::table_name()
+        )
+    })?;
 
     let n_cols = fields.len() + 1; // +1 for pk
     let chunk_size = (65535 / n_cols).max(1);
@@ -370,7 +438,9 @@ where
     for chunk in models.chunks(chunk_size) {
         let (sql, values) = build_bulk_update_sql::<M>(chunk, fields);
         let q = bind_sql_values(sqlx::query(&sql), values);
-        let result = q.execute(&mut *conn).await
+        let result = q
+            .execute(&mut *conn)
+            .await
             .with_context(|| format!("bulk_update on {} failed", M::table_name()))?;
         total += result.rows_affected() as usize;
     }
@@ -393,10 +463,16 @@ where
     A: Acquire<'a, Database = Postgres>,
     M: Model + ModelValues,
 {
-    if models.is_empty() { return Ok(0); }
+    if models.is_empty() {
+        return Ok(0);
+    }
 
-    let mut conn = executor.acquire().await
-        .with_context(|| format!("bulk_upsert: failed to acquire connection for {}", M::table_name()))?;
+    let mut conn = executor.acquire().await.with_context(|| {
+        format!(
+            "bulk_upsert: failed to acquire connection for {}",
+            M::table_name()
+        )
+    })?;
 
     let n_cols = 1 + models[0].field_values().len();
     let chunk_size = (65535 / n_cols).max(1);
@@ -405,7 +481,9 @@ where
     for chunk in models.chunks(chunk_size) {
         let (sql, values) = build_bulk_upsert_sql::<M>(chunk, conflict_on);
         let q = bind_sql_values(sqlx::query(&sql), values);
-        let result = q.execute(&mut *conn).await
+        let result = q
+            .execute(&mut *conn)
+            .await
             .with_context(|| format!("bulk_upsert on {} failed", M::table_name()))?;
         total += result.rows_affected() as usize;
     }
@@ -416,24 +494,32 @@ where
 
 fn sql_type_cast(val: &SqlValue) -> &'static str {
     match val {
-        SqlValue::NullBool | SqlValue::NullSmallInt | SqlValue::NullInt |
-        SqlValue::NullBigInt | SqlValue::NullFloat | SqlValue::NullDouble |
-        SqlValue::NullText | SqlValue::NullBytes | SqlValue::NullUuid |
-        SqlValue::NullDateTime | SqlValue::NullDate | SqlValue::NullTime |
-        SqlValue::NullJson    => "::text",
-        SqlValue::Bool(_)     => "::bool",
+        SqlValue::NullBool
+        | SqlValue::NullSmallInt
+        | SqlValue::NullInt
+        | SqlValue::NullBigInt
+        | SqlValue::NullFloat
+        | SqlValue::NullDouble
+        | SqlValue::NullText
+        | SqlValue::NullBytes
+        | SqlValue::NullUuid
+        | SqlValue::NullDateTime
+        | SqlValue::NullDate
+        | SqlValue::NullTime
+        | SqlValue::NullJson => "::text",
+        SqlValue::Bool(_) => "::bool",
         SqlValue::SmallInt(_) => "::int2",
-        SqlValue::Int(_)      => "::int4",
-        SqlValue::BigInt(_)   => "::int8",
-        SqlValue::Float(_)    => "::float4",
-        SqlValue::Double(_)   => "::float8",
-        SqlValue::Text(_)     => "::text",
-        SqlValue::Bytes(_)    => "::bytea",
-        SqlValue::Uuid(_)     => "::uuid",
+        SqlValue::Int(_) => "::int4",
+        SqlValue::BigInt(_) => "::int8",
+        SqlValue::Float(_) => "::float4",
+        SqlValue::Double(_) => "::float8",
+        SqlValue::Text(_) => "::text",
+        SqlValue::Bytes(_) => "::bytea",
+        SqlValue::Uuid(_) => "::uuid",
         SqlValue::DateTime(_) => "::timestamptz",
-        SqlValue::Date(_)     => "::date",
-        SqlValue::Time(_)     => "::time",
-        SqlValue::Json(_)     => "::jsonb",
+        SqlValue::Date(_) => "::date",
+        SqlValue::Time(_) => "::time",
+        SqlValue::Json(_) => "::jsonb",
     }
 }
 
@@ -466,12 +552,17 @@ fn build_bulk_create_sql<M: Model + ModelValues>(models: &[M]) -> (String, Vec<S
 
     let sql = format!(
         "INSERT INTO \"{}\" ({}) VALUES {}",
-        M::table_name(), cols.join(", "), row_placeholders.join(", "),
+        M::table_name(),
+        cols.join(", "),
+        row_placeholders.join(", "),
     );
     (sql, all_values)
 }
 
-fn build_bulk_update_sql<M: Model + ModelValues>(models: &[M], fields: &[&str]) -> (String, Vec<SqlValue>) {
+fn build_bulk_update_sql<M: Model + ModelValues>(
+    models: &[M],
+    fields: &[&str],
+) -> (String, Vec<SqlValue>) {
     let table = M::table_name();
     let pk_col = M::pk_column();
 
@@ -487,7 +578,8 @@ fn build_bulk_update_sql<M: Model + ModelValues>(models: &[M], fields: &[&str]) 
         let mut ph: Vec<String> = Vec::new();
 
         for f in fields.iter() {
-            let val = model_fields.iter()
+            let val = model_fields
+                .iter()
                 .find(|(c, _)| c == f)
                 .map(|(_, v)| v.clone())
                 .unwrap_or(SqlValue::NullText);
@@ -505,11 +597,13 @@ fn build_bulk_update_sql<M: Model + ModelValues>(models: &[M], fields: &[&str]) 
         row_placeholders.push(format!("({})", ph.join(", ")));
     }
 
-    let set_clauses: Vec<String> = fields.iter()
+    let set_clauses: Vec<String> = fields
+        .iter()
         .map(|f| format!("\"{}\" = v.\"{}\"", f, f))
         .collect();
 
-    let alias_cols: Vec<String> = fields.iter()
+    let alias_cols: Vec<String> = fields
+        .iter()
         .map(|f| format!("\"{}\"", f))
         .chain(std::iter::once(format!("\"{}\"", pk_col)))
         .collect();
@@ -541,7 +635,9 @@ where
     M: FromRow,
 {
     let q = bind_sql_values(sqlx::query(sql), params);
-    let rows = q.fetch_all(executor).await
+    let rows = q
+        .fetch_all(executor)
+        .await
         .with_context(|| format!("raw query failed: {}", sql))?;
     rows.into_iter()
         .map(|r| M::from_row(&PgRangoRow(r)).map_err(|e| anyhow::anyhow!("{}", e)))
@@ -556,9 +652,12 @@ where
 {
     use sqlx::Row;
     let q = bind_sql_values(sqlx::query(sql), params);
-    let row = q.fetch_one(executor).await
+    let row = q
+        .fetch_one(executor)
+        .await
         .with_context(|| format!("raw_scalar query failed: {}", sql))?;
-    row.try_get::<T, _>(0).map_err(|e| anyhow::anyhow!("raw_scalar decode: {}", e))
+    row.try_get::<T, _>(0)
+        .map_err(|e| anyhow::anyhow!("raw_scalar decode: {}", e))
 }
 
 /// Execute a raw SQL statement (INSERT/UPDATE/DELETE/DDL) — returns rows affected.
@@ -567,19 +666,24 @@ where
     E: Executor<'e, Database = Postgres>,
 {
     let q = bind_sql_values(sqlx::query(sql), params);
-    q.execute(executor).await
+    q.execute(executor)
+        .await
         .map(|r| r.rows_affected())
         .with_context(|| format!("raw_execute failed: {}", sql))
 }
 
-fn build_bulk_upsert_sql<M: Model + ModelValues>(models: &[M], conflict_on: &[&str]) -> (String, Vec<SqlValue>) {
+fn build_bulk_upsert_sql<M: Model + ModelValues>(
+    models: &[M],
+    conflict_on: &[&str],
+) -> (String, Vec<SqlValue>) {
     let pk_col = M::pk_column();
     let sample = models[0].field_values();
 
     let mut cols = vec![format!("\"{}\"", pk_col)];
     cols.extend(sample.iter().map(|(c, _)| format!("\"{}\"", c)));
 
-    let update_cols: Vec<String> = sample.iter()
+    let update_cols: Vec<String> = sample
+        .iter()
         .filter(|(c, _)| !conflict_on.contains(c))
         .map(|(c, _)| format!("\"{}\" = EXCLUDED.\"{}\"", c, c))
         .collect();
@@ -604,7 +708,8 @@ fn build_bulk_upsert_sql<M: Model + ModelValues>(models: &[M], conflict_on: &[&s
         row_placeholders.push(format!("({})", ph.join(", ")));
     }
 
-    let conflict_clause = conflict_on.iter()
+    let conflict_clause = conflict_on
+        .iter()
         .map(|c| format!("\"{}\"", c))
         .collect::<Vec<_>>()
         .join(", ");
@@ -612,12 +717,19 @@ fn build_bulk_upsert_sql<M: Model + ModelValues>(models: &[M], conflict_on: &[&s
     let sql = if update_cols.is_empty() {
         format!(
             "INSERT INTO \"{}\" ({}) VALUES {} ON CONFLICT ({}) DO NOTHING",
-            M::table_name(), cols.join(", "), row_placeholders.join(", "), conflict_clause,
+            M::table_name(),
+            cols.join(", "),
+            row_placeholders.join(", "),
+            conflict_clause,
         )
     } else {
         format!(
             "INSERT INTO \"{}\" ({}) VALUES {} ON CONFLICT ({}) DO UPDATE SET {}",
-            M::table_name(), cols.join(", "), row_placeholders.join(", "), conflict_clause, update_cols.join(", "),
+            M::table_name(),
+            cols.join(", "),
+            row_placeholders.join(", "),
+            conflict_clause,
+            update_cols.join(", "),
         )
     };
     (sql, all_values)

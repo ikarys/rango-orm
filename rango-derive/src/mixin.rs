@@ -1,7 +1,7 @@
+use crate::rango_core_path;
 use proc_macro2::TokenStream;
 use quote::quote;
 use syn::{DeriveInput, Result};
-use crate::rango_core_path;
 
 /// Expand `#[derive(ModelMixin)]`.
 pub fn expand(input: DeriveInput) -> Result<TokenStream> {

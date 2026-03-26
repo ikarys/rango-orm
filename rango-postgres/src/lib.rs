@@ -1,24 +1,27 @@
 pub mod executor;
 pub mod m2m;
-pub mod pg_ext;
-pub mod related;
 mod ops;
+pub mod pg_ext;
 mod query_builder;
+pub mod related;
 mod row;
 mod transaction;
 
 use rango_core::DatabaseConfig;
-use sqlx::{postgres::PgPoolOptions, Executor};
+use sqlx::{Executor, postgres::PgPoolOptions};
 use std::time::Duration;
 
-pub use sqlx::PgPool;
-pub use ops::{all, delete, get, get_or_create, insert, update, update_or_create, bulk_create, bulk_update, bulk_upsert, raw, raw_scalar, raw_execute};
-pub use transaction::{atomic, transaction, RangoTransaction};
 pub use executor::RangoExecutor;
 pub use m2m::M2M;
+pub use ops::{
+    all, bulk_create, bulk_update, bulk_upsert, delete, get, get_or_create, insert, raw,
+    raw_execute, raw_scalar, update, update_or_create,
+};
+pub use pg_ext::{Pg, PgQueryExt};
 pub use query_builder::QueryBuilder;
 pub use related::WithRelated;
-pub use pg_ext::{PgQueryExt, Pg};
+pub use sqlx::PgPool;
+pub use transaction::{RangoTransaction, atomic, transaction};
 
 use rango_core::{Filterable, FromRow, Model, ModelValues};
 

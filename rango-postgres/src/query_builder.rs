@@ -1,9 +1,9 @@
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
 
+use anyhow::Result;
 use rango_core::{FromRow, Model, ModelValues, RowError, SqlValue};
 use sqlx::{PgPool, Postgres};
-use anyhow::Result;
 
 use crate::ops::DEFAULT_QUERY_LIMIT;
 use crate::related::WithRelated;
@@ -18,7 +18,17 @@ type CollectVecFn = fn(Vec<Box<dyn Any + Send + Sync>>) -> Box<dyn Any + Send + 
 
 #[derive(Debug, Clone)]
 enum Op {
-    Eq, Ne, Gt, Gte, Lt, Lte, Like, ILike, In, IsNull, IsNotNull,
+    Eq,
+    Ne,
+    Gt,
+    Gte,
+    Lt,
+    Lte,
+    Like,
+    ILike,
+    In,
+    IsNull,
+    IsNotNull,
 }
 
 #[derive(Debug, Clone)]
@@ -26,11 +36,17 @@ struct Condition {
     column: String,
     op: Op,
     value: Option<SqlValue>,
-    values: Option<Vec<SqlValue>>,  // for IN
+    values: Option<Vec<SqlValue>>, // for IN
 }
 
 #[derive(Debug, Clone)]
-enum Connector { And, Or, AndNot, OrNot, Xor }
+enum Connector {
+    And,
+    Or,
+    AndNot,
+    OrNot,
+    Xor,
+}
 
 #[derive(Debug, Clone)]
 enum ConditionNode {
@@ -358,7 +374,10 @@ where
         let (where_clause, binds) = self.build_where();
 
         let mut sql = format!("SELECT * FROM \"{}\"", table);
-        if !where_clause.is_empty() { sql.push(' '); sql.push_str(&where_clause); }
+        if !where_clause.is_empty() {
+            sql.push(' ');
+            sql.push_str(&where_clause);
+        }
         if !self.order_by.is_empty() {
             sql.push_str(&format!(" ORDER BY {}", self.order_by.join(", ")));
         }
@@ -369,7 +388,9 @@ where
             sql.push_str(&format!(" LIMIT {}", l));
         }
         // explicit_limit=true, limit=None → .unlimited() was called; no LIMIT clause added
-        if let Some(o) = self.offset { sql.push_str(&format!(" OFFSET {}", o)); }
+        if let Some(o) = self.offset {
+            sql.push_str(&format!(" OFFSET {}", o));
+        }
 
         let rows = bind_and_fetch_all(&self.pool, &sql, binds).await?;
         let mut results: Vec<WithRelated<M>> = rows
@@ -400,19 +421,24 @@ where
                 })
                 .collect();
 
-            if indexed_fks.is_empty() { continue; }
+            if indexed_fks.is_empty() {
+                continue;
+            }
 
             // Deduplicate FK values while preserving order.
             let mut seen: Vec<String> = Vec::new();
             let mut unique_vals: Vec<SqlValue> = Vec::new();
             for (_, v) in &indexed_fks {
                 if let Some(k) = sql_value_key(v)
-                    && !seen.contains(&k) {
-                        seen.push(k);
-                        unique_vals.push(v.clone());
-                    }
+                    && !seen.contains(&k)
+                {
+                    seen.push(k);
+                    unique_vals.push(v.clone());
+                }
             }
-            if unique_vals.is_empty() { continue; }
+            if unique_vals.is_empty() {
+                continue;
+            }
 
             let placeholders: Vec<String> =
                 (1..=unique_vals.len()).map(|i| format!("${}", i)).collect();
@@ -435,11 +461,12 @@ where
 
             for (i, fk_val) in &indexed_fks {
                 if let Some(fk_key) = sql_value_key(fk_val)
-                    && let Some(row) = row_by_pk.get(&fk_key) {
-                        let boxed = (spec.from_row)(&PgRangoRow2::new(row))
-                            .map_err(|e| anyhow::anyhow!("select_related({}): {}", spec.fk_col, e))?;
-                        results[*i].insert_raw(spec.type_id, boxed);
-                    }
+                    && let Some(row) = row_by_pk.get(&fk_key)
+                {
+                    let boxed = (spec.from_row)(&PgRangoRow2::new(row))
+                        .map_err(|e| anyhow::anyhow!("select_related({}): {}", spec.fk_col, e))?;
+                    results[*i].insert_raw(spec.type_id, boxed);
+                }
             }
         }
 
@@ -455,12 +482,15 @@ where
             let mut unique_pks: Vec<SqlValue> = Vec::new();
             for (_, v) in &indexed_pks {
                 if let Some(k) = sql_value_key(v)
-                    && !seen.contains(&k) {
-                        seen.push(k);
-                        unique_pks.push(v.clone());
-                    }
+                    && !seen.contains(&k)
+                {
+                    seen.push(k);
+                    unique_pks.push(v.clone());
+                }
             }
-            if unique_pks.is_empty() { continue; }
+            if unique_pks.is_empty() {
+                continue;
+            }
 
             let placeholders: Vec<String> =
                 (1..=unique_pks.len()).map(|i| format!("${}", i)).collect();
@@ -477,8 +507,9 @@ where
             let mut grouped: HashMap<String, Vec<Box<dyn Any + Send + Sync>>> = HashMap::new();
             for row in &prefetch_rows {
                 if let Some(fk_key) = extract_key_from_row(row, &spec.related_fk_col) {
-                    let boxed = (spec.from_row)(&PgRangoRow2::new(row))
-                        .map_err(|e| anyhow::anyhow!("prefetch_related({}): {}", spec.related_fk_col, e))?;
+                    let boxed = (spec.from_row)(&PgRangoRow2::new(row)).map_err(|e| {
+                        anyhow::anyhow!("prefetch_related({}): {}", spec.related_fk_col, e)
+                    })?;
                     grouped.entry(fk_key).or_default().push(boxed);
                 }
             }
@@ -502,7 +533,10 @@ where
         let (where_clause, binds) = self.build_where();
 
         let mut sql = format!("SELECT * FROM \"{}\"", table);
-        if !where_clause.is_empty() { sql.push(' '); sql.push_str(&where_clause); }
+        if !where_clause.is_empty() {
+            sql.push(' ');
+            sql.push_str(&where_clause);
+        }
         sql.push_str(" LIMIT 1");
 
         let rows = bind_and_fetch_all(&self.pool, &sql, binds).await?;
@@ -522,7 +556,10 @@ where
         let (where_clause, binds) = self.build_where();
 
         let mut sql = format!("SELECT COUNT(*) FROM \"{}\"", table);
-        if !where_clause.is_empty() { sql.push(' '); sql.push_str(&where_clause); }
+        if !where_clause.is_empty() {
+            sql.push(' ');
+            sql.push_str(&where_clause);
+        }
 
         let row = bind_and_fetch_one(&self.pool, &sql, binds).await?;
         Ok(row.try_get::<i64, _>(0).unwrap_or(0))
@@ -548,62 +585,101 @@ where
     ///     println!("{:?}", row["email"]);
     /// }
     /// ```
-    pub async fn values(self, cols: &[&str]) -> Result<Vec<std::collections::HashMap<String, SqlValue>>> {
+    pub async fn values(
+        self,
+        cols: &[&str],
+    ) -> Result<Vec<std::collections::HashMap<String, SqlValue>>> {
         use sqlx::Row;
         let table = M::table_name();
         let (where_clause, binds) = self.build_where();
 
-        let col_list = cols.iter()
+        let col_list = cols
+            .iter()
             .map(|c| format!("\"{}\"", c))
             .collect::<Vec<_>>()
             .join(", ");
 
         let mut sql = format!("SELECT {} FROM \"{}\"", col_list, table);
-        if !where_clause.is_empty() { sql.push(' '); sql.push_str(&where_clause); }
+        if !where_clause.is_empty() {
+            sql.push(' ');
+            sql.push_str(&where_clause);
+        }
         if !self.order_by.is_empty() {
             sql.push_str(&format!(" ORDER BY {}", self.order_by.join(", ")));
         }
-        if !self.explicit_limit { sql.push_str(&format!(" LIMIT {}", DEFAULT_QUERY_LIMIT)); }
-        else if let Some(l) = self.limit { sql.push_str(&format!(" LIMIT {}", l)); }
-        if let Some(o) = self.offset { sql.push_str(&format!(" OFFSET {}", o)); }
+        if !self.explicit_limit {
+            sql.push_str(&format!(" LIMIT {}", DEFAULT_QUERY_LIMIT));
+        } else if let Some(l) = self.limit {
+            sql.push_str(&format!(" LIMIT {}", l));
+        }
+        if let Some(o) = self.offset {
+            sql.push_str(&format!(" OFFSET {}", o));
+        }
 
         let rows = bind_and_fetch_all(&self.pool, &sql, binds).await?;
 
-        rows.into_iter().map(|row| {
-            use sqlx::{Column, TypeInfo};
-            let mut map = std::collections::HashMap::new();
-            for &col in cols {
-                let type_name = row.column(col).type_info().name().to_uppercase();
-                let val: SqlValue = match type_name.as_str() {
-                    "BOOL" => row.try_get::<Option<bool>, _>(col).ok()
-                        .map(|v| v.map(SqlValue::Bool).unwrap_or(SqlValue::NullBool))
-                        .unwrap_or(SqlValue::NullBool),
-                    "INT2" => row.try_get::<Option<i16>, _>(col).ok()
-                        .map(|v| v.map(|n| SqlValue::BigInt(n as i64)).unwrap_or(SqlValue::NullBigInt))
-                        .unwrap_or(SqlValue::NullBigInt),
-                    "INT4" | "SERIAL" => row.try_get::<Option<i32>, _>(col).ok()
-                        .map(|v| v.map(|n| SqlValue::BigInt(n as i64)).unwrap_or(SqlValue::NullBigInt))
-                        .unwrap_or(SqlValue::NullBigInt),
-                    "INT8" | "BIGSERIAL" => row.try_get::<Option<i64>, _>(col).ok()
-                        .map(|v| v.map(SqlValue::BigInt).unwrap_or(SqlValue::NullBigInt))
-                        .unwrap_or(SqlValue::NullBigInt),
-                    "FLOAT4" => row.try_get::<Option<f32>, _>(col).ok()
-                        .map(|v| v.map(|n| SqlValue::Double(n as f64)).unwrap_or(SqlValue::NullDouble))
-                        .unwrap_or(SqlValue::NullDouble),
-                    "FLOAT8" | "NUMERIC" => row.try_get::<Option<f64>, _>(col).ok()
-                        .map(|v| v.map(SqlValue::Double).unwrap_or(SqlValue::NullDouble))
-                        .unwrap_or(SqlValue::NullDouble),
-                    "UUID" => row.try_get::<Option<uuid::Uuid>, _>(col).ok()
-                        .map(|v| v.map(SqlValue::Uuid).unwrap_or(SqlValue::NullUuid))
-                        .unwrap_or(SqlValue::NullUuid),
-                    _ => row.try_get::<Option<String>, _>(col).ok()
-                        .map(|v| v.map(SqlValue::Text).unwrap_or(SqlValue::NullText))
-                        .unwrap_or(SqlValue::NullText),
-                };
-                map.insert(col.to_string(), val);
-            }
-            Ok(map)
-        }).collect()
+        rows.into_iter()
+            .map(|row| {
+                use sqlx::{Column, TypeInfo};
+                let mut map = std::collections::HashMap::new();
+                for &col in cols {
+                    let type_name = row.column(col).type_info().name().to_uppercase();
+                    let val: SqlValue = match type_name.as_str() {
+                        "BOOL" => row
+                            .try_get::<Option<bool>, _>(col)
+                            .ok()
+                            .map(|v| v.map(SqlValue::Bool).unwrap_or(SqlValue::NullBool))
+                            .unwrap_or(SqlValue::NullBool),
+                        "INT2" => row
+                            .try_get::<Option<i16>, _>(col)
+                            .ok()
+                            .map(|v| {
+                                v.map(|n| SqlValue::BigInt(n as i64))
+                                    .unwrap_or(SqlValue::NullBigInt)
+                            })
+                            .unwrap_or(SqlValue::NullBigInt),
+                        "INT4" | "SERIAL" => row
+                            .try_get::<Option<i32>, _>(col)
+                            .ok()
+                            .map(|v| {
+                                v.map(|n| SqlValue::BigInt(n as i64))
+                                    .unwrap_or(SqlValue::NullBigInt)
+                            })
+                            .unwrap_or(SqlValue::NullBigInt),
+                        "INT8" | "BIGSERIAL" => row
+                            .try_get::<Option<i64>, _>(col)
+                            .ok()
+                            .map(|v| v.map(SqlValue::BigInt).unwrap_or(SqlValue::NullBigInt))
+                            .unwrap_or(SqlValue::NullBigInt),
+                        "FLOAT4" => row
+                            .try_get::<Option<f32>, _>(col)
+                            .ok()
+                            .map(|v| {
+                                v.map(|n| SqlValue::Double(n as f64))
+                                    .unwrap_or(SqlValue::NullDouble)
+                            })
+                            .unwrap_or(SqlValue::NullDouble),
+                        "FLOAT8" | "NUMERIC" => row
+                            .try_get::<Option<f64>, _>(col)
+                            .ok()
+                            .map(|v| v.map(SqlValue::Double).unwrap_or(SqlValue::NullDouble))
+                            .unwrap_or(SqlValue::NullDouble),
+                        "UUID" => row
+                            .try_get::<Option<uuid::Uuid>, _>(col)
+                            .ok()
+                            .map(|v| v.map(SqlValue::Uuid).unwrap_or(SqlValue::NullUuid))
+                            .unwrap_or(SqlValue::NullUuid),
+                        _ => row
+                            .try_get::<Option<String>, _>(col)
+                            .ok()
+                            .map(|v| v.map(SqlValue::Text).unwrap_or(SqlValue::NullText))
+                            .unwrap_or(SqlValue::NullText),
+                    };
+                    map.insert(col.to_string(), val);
+                }
+                Ok(map)
+            })
+            .collect()
     }
 
     /// SELECT SUM(col) FROM ... WHERE ... — returns None if the table is empty or all values are NULL.
@@ -611,7 +687,10 @@ where
         let table = M::table_name();
         let (where_clause, binds) = self.build_where();
         let mut sql = format!("SELECT SUM(\"{}\")::float8 FROM \"{}\"", col, table);
-        if !where_clause.is_empty() { sql.push(' '); sql.push_str(&where_clause); }
+        if !where_clause.is_empty() {
+            sql.push(' ');
+            sql.push_str(&where_clause);
+        }
         let row = bind_and_fetch_one(&self.pool, &sql, binds).await?;
         Ok(row.try_get::<Option<f64>, _>(0).unwrap_or(None))
     }
@@ -621,7 +700,10 @@ where
         let table = M::table_name();
         let (where_clause, binds) = self.build_where();
         let mut sql = format!("SELECT AVG(\"{}\")::float8 FROM \"{}\"", col, table);
-        if !where_clause.is_empty() { sql.push(' '); sql.push_str(&where_clause); }
+        if !where_clause.is_empty() {
+            sql.push(' ');
+            sql.push_str(&where_clause);
+        }
         let row = bind_and_fetch_one(&self.pool, &sql, binds).await?;
         Ok(row.try_get::<Option<f64>, _>(0).unwrap_or(None))
     }
@@ -643,7 +725,10 @@ where
         let table = M::table_name();
         let (where_clause, binds) = self.build_where();
         let mut sql = format!("SELECT MIN(\"{}\") FROM \"{}\"", col, table);
-        if !where_clause.is_empty() { sql.push(' '); sql.push_str(&where_clause); }
+        if !where_clause.is_empty() {
+            sql.push(' ');
+            sql.push_str(&where_clause);
+        }
         let row = bind_and_fetch_one(&self.pool, &sql, binds).await?;
         Ok(row.try_get::<Option<T>, _>(0).unwrap_or(None))
     }
@@ -665,7 +750,10 @@ where
         let table = M::table_name();
         let (where_clause, binds) = self.build_where();
         let mut sql = format!("SELECT MAX(\"{}\") FROM \"{}\"", col, table);
-        if !where_clause.is_empty() { sql.push(' '); sql.push_str(&where_clause); }
+        if !where_clause.is_empty() {
+            sql.push(' ');
+            sql.push_str(&where_clause);
+        }
         let row = bind_and_fetch_one(&self.pool, &sql, binds).await?;
         Ok(row.try_get::<Option<T>, _>(0).unwrap_or(None))
     }
@@ -675,13 +763,21 @@ where
         let table = M::table_name();
         let (where_clause, _) = self.build_where();
         let mut sql = format!("SELECT * FROM \"{}\"", table);
-        if !where_clause.is_empty() { sql.push(' '); sql.push_str(&where_clause); }
+        if !where_clause.is_empty() {
+            sql.push(' ');
+            sql.push_str(&where_clause);
+        }
         if !self.order_by.is_empty() {
             sql.push_str(&format!(" ORDER BY {}", self.order_by.join(", ")));
         }
-        if let Some(l) = self.limit { sql.push_str(&format!(" LIMIT {}", l)); }
-        else if !self.explicit_limit { sql.push_str(&format!(" LIMIT {}", DEFAULT_QUERY_LIMIT)); }
-        if let Some(o) = self.offset { sql.push_str(&format!(" OFFSET {}", o)); }
+        if let Some(l) = self.limit {
+            sql.push_str(&format!(" LIMIT {}", l));
+        } else if !self.explicit_limit {
+            sql.push_str(&format!(" LIMIT {}", DEFAULT_QUERY_LIMIT));
+        }
+        if let Some(o) = self.offset {
+            sql.push_str(&format!(" OFFSET {}", o));
+        }
         sql
     }
 
@@ -696,10 +792,21 @@ where
 
     // ── Internals ─────────────────────────────────────────────────────────────
 
-    fn add(mut self, col: &str, op: Op, value: Option<SqlValue>, values: Option<Vec<SqlValue>>) -> Self {
+    fn add(
+        mut self,
+        col: &str,
+        op: Op,
+        value: Option<SqlValue>,
+        values: Option<Vec<SqlValue>>,
+    ) -> Self {
         let connector = std::mem::replace(&mut self.next_connector, Connector::And);
         self.conditions.push(ConditionGroup {
-            node: ConditionNode::Single(Condition { column: col.to_string(), op, value, values }),
+            node: ConditionNode::Single(Condition {
+                column: col.to_string(),
+                op,
+                value,
+                values,
+            }),
             connector,
         });
         self
@@ -739,7 +846,9 @@ where
 
 // ─── Type-erased helpers (monomorphized at call site) ─────────────────────────
 
-fn erased_from_row<R>(row: &dyn rango_core::RangoRow) -> Result<Box<dyn Any + Send + Sync>, RowError>
+fn erased_from_row<R>(
+    row: &dyn rango_core::RangoRow,
+) -> Result<Box<dyn Any + Send + Sync>, RowError>
 where
     R: FromRow + Send + Sync + 'static,
 {
@@ -752,14 +861,21 @@ where
 {
     let typed: Vec<R> = items
         .into_iter()
-        .map(|b| *b.downcast::<R>().expect("prefetch_related type mismatch — this is a bug"))
+        .map(|b| {
+            *b.downcast::<R>()
+                .expect("prefetch_related type mismatch — this is a bug")
+        })
         .collect();
     Box::new(typed) as Box<dyn Any + Send + Sync>
 }
 
 // ─── SQL builder helpers ──────────────────────────────────────────────────────
 
-fn build_conditions(groups: &[ConditionGroup], binds: &mut Vec<SqlValue>, idx: &mut usize) -> String {
+fn build_conditions(
+    groups: &[ConditionGroup],
+    binds: &mut Vec<SqlValue>,
+    idx: &mut usize,
+) -> String {
     let mut parts = Vec::new();
     for (i, cg) in groups.iter().enumerate() {
         let expr = match &cg.node {
@@ -774,11 +890,11 @@ fn build_conditions(groups: &[ConditionGroup], binds: &mut Vec<SqlValue>, idx: &
             parts.push(expr);
         } else {
             let conn = match &cg.connector {
-                Connector::And    => format!("AND {}", expr),
-                Connector::Or     => format!("OR {}", expr),
+                Connector::And => format!("AND {}", expr),
+                Connector::Or => format!("OR {}", expr),
                 Connector::AndNot => format!("AND NOT {}", expr),
-                Connector::OrNot  => format!("OR NOT {}", expr),
-                Connector::Xor    => format!("XOR {}", expr),
+                Connector::OrNot => format!("OR NOT {}", expr),
+                Connector::Xor => format!("XOR {}", expr),
             };
             parts.push(conn);
         }
@@ -789,29 +905,35 @@ fn build_conditions(groups: &[ConditionGroup], binds: &mut Vec<SqlValue>, idx: &
 fn build_condition(c: &Condition, binds: &mut Vec<SqlValue>, idx: &mut usize) -> String {
     let col = format!("\"{}\"", c.column);
     match &c.op {
-        Op::IsNull    => format!("{} IS NULL", col),
+        Op::IsNull => format!("{} IS NULL", col),
         Op::IsNotNull => format!("{} IS NOT NULL", col),
         Op::In => {
             let vals = c.values.as_ref().unwrap();
-            let placeholders: Vec<String> = vals.iter().map(|_| {
-                let p = format!("${}", idx); *idx += 1; p
-            }).collect();
+            let placeholders: Vec<String> = vals
+                .iter()
+                .map(|_| {
+                    let p = format!("${}", idx);
+                    *idx += 1;
+                    p
+                })
+                .collect();
             binds.extend(vals.clone());
             format!("{} IN ({})", col, placeholders.join(", "))
         }
         op => {
             let op_str = match op {
-                Op::Eq    => "=",
-                Op::Ne    => "!=",
-                Op::Gt    => ">",
-                Op::Gte   => ">=",
-                Op::Lt    => "<",
-                Op::Lte   => "<=",
-                Op::Like  => "LIKE",
+                Op::Eq => "=",
+                Op::Ne => "!=",
+                Op::Gt => ">",
+                Op::Gte => ">=",
+                Op::Lt => "<",
+                Op::Lte => "<=",
+                Op::Like => "LIKE",
                 Op::ILike => "ILIKE",
                 _ => unreachable!(),
             };
-            let p = format!("${}", idx); *idx += 1;
+            let p = format!("${}", idx);
+            *idx += 1;
             binds.push(c.value.clone().unwrap());
             format!("{} {} {}", col, op_str, p)
         }
@@ -823,12 +945,12 @@ fn build_condition(c: &Condition, binds: &mut Vec<SqlValue>, idx: &mut usize) ->
 /// Convert a `SqlValue` to a string key for use in HashMap lookups.
 fn sql_value_key(v: &SqlValue) -> Option<String> {
     match v {
-        SqlValue::Uuid(u)      => Some(u.to_string()),
-        SqlValue::BigInt(i)    => Some(i.to_string()),
-        SqlValue::Int(i)       => Some(i.to_string()),
-        SqlValue::SmallInt(i)  => Some(i.to_string()),
-        SqlValue::Text(s)      => Some(s.clone()),
-        _                      => None,
+        SqlValue::Uuid(u) => Some(u.to_string()),
+        SqlValue::BigInt(i) => Some(i.to_string()),
+        SqlValue::Int(i) => Some(i.to_string()),
+        SqlValue::SmallInt(i) => Some(i.to_string()),
+        SqlValue::Text(s) => Some(s.clone()),
+        _ => None,
     }
 }
 
@@ -836,27 +958,41 @@ fn sql_value_key(v: &SqlValue) -> Option<String> {
 /// Tries UUID, i64, i32, i16, String in order.
 fn extract_key_from_row(row: &sqlx::postgres::PgRow, col: &str) -> Option<String> {
     use sqlx::Row;
-    if let Ok(v) = row.try_get::<uuid::Uuid, _>(col) { return Some(v.to_string()); }
-    if let Ok(v) = row.try_get::<i64, _>(col)         { return Some(v.to_string()); }
-    if let Ok(v) = row.try_get::<i32, _>(col)         { return Some(v.to_string()); }
-    if let Ok(v) = row.try_get::<i16, _>(col)         { return Some(v.to_string()); }
-    if let Ok(v) = row.try_get::<String, _>(col)      { return Some(v); }
+    if let Ok(v) = row.try_get::<uuid::Uuid, _>(col) {
+        return Some(v.to_string());
+    }
+    if let Ok(v) = row.try_get::<i64, _>(col) {
+        return Some(v.to_string());
+    }
+    if let Ok(v) = row.try_get::<i32, _>(col) {
+        return Some(v.to_string());
+    }
+    if let Ok(v) = row.try_get::<i16, _>(col) {
+        return Some(v.to_string());
+    }
+    if let Ok(v) = row.try_get::<String, _>(col) {
+        return Some(v);
+    }
     None
 }
 
 // ─── Bind helpers ─────────────────────────────────────────────────────────────
 
 use crate::ops::bind_sql_values;
-use sqlx::{postgres::PgRow, Row};
+use sqlx::{Row, postgres::PgRow};
 
 async fn bind_and_fetch_all(pool: &PgPool, sql: &str, binds: Vec<SqlValue>) -> Result<Vec<PgRow>> {
     let q = sqlx::query(sql);
     let q = bind_sql_values(q, binds);
-    q.fetch_all(pool).await.map_err(|e| anyhow::anyhow!("{}", e))
+    q.fetch_all(pool)
+        .await
+        .map_err(|e| anyhow::anyhow!("{}", e))
 }
 
 async fn bind_and_fetch_one(pool: &PgPool, sql: &str, binds: Vec<SqlValue>) -> Result<PgRow> {
     let q = sqlx::query(sql);
     let q = bind_sql_values(q, binds);
-    q.fetch_one(pool).await.map_err(|e| anyhow::anyhow!("{}", e))
+    q.fetch_one(pool)
+        .await
+        .map_err(|e| anyhow::anyhow!("{}", e))
 }

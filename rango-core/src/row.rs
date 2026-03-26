@@ -1,4 +1,3 @@
-
 /// Error when reading a row.
 #[derive(Debug)]
 pub struct RowError(pub String);

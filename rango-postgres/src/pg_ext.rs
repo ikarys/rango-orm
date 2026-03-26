@@ -1,3 +1,4 @@
+use anyhow::Result;
 /// Postgres-specific query extensions.
 ///
 /// Import this trait to unlock Postgres-only filter methods on any `QueryBuilder`.
@@ -15,12 +16,11 @@
 /// ```
 use rango_core::{FromRow, Model, ModelValues, SqlValue};
 use sqlx::{PgPool, Row};
-use anyhow::Result;
 
-use crate::query_builder::QueryBuilder;
 use crate::ops::bind_sql_values;
-use crate::row::PgRangoRow;
+use crate::query_builder::QueryBuilder;
 use crate::related::WithRelated;
+use crate::row::PgRangoRow;
 
 /// Postgres-only extensions for `QueryBuilder`.
 pub trait PgQueryExt<M>
@@ -112,13 +112,12 @@ where
     }
 
     fn array_contains(self, col: &str, values: Vec<String>) -> Self {
-        let array_literal = values.iter()
+        let array_literal = values
+            .iter()
             .map(|v| format!("'{}'", v.replace('\'', "''")))
             .collect::<Vec<_>>()
             .join(", ");
-        self.raw_where_no_bind(
-            format!("\"{}\" @> ARRAY[{}]", col, array_literal),
-        )
+        self.raw_where_no_bind(format!("\"{}\" @> ARRAY[{}]", col, array_literal))
     }
 }
 
@@ -134,32 +133,46 @@ impl Pg {
         use crate::ops::DEFAULT_QUERY_LIMIT;
         let sql = format!(
             "SELECT * FROM \"{}\" WHERE to_tsvector('english', \"{}\") @@ plainto_tsquery('english', $1) LIMIT {}",
-            M::table_name(), col, DEFAULT_QUERY_LIMIT
+            M::table_name(),
+            col,
+            DEFAULT_QUERY_LIMIT
         );
         let rows = bind_sql_values(sqlx::query(&sql), vec![SqlValue::Text(query.to_string())])
             .fetch_all(pool)
             .await
             .map_err(|e| anyhow::anyhow!("{}", e))?;
         rows.into_iter()
-            .map(|r| M::from_row(&PgRangoRow(r))
-                .map(WithRelated::new)
-                .map_err(|e| anyhow::anyhow!("{}", e)))
+            .map(|r| {
+                M::from_row(&PgRangoRow(r))
+                    .map(WithRelated::new)
+                    .map_err(|e| anyhow::anyhow!("{}", e))
+            })
             .collect()
     }
 
     /// Get a JSONB field value as a string.
-    pub async fn json_get<M>(pool: &PgPool, pk: &SqlValue, col: &str, key: &str) -> Result<Option<String>>
+    pub async fn json_get<M>(
+        pool: &PgPool,
+        pk: &SqlValue,
+        col: &str,
+        key: &str,
+    ) -> Result<Option<String>>
     where
         M: Model + ModelValues,
     {
         let sql = format!(
             "SELECT \"{}\"->>$1 FROM \"{}\" WHERE \"{}\" = $2",
-            col, M::table_name(), M::pk_column()
+            col,
+            M::table_name(),
+            M::pk_column()
         );
-        let row = bind_sql_values(sqlx::query(&sql), vec![SqlValue::Text(key.to_string()), pk.clone()])
-            .fetch_optional(pool)
-            .await
-            .map_err(|e| anyhow::anyhow!("{}", e))?;
+        let row = bind_sql_values(
+            sqlx::query(&sql),
+            vec![SqlValue::Text(key.to_string()), pk.clone()],
+        )
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| anyhow::anyhow!("{}", e))?;
         Ok(row.and_then(|r| r.try_get::<Option<String>, _>(0).ok().flatten()))
     }
 }

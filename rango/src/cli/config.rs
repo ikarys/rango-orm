@@ -51,7 +51,6 @@ impl Default for DatabaseConfig {
             after_connect: Vec::new(),
         }
     }
-
 }
 
 impl DatabaseConfig {
@@ -63,10 +62,18 @@ impl DatabaseConfig {
     }
 }
 
-fn default_max_connections() -> u32 { 20 }
-fn default_min_connections() -> u32 { 2 }
-fn default_connect_timeout() -> u64 { 10 }
-fn default_idle_timeout() -> u64 { 600 }
+fn default_max_connections() -> u32 {
+    20
+}
+fn default_min_connections() -> u32 {
+    2
+}
+fn default_connect_timeout() -> u64 {
+    10
+}
+fn default_idle_timeout() -> u64 {
+    600
+}
 
 #[allow(dead_code)]
 #[derive(Debug, Deserialize)]
@@ -103,10 +110,18 @@ impl Default for ModelsConfig {
     }
 }
 
-fn default_backend() -> String { "postgres".to_string() }
-fn default_migrations_dir() -> String { "migrations".to_string() }
-fn default_migrations_table() -> String { "_rango_migrations".to_string() }
-fn default_src_dir() -> String { "src".to_string() }
+fn default_backend() -> String {
+    "postgres".to_string()
+}
+fn default_migrations_dir() -> String {
+    "migrations".to_string()
+}
+fn default_migrations_table() -> String {
+    "_rango_migrations".to_string()
+}
+fn default_src_dir() -> String {
+    "src".to_string()
+}
 
 impl RangoConfig {
     /// Load from rango.toml if it exists, otherwise return defaults.
@@ -115,10 +130,8 @@ impl RangoConfig {
         if !std::path::Path::new(path).exists() {
             return Ok(Self::default());
         }
-        let content = fs::read_to_string(path)
-            .context("Failed to read rango.toml")?;
-        let config: Self = toml::from_str(&content)
-            .context("Failed to parse rango.toml")?;
+        let content = fs::read_to_string(path).context("Failed to read rango.toml")?;
+        let config: Self = toml::from_str(&content).context("Failed to parse rango.toml")?;
         Ok(config)
     }
 

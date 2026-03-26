@@ -7,7 +7,10 @@ pub struct CheckConstraint {
 
 impl CheckConstraint {
     pub fn new(sql: impl Into<String>) -> Self {
-        Self { sql: sql.into(), name: String::new() }
+        Self {
+            sql: sql.into(),
+            name: String::new(),
+        }
     }
 
     pub fn name(mut self, name: impl Into<String>) -> Self {
@@ -80,12 +83,18 @@ pub struct OrderBy {
 
 /// Ascending order helper.
 pub fn asc(col: impl Into<String>) -> OrderBy {
-    OrderBy { column: col.into(), dir: OrderDir::Asc }
+    OrderBy {
+        column: col.into(),
+        dir: OrderDir::Asc,
+    }
 }
 
 /// Descending order helper.
 pub fn desc(col: impl Into<String>) -> OrderBy {
-    OrderBy { column: col.into(), dir: OrderDir::Desc }
+    OrderBy {
+        column: col.into(),
+        dir: OrderDir::Desc,
+    }
 }
 
 /// An index definition.

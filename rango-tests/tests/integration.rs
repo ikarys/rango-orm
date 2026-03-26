@@ -4,11 +4,10 @@
 ///   DATABASE_URL=postgres://postgres:postgres@localhost/rango_test cargo test --features integration
 ///
 /// These tests create and drop their own tables using a unique prefix per run.
-
 use rango_core::*;
 use rango_derive::Model;
-use rango_postgres::*;
 use rango_postgres::PgQueryExt;
+use rango_postgres::*;
 use uuid::Uuid;
 
 // ── Test models ───────────────────────────────────────────────────────────────
@@ -47,7 +46,9 @@ struct TestArticle {
 async fn pool() -> PgPool {
     let url = std::env::var("DATABASE_URL")
         .unwrap_or_else(|_| "postgres://postgres:postgres@localhost:5432/rango_test".to_string());
-    PgPool::connect(&url).await.expect("Failed to connect to test database")
+    PgPool::connect(&url)
+        .await
+        .expect("Failed to connect to test database")
 }
 
 async fn setup(pool: &PgPool) {
@@ -101,9 +102,18 @@ async fn setup(pool: &PgPool) {
 }
 
 async fn teardown(pool: &PgPool) {
-    sqlx::query(r#"DROP TABLE IF EXISTS "rango_test_article""#).execute(pool).await.ok();
-    sqlx::query(r#"DROP TABLE IF EXISTS "rango_test_post""#).execute(pool).await.ok();
-    sqlx::query(r#"DROP TABLE IF EXISTS "rango_test_user""#).execute(pool).await.ok();
+    sqlx::query(r#"DROP TABLE IF EXISTS "rango_test_article""#)
+        .execute(pool)
+        .await
+        .ok();
+    sqlx::query(r#"DROP TABLE IF EXISTS "rango_test_post""#)
+        .execute(pool)
+        .await
+        .ok();
+    sqlx::query(r#"DROP TABLE IF EXISTS "rango_test_user""#)
+        .execute(pool)
+        .await
+        .ok();
 }
 
 fn article(title: &str, content: &str, metadata: serde_json::Value) -> TestArticle {
@@ -137,7 +147,8 @@ async fn test_insert_and_get() {
     let inserted = insert(&pool, u.clone()).await.expect("insert failed");
     assert_eq!(inserted.email, u.email);
 
-    let fetched = get::<_, TestUser>(&pool, &u.id.to_sql_value()).await
+    let fetched = get::<_, TestUser>(&pool, &u.id.to_sql_value())
+        .await
         .expect("get failed")
         .expect("user not found");
     assert_eq!(fetched.email, u.email);
@@ -171,7 +182,9 @@ async fn test_delete() {
     insert(&pool, u.clone()).await.unwrap();
     delete(&pool, &u).await.expect("delete failed");
 
-    let fetched = get::<_, TestUser>(&pool, &u.id.to_sql_value()).await.unwrap();
+    let fetched = get::<_, TestUser>(&pool, &u.id.to_sql_value())
+        .await
+        .unwrap();
     assert!(fetched.is_none());
 
     teardown(&pool).await;
@@ -196,8 +209,16 @@ async fn test_filter_eq() {
         .await
         .expect("filter failed");
 
-    assert!(results.iter().any(|u| u.email == FieldEmail("active@test.com".to_string())));
-    assert!(!results.iter().any(|u| u.email == FieldEmail("inactive@test.com".to_string())));
+    assert!(
+        results
+            .iter()
+            .any(|u| u.email == FieldEmail("active@test.com".to_string()))
+    );
+    assert!(
+        !results
+            .iter()
+            .any(|u| u.email == FieldEmail("inactive@test.com".to_string()))
+    );
 
     teardown(&pool).await;
 }
@@ -258,7 +279,9 @@ async fn test_bulk_create() {
         .map(|i| user(&format!("bulk{}@test.com", i)))
         .collect();
 
-    let n = bulk_create(&pool, &users).await.expect("bulk_create failed");
+    let n = bulk_create(&pool, &users)
+        .await
+        .expect("bulk_create failed");
     assert_eq!(n, 5);
 
     teardown(&pool).await;
@@ -278,7 +301,9 @@ async fn test_bulk_update() {
     for u in &mut users {
         u.name = FieldVarchar("Updated".to_string());
     }
-    let n = bulk_update(&pool, &users, &["name"]).await.expect("bulk_update failed");
+    let n = bulk_update(&pool, &users, &["name"])
+        .await
+        .expect("bulk_update failed");
     assert_eq!(n, 3);
 
     teardown(&pool).await;
@@ -340,7 +365,9 @@ async fn test_get_or_create() {
     let defaults = user("goc@test.com");
     let lookup = vec![("email", SqlValue::Text("goc@test.com".to_string()))];
 
-    let (u1, created1) = get_or_create(&pool, lookup.clone(), defaults.clone()).await.unwrap();
+    let (u1, created1) = get_or_create(&pool, lookup.clone(), defaults.clone())
+        .await
+        .unwrap();
     assert!(created1);
 
     let (u2, created2) = get_or_create(&pool, lookup, defaults).await.unwrap();
@@ -461,16 +488,26 @@ async fn test_pg_fts() {
     let pool = pool().await;
     setup(&pool).await;
 
-    insert(&pool, article(
-        "Rust ORM guide",
-        "Rango is a Django-inspired ORM for Rust with async support",
-        serde_json::json!({}),
-    )).await.unwrap();
-    insert(&pool, article(
-        "Python tutorial",
-        "Flask is a lightweight web framework for Python developers",
-        serde_json::json!({}),
-    )).await.unwrap();
+    insert(
+        &pool,
+        article(
+            "Rust ORM guide",
+            "Rango is a Django-inspired ORM for Rust with async support",
+            serde_json::json!({}),
+        ),
+    )
+    .await
+    .unwrap();
+    insert(
+        &pool,
+        article(
+            "Python tutorial",
+            "Flask is a lightweight web framework for Python developers",
+            serde_json::json!({}),
+        ),
+    )
+    .await
+    .unwrap();
 
     let results = TestArticle::filter(&pool)
         .fts("content", "Rust ORM async")
@@ -490,8 +527,26 @@ async fn test_pg_json_contains() {
     let pool = pool().await;
     setup(&pool).await;
 
-    insert(&pool, article("Draft post", "content", serde_json::json!({"status": "draft"}))).await.unwrap();
-    insert(&pool, article("Published post", "content", serde_json::json!({"status": "published"}))).await.unwrap();
+    insert(
+        &pool,
+        article(
+            "Draft post",
+            "content",
+            serde_json::json!({"status": "draft"}),
+        ),
+    )
+    .await
+    .unwrap();
+    insert(
+        &pool,
+        article(
+            "Published post",
+            "content",
+            serde_json::json!({"status": "published"}),
+        ),
+    )
+    .await
+    .unwrap();
 
     let results = TestArticle::filter(&pool)
         .json_contains("metadata", serde_json::json!({"status": "published"}))
@@ -511,8 +566,22 @@ async fn test_pg_json_has_key() {
     let pool = pool().await;
     setup(&pool).await;
 
-    insert(&pool, article("With views", "content", serde_json::json!({"views": 42}))).await.unwrap();
-    insert(&pool, article("No views key", "content", serde_json::json!({"status": "draft"}))).await.unwrap();
+    insert(
+        &pool,
+        article("With views", "content", serde_json::json!({"views": 42})),
+    )
+    .await
+    .unwrap();
+    insert(
+        &pool,
+        article(
+            "No views key",
+            "content",
+            serde_json::json!({"status": "draft"}),
+        ),
+    )
+    .await
+    .unwrap();
 
     let results = TestArticle::filter(&pool)
         .json_has_key("metadata", "views")
@@ -532,8 +601,22 @@ async fn test_pg_json_field_eq() {
     let pool = pool().await;
     setup(&pool).await;
 
-    insert(&pool, article("Active", "content", serde_json::json!({"status": "active"}))).await.unwrap();
-    insert(&pool, article("Inactive", "content", serde_json::json!({"status": "inactive"}))).await.unwrap();
+    insert(
+        &pool,
+        article("Active", "content", serde_json::json!({"status": "active"})),
+    )
+    .await
+    .unwrap();
+    insert(
+        &pool,
+        article(
+            "Inactive",
+            "content",
+            serde_json::json!({"status": "inactive"}),
+        ),
+    )
+    .await
+    .unwrap();
 
     let results = TestArticle::filter(&pool)
         .json_field_eq("metadata", "status", "active")
@@ -568,7 +651,8 @@ async fn test_export_import_roundtrip() {
     assert_eq!(rows.len(), 2);
 
     // Verify exported data is complete
-    let emails: Vec<String> = rows.iter()
+    let emails: Vec<String> = rows
+        .iter()
         .filter_map(|r| match r.get("email") {
             Some(SqlValue::Text(s)) => Some(s.clone()),
             _ => None,

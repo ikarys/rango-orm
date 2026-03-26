@@ -7,21 +7,31 @@ pub async fn run(database_url: &str, migrations_dir: &str, after_connect: &[Stri
     let cfg = crate::config::RangoConfig::load().unwrap_or_default();
     let backend = cfg.database.backend_kind();
 
-    println!("🔌 Connecting to database ({})...",
-        match backend { BackendKind::Sqlite => "sqlite", _ => "postgres" });
+    println!(
+        "🔌 Connecting to database ({})...",
+        match backend {
+            BackendKind::Sqlite => "sqlite",
+            _ => "postgres",
+        }
+    );
 
     match backend {
         BackendKind::Sqlite => run_sqlite(database_url, migrations_dir).await,
-        _                   => run_postgres(database_url, migrations_dir, after_connect).await,
+        _ => run_postgres(database_url, migrations_dir, after_connect).await,
     }
 }
 
 // ─── Postgres ─────────────────────────────────────────────────────────────────
 
-async fn run_postgres(database_url: &str, migrations_dir: &str, after_connect: &[String]) -> Result<()> {
+async fn run_postgres(
+    database_url: &str,
+    migrations_dir: &str,
+    after_connect: &[String],
+) -> Result<()> {
     let mut config = rango_core::DatabaseConfig::from_url(database_url);
     config.after_connect = after_connect.to_vec();
-    let pool = rango_postgres::connect(&config).await
+    let pool = rango_postgres::connect(&config)
+        .await
         .context("Failed to connect to Postgres")?;
 
     sqlx::query(
@@ -29,8 +39,11 @@ async fn run_postgres(database_url: &str, migrations_dir: &str, after_connect: &
             id         SERIAL PRIMARY KEY,
             name       TEXT NOT NULL UNIQUE,
             applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
-        )"
-    ).execute(&pool).await.context("Failed to create _rango_migrations")?;
+        )",
+    )
+    .execute(&pool)
+    .await
+    .context("Failed to create _rango_migrations")?;
 
     let applied = fetch_applied_pg(&pool).await?;
     apply_files(migrations_dir, &applied, |sql, name| {
@@ -38,26 +51,36 @@ async fn run_postgres(database_url: &str, migrations_dir: &str, after_connect: &
         let sql = sql.to_string();
         let name = name.to_string();
         async move {
-            sqlx::raw_sql(&sql).execute(&pool).await
+            sqlx::raw_sql(&sql)
+                .execute(&pool)
+                .await
                 .with_context(|| format!("Failed to apply {}", name))?;
             sqlx::query("INSERT INTO _rango_migrations (name) VALUES ($1)")
-                .bind(&name).execute(&pool).await
+                .bind(&name)
+                .execute(&pool)
+                .await
                 .context("Failed to record migration")?;
             Ok(())
         }
-    }).await
+    })
+    .await
 }
 
-async fn fetch_applied_pg(pool: &rango_postgres::PgPool) -> Result<std::collections::HashSet<String>> {
+async fn fetch_applied_pg(
+    pool: &rango_postgres::PgPool,
+) -> Result<std::collections::HashSet<String>> {
     let rows: Vec<(String,)> = sqlx::query_as("SELECT name FROM _rango_migrations")
-        .fetch_all(pool).await.context("Failed to fetch applied migrations")?;
+        .fetch_all(pool)
+        .await
+        .context("Failed to fetch applied migrations")?;
     Ok(rows.into_iter().map(|(n,)| n).collect())
 }
 
 // ─── SQLite ───────────────────────────────────────────────────────────────────
 
 async fn run_sqlite(database_url: &str, migrations_dir: &str) -> Result<()> {
-    let pool = rango_sqlite::connect(database_url).await
+    let pool = rango_sqlite::connect(database_url)
+        .await
         .context("Failed to connect to SQLite")?;
 
     sqlx::query(
@@ -65,8 +88,11 @@ async fn run_sqlite(database_url: &str, migrations_dir: &str) -> Result<()> {
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
             name       TEXT NOT NULL UNIQUE,
             applied_at TEXT NOT NULL DEFAULT (datetime('now'))
-        )"
-    ).execute(&pool).await.context("Failed to create _rango_migrations")?;
+        )",
+    )
+    .execute(&pool)
+    .await
+    .context("Failed to create _rango_migrations")?;
 
     let applied = fetch_applied_sqlite(&pool).await?;
     apply_files(migrations_dir, &applied, |sql, name| {
@@ -74,19 +100,28 @@ async fn run_sqlite(database_url: &str, migrations_dir: &str) -> Result<()> {
         let sql = sql.to_string();
         let name = name.to_string();
         async move {
-            sqlx::raw_sql(&sql).execute(&pool).await
+            sqlx::raw_sql(&sql)
+                .execute(&pool)
+                .await
                 .with_context(|| format!("Failed to apply {}", name))?;
             sqlx::query("INSERT INTO _rango_migrations (name) VALUES (?)")
-                .bind(&name).execute(&pool).await
+                .bind(&name)
+                .execute(&pool)
+                .await
                 .context("Failed to record migration")?;
             Ok(())
         }
-    }).await
+    })
+    .await
 }
 
-async fn fetch_applied_sqlite(pool: &rango_sqlite::SqlitePool) -> Result<std::collections::HashSet<String>> {
+async fn fetch_applied_sqlite(
+    pool: &rango_sqlite::SqlitePool,
+) -> Result<std::collections::HashSet<String>> {
     let rows: Vec<(String,)> = sqlx::query_as("SELECT name FROM _rango_migrations")
-        .fetch_all(pool).await.context("Failed to fetch applied migrations")?;
+        .fetch_all(pool)
+        .await
+        .context("Failed to fetch applied migrations")?;
     Ok(rows.into_iter().map(|(n,)| n).collect())
 }
 
@@ -133,9 +168,10 @@ where
 }
 
 fn collect_migration_files(dir: &str) -> Result<Vec<std::path::PathBuf>> {
-    let entries = fs::read_dir(dir)
-        .with_context(|| format!("Cannot read migrations directory: {}", dir))?;
-    Ok(entries.flatten()
+    let entries =
+        fs::read_dir(dir).with_context(|| format!("Cannot read migrations directory: {}", dir))?;
+    Ok(entries
+        .flatten()
         .map(|e| e.path())
         .filter(|p| p.extension().map(|x| x == "sql").unwrap_or(false))
         .collect())

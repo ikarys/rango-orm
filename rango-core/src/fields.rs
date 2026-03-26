@@ -153,7 +153,10 @@ pub struct FieldRange<const MIN: i64, const MAX: i64>(pub i64);
 impl<const MIN: i64, const MAX: i64> FieldRange<MIN, MAX> {
     pub fn new(val: i64) -> Result<Self, FieldError> {
         if val < MIN || val > MAX {
-            return Err(FieldError(format!("Value {} out of range [{}, {}]", val, MIN, MAX)));
+            return Err(FieldError(format!(
+                "Value {} out of range [{}, {}]",
+                val, MIN, MAX
+            )));
         }
         Ok(Self(val))
     }
@@ -176,64 +179,219 @@ impl std::error::Error for FieldError {}
 
 use crate::query::{SqlValue, ToSqlValue};
 
-impl ToSqlValue for FieldBool    { fn to_sql_value(&self) -> SqlValue { SqlValue::Bool(self.0) } }
-impl ToSqlValue for FieldSmallInt { fn to_sql_value(&self) -> SqlValue { SqlValue::SmallInt(self.0) } }
-impl ToSqlValue for FieldInt     { fn to_sql_value(&self) -> SqlValue { SqlValue::Int(self.0) } }
-impl ToSqlValue for FieldBigInt  { fn to_sql_value(&self) -> SqlValue { SqlValue::BigInt(self.0) } }
-impl ToSqlValue for FieldFloat   { fn to_sql_value(&self) -> SqlValue { SqlValue::Float(self.0) } }
-impl ToSqlValue for FieldDouble  { fn to_sql_value(&self) -> SqlValue { SqlValue::Double(self.0) } }
-impl ToSqlValue for FieldText    { fn to_sql_value(&self) -> SqlValue { SqlValue::Text(self.0.clone()) } }
-impl ToSqlValue for FieldEmail   { fn to_sql_value(&self) -> SqlValue { SqlValue::Text(self.0.clone()) } }
-impl ToSqlValue for FieldUrl     { fn to_sql_value(&self) -> SqlValue { SqlValue::Text(self.0.clone()) } }
-impl ToSqlValue for FieldBytes   { fn to_sql_value(&self) -> SqlValue { SqlValue::Bytes(self.0.clone()) } }
-impl ToSqlValue for FieldUuid    { fn to_sql_value(&self) -> SqlValue { SqlValue::Uuid(self.0) } }
-impl ToSqlValue for FieldDateTime { fn to_sql_value(&self) -> SqlValue { SqlValue::DateTime(self.0) } }
-impl ToSqlValue for FieldDate    { fn to_sql_value(&self) -> SqlValue { SqlValue::Date(self.0) } }
-impl ToSqlValue for FieldTime    { fn to_sql_value(&self) -> SqlValue { SqlValue::Time(self.0) } }
-impl ToSqlValue for FieldJson    { fn to_sql_value(&self) -> SqlValue { SqlValue::Json(self.0.clone()) } }
+impl ToSqlValue for FieldBool {
+    fn to_sql_value(&self) -> SqlValue {
+        SqlValue::Bool(self.0)
+    }
+}
+impl ToSqlValue for FieldSmallInt {
+    fn to_sql_value(&self) -> SqlValue {
+        SqlValue::SmallInt(self.0)
+    }
+}
+impl ToSqlValue for FieldInt {
+    fn to_sql_value(&self) -> SqlValue {
+        SqlValue::Int(self.0)
+    }
+}
+impl ToSqlValue for FieldBigInt {
+    fn to_sql_value(&self) -> SqlValue {
+        SqlValue::BigInt(self.0)
+    }
+}
+impl ToSqlValue for FieldFloat {
+    fn to_sql_value(&self) -> SqlValue {
+        SqlValue::Float(self.0)
+    }
+}
+impl ToSqlValue for FieldDouble {
+    fn to_sql_value(&self) -> SqlValue {
+        SqlValue::Double(self.0)
+    }
+}
+impl ToSqlValue for FieldText {
+    fn to_sql_value(&self) -> SqlValue {
+        SqlValue::Text(self.0.clone())
+    }
+}
+impl ToSqlValue for FieldEmail {
+    fn to_sql_value(&self) -> SqlValue {
+        SqlValue::Text(self.0.clone())
+    }
+}
+impl ToSqlValue for FieldUrl {
+    fn to_sql_value(&self) -> SqlValue {
+        SqlValue::Text(self.0.clone())
+    }
+}
+impl ToSqlValue for FieldBytes {
+    fn to_sql_value(&self) -> SqlValue {
+        SqlValue::Bytes(self.0.clone())
+    }
+}
+impl ToSqlValue for FieldUuid {
+    fn to_sql_value(&self) -> SqlValue {
+        SqlValue::Uuid(self.0)
+    }
+}
+impl ToSqlValue for FieldDateTime {
+    fn to_sql_value(&self) -> SqlValue {
+        SqlValue::DateTime(self.0)
+    }
+}
+impl ToSqlValue for FieldDate {
+    fn to_sql_value(&self) -> SqlValue {
+        SqlValue::Date(self.0)
+    }
+}
+impl ToSqlValue for FieldTime {
+    fn to_sql_value(&self) -> SqlValue {
+        SqlValue::Time(self.0)
+    }
+}
+impl ToSqlValue for FieldJson {
+    fn to_sql_value(&self) -> SqlValue {
+        SqlValue::Json(self.0.clone())
+    }
+}
 
 impl<const MIN: usize, const MAX: usize> ToSqlValue for FieldVarchar<MIN, MAX> {
-    fn to_sql_value(&self) -> SqlValue { SqlValue::Text(self.0.clone()) }
+    fn to_sql_value(&self) -> SqlValue {
+        SqlValue::Text(self.0.clone())
+    }
 }
 impl<const MIN: usize, const MAX: usize> ToSqlValue for FieldPassword<MIN, MAX> {
-    fn to_sql_value(&self) -> SqlValue { SqlValue::Text(self.0.clone()) }
+    fn to_sql_value(&self) -> SqlValue {
+        SqlValue::Text(self.0.clone())
+    }
 }
 impl<const MIN: i64, const MAX: i64> ToSqlValue for FieldRange<MIN, MAX> {
-    fn to_sql_value(&self) -> SqlValue { SqlValue::BigInt(self.0) }
+    fn to_sql_value(&self) -> SqlValue {
+        SqlValue::BigInt(self.0)
+    }
 }
 impl<const P: u8, const S: u8> ToSqlValue for FieldDecimal<P, S> {
-    fn to_sql_value(&self) -> SqlValue { SqlValue::Double(self.0) }
+    fn to_sql_value(&self) -> SqlValue {
+        SqlValue::Double(self.0)
+    }
 }
 
 // Option<T> support — typed nulls so Postgres knows the column type
-impl ToSqlValue for Option<FieldBool>     { fn to_sql_value(&self) -> SqlValue { self.as_ref().map_or(SqlValue::NullBool,     |v| v.to_sql_value()) } }
-impl ToSqlValue for Option<FieldSmallInt> { fn to_sql_value(&self) -> SqlValue { self.as_ref().map_or(SqlValue::NullSmallInt, |v| v.to_sql_value()) } }
-impl ToSqlValue for Option<FieldInt>      { fn to_sql_value(&self) -> SqlValue { self.as_ref().map_or(SqlValue::NullInt,      |v| v.to_sql_value()) } }
-impl ToSqlValue for Option<FieldBigInt>   { fn to_sql_value(&self) -> SqlValue { self.as_ref().map_or(SqlValue::NullBigInt,   |v| v.to_sql_value()) } }
-impl ToSqlValue for Option<FieldFloat>    { fn to_sql_value(&self) -> SqlValue { self.as_ref().map_or(SqlValue::NullFloat,    |v| v.to_sql_value()) } }
-impl ToSqlValue for Option<FieldDouble>   { fn to_sql_value(&self) -> SqlValue { self.as_ref().map_or(SqlValue::NullDouble,   |v| v.to_sql_value()) } }
-impl ToSqlValue for Option<FieldText>     { fn to_sql_value(&self) -> SqlValue { self.as_ref().map_or(SqlValue::NullText,     |v| v.to_sql_value()) } }
-impl ToSqlValue for Option<FieldEmail>    { fn to_sql_value(&self) -> SqlValue { self.as_ref().map_or(SqlValue::NullText,     |v| v.to_sql_value()) } }
-impl ToSqlValue for Option<FieldUrl>      { fn to_sql_value(&self) -> SqlValue { self.as_ref().map_or(SqlValue::NullText,     |v| v.to_sql_value()) } }
-impl ToSqlValue for Option<FieldBytes>    { fn to_sql_value(&self) -> SqlValue { self.as_ref().map_or(SqlValue::NullBytes,    |v| v.to_sql_value()) } }
-impl ToSqlValue for Option<FieldUuid>     { fn to_sql_value(&self) -> SqlValue { self.as_ref().map_or(SqlValue::NullUuid,     |v| v.to_sql_value()) } }
-impl ToSqlValue for Option<FieldDateTime> { fn to_sql_value(&self) -> SqlValue { self.as_ref().map_or(SqlValue::NullDateTime, |v| v.to_sql_value()) } }
-impl ToSqlValue for Option<FieldDate>     { fn to_sql_value(&self) -> SqlValue { self.as_ref().map_or(SqlValue::NullDate,     |v| v.to_sql_value()) } }
-impl ToSqlValue for Option<FieldTime>     { fn to_sql_value(&self) -> SqlValue { self.as_ref().map_or(SqlValue::NullTime,     |v| v.to_sql_value()) } }
-impl ToSqlValue for Option<FieldJson>     { fn to_sql_value(&self) -> SqlValue { self.as_ref().map_or(SqlValue::NullJson,     |v| v.to_sql_value()) } }
+impl ToSqlValue for Option<FieldBool> {
+    fn to_sql_value(&self) -> SqlValue {
+        self.as_ref()
+            .map_or(SqlValue::NullBool, |v| v.to_sql_value())
+    }
+}
+impl ToSqlValue for Option<FieldSmallInt> {
+    fn to_sql_value(&self) -> SqlValue {
+        self.as_ref()
+            .map_or(SqlValue::NullSmallInt, |v| v.to_sql_value())
+    }
+}
+impl ToSqlValue for Option<FieldInt> {
+    fn to_sql_value(&self) -> SqlValue {
+        self.as_ref()
+            .map_or(SqlValue::NullInt, |v| v.to_sql_value())
+    }
+}
+impl ToSqlValue for Option<FieldBigInt> {
+    fn to_sql_value(&self) -> SqlValue {
+        self.as_ref()
+            .map_or(SqlValue::NullBigInt, |v| v.to_sql_value())
+    }
+}
+impl ToSqlValue for Option<FieldFloat> {
+    fn to_sql_value(&self) -> SqlValue {
+        self.as_ref()
+            .map_or(SqlValue::NullFloat, |v| v.to_sql_value())
+    }
+}
+impl ToSqlValue for Option<FieldDouble> {
+    fn to_sql_value(&self) -> SqlValue {
+        self.as_ref()
+            .map_or(SqlValue::NullDouble, |v| v.to_sql_value())
+    }
+}
+impl ToSqlValue for Option<FieldText> {
+    fn to_sql_value(&self) -> SqlValue {
+        self.as_ref()
+            .map_or(SqlValue::NullText, |v| v.to_sql_value())
+    }
+}
+impl ToSqlValue for Option<FieldEmail> {
+    fn to_sql_value(&self) -> SqlValue {
+        self.as_ref()
+            .map_or(SqlValue::NullText, |v| v.to_sql_value())
+    }
+}
+impl ToSqlValue for Option<FieldUrl> {
+    fn to_sql_value(&self) -> SqlValue {
+        self.as_ref()
+            .map_or(SqlValue::NullText, |v| v.to_sql_value())
+    }
+}
+impl ToSqlValue for Option<FieldBytes> {
+    fn to_sql_value(&self) -> SqlValue {
+        self.as_ref()
+            .map_or(SqlValue::NullBytes, |v| v.to_sql_value())
+    }
+}
+impl ToSqlValue for Option<FieldUuid> {
+    fn to_sql_value(&self) -> SqlValue {
+        self.as_ref()
+            .map_or(SqlValue::NullUuid, |v| v.to_sql_value())
+    }
+}
+impl ToSqlValue for Option<FieldDateTime> {
+    fn to_sql_value(&self) -> SqlValue {
+        self.as_ref()
+            .map_or(SqlValue::NullDateTime, |v| v.to_sql_value())
+    }
+}
+impl ToSqlValue for Option<FieldDate> {
+    fn to_sql_value(&self) -> SqlValue {
+        self.as_ref()
+            .map_or(SqlValue::NullDate, |v| v.to_sql_value())
+    }
+}
+impl ToSqlValue for Option<FieldTime> {
+    fn to_sql_value(&self) -> SqlValue {
+        self.as_ref()
+            .map_or(SqlValue::NullTime, |v| v.to_sql_value())
+    }
+}
+impl ToSqlValue for Option<FieldJson> {
+    fn to_sql_value(&self) -> SqlValue {
+        self.as_ref()
+            .map_or(SqlValue::NullJson, |v| v.to_sql_value())
+    }
+}
 
 // Parametric types
 impl<const MIN: usize, const MAX: usize> ToSqlValue for Option<FieldVarchar<MIN, MAX>> {
-    fn to_sql_value(&self) -> SqlValue { self.as_ref().map_or(SqlValue::NullText, |v| v.to_sql_value()) }
+    fn to_sql_value(&self) -> SqlValue {
+        self.as_ref()
+            .map_or(SqlValue::NullText, |v| v.to_sql_value())
+    }
 }
 impl<const MIN: usize, const MAX: usize> ToSqlValue for Option<FieldPassword<MIN, MAX>> {
-    fn to_sql_value(&self) -> SqlValue { self.as_ref().map_or(SqlValue::NullText, |v| v.to_sql_value()) }
+    fn to_sql_value(&self) -> SqlValue {
+        self.as_ref()
+            .map_or(SqlValue::NullText, |v| v.to_sql_value())
+    }
 }
 impl<const MIN: i64, const MAX: i64> ToSqlValue for Option<FieldRange<MIN, MAX>> {
-    fn to_sql_value(&self) -> SqlValue { self.as_ref().map_or(SqlValue::NullBigInt, |v| v.to_sql_value()) }
+    fn to_sql_value(&self) -> SqlValue {
+        self.as_ref()
+            .map_or(SqlValue::NullBigInt, |v| v.to_sql_value())
+    }
 }
 impl<M> ToSqlValue for Option<ForeignKey<M>> {
-    fn to_sql_value(&self) -> SqlValue { self.as_ref().map_or(SqlValue::NullUuid, |v| v.to_sql_value()) }
+    fn to_sql_value(&self) -> SqlValue {
+        self.as_ref()
+            .map_or(SqlValue::NullUuid, |v| v.to_sql_value())
+    }
 }
 
 // ─── Many to Many ────────────────────────────────────────────────────────────
@@ -305,17 +463,73 @@ impl<M> ToSqlValue for ForeignKey<M> {
 
 // ─── From<T> conversions (ergonomics) ────────────────────────────────────────
 
-impl From<bool> for FieldBool { fn from(v: bool) -> Self { Self(v) } }
-impl From<i16> for FieldSmallInt { fn from(v: i16) -> Self { Self(v) } }
-impl From<i32> for FieldInt { fn from(v: i32) -> Self { Self(v) } }
-impl From<i64> for FieldBigInt { fn from(v: i64) -> Self { Self(v) } }
-impl From<f32> for FieldFloat { fn from(v: f32) -> Self { Self(v) } }
-impl From<f64> for FieldDouble { fn from(v: f64) -> Self { Self(v) } }
-impl From<String> for FieldText { fn from(v: String) -> Self { Self(v) } }
-impl From<&str> for FieldText { fn from(v: &str) -> Self { Self(v.to_string()) } }
-impl From<Vec<u8>> for FieldBytes { fn from(v: Vec<u8>) -> Self { Self(v) } }
-impl From<Uuid> for FieldUuid { fn from(v: Uuid) -> Self { Self(v) } }
-impl From<NaiveDate> for FieldDate { fn from(v: NaiveDate) -> Self { Self(v) } }
-impl From<NaiveTime> for FieldTime { fn from(v: NaiveTime) -> Self { Self(v) } }
-impl From<DateTime<Utc>> for FieldDateTime { fn from(v: DateTime<Utc>) -> Self { Self(v) } }
-impl From<serde_json::Value> for FieldJson { fn from(v: serde_json::Value) -> Self { Self(v) } }
+impl From<bool> for FieldBool {
+    fn from(v: bool) -> Self {
+        Self(v)
+    }
+}
+impl From<i16> for FieldSmallInt {
+    fn from(v: i16) -> Self {
+        Self(v)
+    }
+}
+impl From<i32> for FieldInt {
+    fn from(v: i32) -> Self {
+        Self(v)
+    }
+}
+impl From<i64> for FieldBigInt {
+    fn from(v: i64) -> Self {
+        Self(v)
+    }
+}
+impl From<f32> for FieldFloat {
+    fn from(v: f32) -> Self {
+        Self(v)
+    }
+}
+impl From<f64> for FieldDouble {
+    fn from(v: f64) -> Self {
+        Self(v)
+    }
+}
+impl From<String> for FieldText {
+    fn from(v: String) -> Self {
+        Self(v)
+    }
+}
+impl From<&str> for FieldText {
+    fn from(v: &str) -> Self {
+        Self(v.to_string())
+    }
+}
+impl From<Vec<u8>> for FieldBytes {
+    fn from(v: Vec<u8>) -> Self {
+        Self(v)
+    }
+}
+impl From<Uuid> for FieldUuid {
+    fn from(v: Uuid) -> Self {
+        Self(v)
+    }
+}
+impl From<NaiveDate> for FieldDate {
+    fn from(v: NaiveDate) -> Self {
+        Self(v)
+    }
+}
+impl From<NaiveTime> for FieldTime {
+    fn from(v: NaiveTime) -> Self {
+        Self(v)
+    }
+}
+impl From<DateTime<Utc>> for FieldDateTime {
+    fn from(v: DateTime<Utc>) -> Self {
+        Self(v)
+    }
+}
+impl From<serde_json::Value> for FieldJson {
+    fn from(v: serde_json::Value) -> Self {
+        Self(v)
+    }
+}

@@ -1,6 +1,6 @@
+use anyhow::{Context, Result};
 use rango_core::{FromRow, Model, ModelValues};
 use sqlx::PgPool;
-use anyhow::{Context, Result};
 
 use crate::ops::bind_sql_values;
 use crate::row::PgRangoRow;
@@ -42,11 +42,9 @@ where
             "INSERT INTO \"{}\" (\"{}\", \"{}\") VALUES ($1, $2) ON CONFLICT DO NOTHING",
             pivot, from_col, to_col
         );
-        let q = bind_sql_values(sqlx::query(&sql), vec![
-            from.pk_value(),
-            to.pk_value(),
-        ]);
-        q.execute(pool).await
+        let q = bind_sql_values(sqlx::query(&sql), vec![from.pk_value(), to.pk_value()]);
+        q.execute(pool)
+            .await
             .with_context(|| format!("M2M add on {} failed", pivot))?;
         Ok(())
     }
@@ -60,11 +58,9 @@ where
             "DELETE FROM \"{}\" WHERE \"{}\" = $1 AND \"{}\" = $2",
             pivot, from_col, to_col
         );
-        let q = bind_sql_values(sqlx::query(&sql), vec![
-            from.pk_value(),
-            to.pk_value(),
-        ]);
-        q.execute(pool).await
+        let q = bind_sql_values(sqlx::query(&sql), vec![from.pk_value(), to.pk_value()]);
+        q.execute(pool)
+            .await
             .with_context(|| format!("M2M remove on {} failed", pivot))?;
         Ok(())
     }
@@ -75,7 +71,8 @@ where
         let from_col = Self::from_col();
         let sql = format!("DELETE FROM \"{}\" WHERE \"{}\" = $1", pivot, from_col);
         let q = bind_sql_values(sqlx::query(&sql), vec![from.pk_value()]);
-        q.execute(pool).await
+        q.execute(pool)
+            .await
             .with_context(|| format!("M2M clear on {} failed", pivot))?;
         Ok(())
     }
@@ -94,7 +91,9 @@ where
                WHERE p."{from_col}" = $1"#,
         );
         let q = bind_sql_values(sqlx::query(&sql), vec![from.pk_value()]);
-        let rows = q.fetch_all(pool).await
+        let rows = q
+            .fetch_all(pool)
+            .await
             .with_context(|| format!("M2M all on {} failed", pivot))?;
 
         rows.into_iter()
@@ -119,7 +118,9 @@ where
                WHERE p."{to_col}" = $1"#,
         );
         let q = bind_sql_values(sqlx::query(&sql), vec![to.pk_value()]);
-        let rows = q.fetch_all(pool).await
+        let rows = q
+            .fetch_all(pool)
+            .await
             .with_context(|| format!("M2M reverse on {} failed", pivot))?;
 
         rows.into_iter()
@@ -146,7 +147,9 @@ where
             pivot, from_col, to_col
         );
         let q = bind_sql_values(sqlx::query(&sql), vec![from.pk_value(), to.pk_value()]);
-        let row = q.fetch_optional(pool).await
+        let row = q
+            .fetch_optional(pool)
+            .await
             .with_context(|| format!("M2M exists on {} failed", pivot))?;
         Ok(row.is_some())
     }

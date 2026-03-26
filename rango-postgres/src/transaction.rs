@@ -1,5 +1,5 @@
-use sqlx::{PgPool, Postgres, Transaction};
 use anyhow::Result;
+use sqlx::{PgPool, Postgres, Transaction};
 use std::future::Future;
 
 /// Type alias for a Rango/sqlx transaction — use this in function signatures
@@ -41,12 +41,15 @@ where
     F: FnOnce(&mut RangoTransaction<'_>) -> Fut,
     Fut: Future<Output = Result<T>>,
 {
-    let mut tx = pool.begin().await
+    let mut tx = pool
+        .begin()
+        .await
         .map_err(|e| anyhow::anyhow!("Failed to begin transaction: {}", e))?;
 
     match f(&mut tx).await {
         Ok(result) => {
-            tx.commit().await
+            tx.commit()
+                .await
                 .map_err(|e| anyhow::anyhow!("Failed to commit: {}", e))?;
             Ok(result)
         }

@@ -1,13 +1,11 @@
 use proc_macro2::TokenStream;
 use quote::quote;
 use syn::{
-    Data, DeriveInput, Field, Fields, Lit, Meta, Result, Type,
-    Token,
-    punctuated::Punctuated,
+    Data, DeriveInput, Field, Fields, Lit, Meta, Result, Token, Type, punctuated::Punctuated,
 };
 
-use crate::utils::to_snake_case;
 use crate::rango_core_path;
+use crate::utils::to_snake_case;
 
 /// Parsed `#[field(...)]` attributes for one field.
 #[derive(Default)]
@@ -48,9 +46,19 @@ pub fn expand(input: DeriveInput) -> Result<TokenStream> {
     let fields = match &input.data {
         Data::Struct(s) => match &s.fields {
             Fields::Named(f) => &f.named,
-            _ => return Err(syn::Error::new_spanned(struct_name, "Model requires named fields")),
+            _ => {
+                return Err(syn::Error::new_spanned(
+                    struct_name,
+                    "Model requires named fields",
+                ));
+            }
         },
-        _ => return Err(syn::Error::new_spanned(struct_name, "Model can only be derived on structs")),
+        _ => {
+            return Err(syn::Error::new_spanned(
+                struct_name,
+                "Model can only be derived on structs",
+            ));
+        }
     };
 
     let core = rango_core_path();
@@ -69,7 +77,9 @@ pub fn expand(input: DeriveInput) -> Result<TokenStream> {
     let mut pk_found = false;
 
     for f in fields.iter() {
-        if is_many_to_many(&f.ty) { continue; }
+        if is_many_to_many(&f.ty) {
+            continue;
+        }
         let fname = f.ident.as_ref().unwrap();
         let is_pk = fname == "id" || parse_field_attr(f)?.primary_key;
         let col_name = fname.to_string();
@@ -113,7 +123,7 @@ pub fn expand(input: DeriveInput) -> Result<TokenStream> {
 
     let comment_expr = match &model_attr.comment {
         Some(c) => quote! { Some(#c.to_string()) },
-        None    => quote! { None },
+        None => quote! { None },
     };
 
     let core2 = rango_core_path();
@@ -175,28 +185,29 @@ fn parse_model_attr(input: &DeriveInput) -> Result<ModelAttr> {
         if !a.path().is_ident("model") {
             continue;
         }
-        let nested = a.parse_args_with(
-            Punctuated::<Meta, Token![,]>::parse_terminated
-        )?;
+        let nested = a.parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated)?;
         for meta in nested {
             match meta {
                 Meta::NameValue(nv) if nv.path.is_ident("table") => {
                     if let syn::Expr::Lit(expr_lit) = &nv.value
-                        && let Lit::Str(s) = &expr_lit.lit {
-                            attr.table = Some(s.value());
-                        }
+                        && let Lit::Str(s) = &expr_lit.lit
+                    {
+                        attr.table = Some(s.value());
+                    }
                 }
                 Meta::NameValue(nv) if nv.path.is_ident("comment") => {
                     if let syn::Expr::Lit(expr_lit) = &nv.value
-                        && let Lit::Str(s) = &expr_lit.lit {
-                            attr.comment = Some(s.value());
-                        }
+                        && let Lit::Str(s) = &expr_lit.lit
+                    {
+                        attr.comment = Some(s.value());
+                    }
                 }
                 Meta::NameValue(nv) if nv.path.is_ident("managed") => {
                     if let syn::Expr::Lit(expr_lit) = &nv.value
-                        && let Lit::Bool(b) = &expr_lit.lit {
-                            attr.managed = Some(b.value);
-                        }
+                        && let Lit::Bool(b) = &expr_lit.lit
+                    {
+                        attr.managed = Some(b.value);
+                    }
                 }
                 Meta::NameValue(nv) if nv.path.is_ident("ordering") => {
                     if let syn::Expr::Array(arr) = &nv.value {
@@ -222,27 +233,34 @@ fn parse_field_attr(field: &Field) -> Result<FieldAttr> {
         if !a.path().is_ident("field") {
             continue;
         }
-        let nested = a.parse_args_with(
-            Punctuated::<Meta, Token![,]>::parse_terminated
-        )?;
+        let nested = a.parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated)?;
         for meta in nested {
             match &meta {
-                Meta::Path(p) if p.is_ident("unique")       => attr.unique = true,
-                Meta::Path(p) if p.is_ident("index")        => attr.index = true,
-                Meta::Path(p) if p.is_ident("primary_key")  => attr.primary_key = true,
+                Meta::Path(p) if p.is_ident("unique") => attr.unique = true,
+                Meta::Path(p) if p.is_ident("index") => attr.index = true,
+                Meta::Path(p) if p.is_ident("primary_key") => attr.primary_key = true,
                 Meta::Path(p) if p.is_ident("auto_now_add") => attr.auto_now_add = true,
-                Meta::Path(p) if p.is_ident("auto_now")     => attr.auto_now = true,
+                Meta::Path(p) if p.is_ident("auto_now") => attr.auto_now = true,
                 Meta::NameValue(nv) if nv.path.is_ident("column") => {
                     if let syn::Expr::Lit(expr_lit) = &nv.value
-                        && let Lit::Str(s) = &expr_lit.lit { attr.column = Some(s.value()); }
+                        && let Lit::Str(s) = &expr_lit.lit
+                    {
+                        attr.column = Some(s.value());
+                    }
                 }
                 Meta::NameValue(nv) if nv.path.is_ident("default") => {
                     if let syn::Expr::Lit(expr_lit) = &nv.value
-                        && let Lit::Str(s) = &expr_lit.lit { attr.default = Some(s.value()); }
+                        && let Lit::Str(s) = &expr_lit.lit
+                    {
+                        attr.default = Some(s.value());
+                    }
                 }
                 Meta::NameValue(nv) if nv.path.is_ident("comment") => {
                     if let syn::Expr::Lit(expr_lit) = &nv.value
-                        && let Lit::Str(s) = &expr_lit.lit { attr.comment = Some(s.value()); }
+                        && let Lit::Str(s) = &expr_lit.lit
+                    {
+                        attr.comment = Some(s.value());
+                    }
                 }
                 _ => {}
             }
@@ -272,7 +290,10 @@ fn generate_column_def(field: &Field, core: &TokenStream) -> Result<TokenStream>
     // Validate: auto_now_add / auto_now only on date/time fields
     if attr.auto_now_add || attr.auto_now {
         let type_str = quote!(#inner_ty).to_string().replace(" ", "");
-        if !matches!(type_str.as_str(), "FieldDate" | "FieldTime" | "FieldDateTime") {
+        if !matches!(
+            type_str.as_str(),
+            "FieldDate" | "FieldTime" | "FieldDateTime"
+        ) {
             return Err(syn::Error::new_spanned(
                 field,
                 "#[field(auto_now_add)] and #[field(auto_now)] are only valid on FieldDate, FieldTime, or FieldDateTime",
@@ -303,23 +324,28 @@ fn generate_column_def(field: &Field, core: &TokenStream) -> Result<TokenStream>
 }
 
 /// Generate the expression to read a field from a RangoRow.
-fn field_type_to_getter(type_str: &str, col: &str, nullable: bool, core: &TokenStream) -> TokenStream {
+fn field_type_to_getter(
+    type_str: &str,
+    col: &str,
+    nullable: bool,
+    core: &TokenStream,
+) -> TokenStream {
     let getter = match type_str {
-        "FieldBool"     => quote! { row.get_bool(#col).map(#core::FieldBool)? },
+        "FieldBool" => quote! { row.get_bool(#col).map(#core::FieldBool)? },
         "FieldSmallInt" => quote! { row.get_i16(#col).map(#core::FieldSmallInt)? },
-        "FieldInt"      => quote! { row.get_i32(#col).map(#core::FieldInt)? },
-        "FieldBigInt"   => quote! { row.get_i64(#col).map(#core::FieldBigInt)? },
-        "FieldFloat"    => quote! { row.get_f32(#col).map(#core::FieldFloat)? },
-        "FieldDouble"   => quote! { row.get_f64(#col).map(#core::FieldDouble)? },
-        "FieldText"     => quote! { row.get_string(#col).map(#core::FieldText)? },
-        "FieldEmail"    => quote! { row.get_string(#col).map(#core::FieldEmail)? },
-        "FieldUrl"      => quote! { row.get_string(#col).map(#core::FieldUrl)? },
-        "FieldBytes"    => quote! { row.get_bytes(#col).map(#core::FieldBytes)? },
-        "FieldUuid"     => quote! { row.get_uuid(#col).map(#core::FieldUuid)? },
+        "FieldInt" => quote! { row.get_i32(#col).map(#core::FieldInt)? },
+        "FieldBigInt" => quote! { row.get_i64(#col).map(#core::FieldBigInt)? },
+        "FieldFloat" => quote! { row.get_f32(#col).map(#core::FieldFloat)? },
+        "FieldDouble" => quote! { row.get_f64(#col).map(#core::FieldDouble)? },
+        "FieldText" => quote! { row.get_string(#col).map(#core::FieldText)? },
+        "FieldEmail" => quote! { row.get_string(#col).map(#core::FieldEmail)? },
+        "FieldUrl" => quote! { row.get_string(#col).map(#core::FieldUrl)? },
+        "FieldBytes" => quote! { row.get_bytes(#col).map(#core::FieldBytes)? },
+        "FieldUuid" => quote! { row.get_uuid(#col).map(#core::FieldUuid)? },
         "FieldDateTime" => quote! { row.get_datetime(#col).map(#core::FieldDateTime)? },
-        "FieldDate"     => quote! { row.get_date(#col).map(#core::FieldDate)? },
-        "FieldTime"     => quote! { row.get_time(#col).map(#core::FieldTime)? },
-        "FieldJson"     => quote! { row.get_json(#col).map(#core::FieldJson)? },
+        "FieldDate" => quote! { row.get_date(#col).map(#core::FieldDate)? },
+        "FieldTime" => quote! { row.get_time(#col).map(#core::FieldTime)? },
+        "FieldJson" => quote! { row.get_json(#col).map(#core::FieldJson)? },
         s if s.starts_with("ForeignKey<") => {
             // Extract the type parameter — not used at runtime, only for type safety
             quote! { row.get_uuid(#col).map(|id| #core::ForeignKey::new(id))? }
@@ -347,15 +373,33 @@ fn field_type_to_getter(type_str: &str, col: &str, nullable: bool, core: &TokenS
 
     if nullable {
         match type_str {
-            "FieldBool"     => quote! { if row.is_null(#col) { None } else { Some(row.get_bool(#col).map(#core::FieldBool)?) } },
-            "FieldSmallInt" => quote! { if row.is_null(#col) { None } else { Some(row.get_i16(#col).map(#core::FieldSmallInt)?) } },
-            "FieldInt"      => quote! { if row.is_null(#col) { None } else { Some(row.get_i32(#col).map(#core::FieldInt)?) } },
-            "FieldBigInt"   => quote! { if row.is_null(#col) { None } else { Some(row.get_i64(#col).map(#core::FieldBigInt)?) } },
-            "FieldText"     => quote! { if row.is_null(#col) { None } else { Some(row.get_string(#col).map(#core::FieldText)?) } },
-            "FieldEmail"    => quote! { if row.is_null(#col) { None } else { Some(row.get_string(#col).map(#core::FieldEmail)?) } },
-            "FieldUuid"     => quote! { if row.is_null(#col) { None } else { Some(row.get_uuid(#col).map(#core::FieldUuid)?) } },
-            "FieldDateTime" => quote! { if row.is_null(#col) { None } else { Some(row.get_datetime(#col).map(#core::FieldDateTime)?) } },
-            "FieldJson"     => quote! { if row.is_null(#col) { None } else { Some(row.get_json(#col).map(#core::FieldJson)?) } },
+            "FieldBool" => {
+                quote! { if row.is_null(#col) { None } else { Some(row.get_bool(#col).map(#core::FieldBool)?) } }
+            }
+            "FieldSmallInt" => {
+                quote! { if row.is_null(#col) { None } else { Some(row.get_i16(#col).map(#core::FieldSmallInt)?) } }
+            }
+            "FieldInt" => {
+                quote! { if row.is_null(#col) { None } else { Some(row.get_i32(#col).map(#core::FieldInt)?) } }
+            }
+            "FieldBigInt" => {
+                quote! { if row.is_null(#col) { None } else { Some(row.get_i64(#col).map(#core::FieldBigInt)?) } }
+            }
+            "FieldText" => {
+                quote! { if row.is_null(#col) { None } else { Some(row.get_string(#col).map(#core::FieldText)?) } }
+            }
+            "FieldEmail" => {
+                quote! { if row.is_null(#col) { None } else { Some(row.get_string(#col).map(#core::FieldEmail)?) } }
+            }
+            "FieldUuid" => {
+                quote! { if row.is_null(#col) { None } else { Some(row.get_uuid(#col).map(#core::FieldUuid)?) } }
+            }
+            "FieldDateTime" => {
+                quote! { if row.is_null(#col) { None } else { Some(row.get_datetime(#col).map(#core::FieldDateTime)?) } }
+            }
+            "FieldJson" => {
+                quote! { if row.is_null(#col) { None } else { Some(row.get_json(#col).map(#core::FieldJson)?) } }
+            }
             s if s.starts_with("ForeignKey<") => {
                 quote! { if row.is_null(#col) { None } else { Some(row.get_uuid(#col).map(|id| #core::ForeignKey::new(id))?) } }
             }
@@ -373,7 +417,9 @@ fn field_type_to_getter(type_str: &str, col: &str, nullable: bool, core: &TokenS
 }
 
 fn parse_two_generics(s: &str, prefix: &str) -> (usize, usize) {
-    let inner = s.trim_start_matches(&format!("{}<", prefix)).trim_end_matches('>');
+    let inner = s
+        .trim_start_matches(&format!("{}<", prefix))
+        .trim_end_matches('>');
     let parts: Vec<&str> = inner.split(',').collect();
     if parts.len() == 2 {
         let min = parts[0].trim().parse().unwrap_or(0);
@@ -385,7 +431,9 @@ fn parse_two_generics(s: &str, prefix: &str) -> (usize, usize) {
 }
 
 fn parse_two_generics_i64(s: &str, prefix: &str) -> (i64, i64) {
-    let inner = s.trim_start_matches(&format!("{}<", prefix)).trim_end_matches('>');
+    let inner = s
+        .trim_start_matches(&format!("{}<", prefix))
+        .trim_end_matches('>');
     let parts: Vec<&str> = inner.split(',').collect();
     if parts.len() == 2 {
         let min = parts[0].trim().parse().unwrap_or(i64::MIN);
@@ -407,11 +455,12 @@ fn is_many_to_many(ty: &Type) -> bool {
 fn extract_option(ty: &Type) -> (bool, &Type) {
     if let Type::Path(tp) = ty
         && let Some(seg) = tp.path.segments.last()
-            && seg.ident == "Option"
-                && let syn::PathArguments::AngleBracketed(args) = &seg.arguments
-                    && let Some(syn::GenericArgument::Type(inner)) = args.args.first() {
-                        return (true, inner);
-                    }
+        && seg.ident == "Option"
+        && let syn::PathArguments::AngleBracketed(args) = &seg.arguments
+        && let Some(syn::GenericArgument::Type(inner)) = args.args.first()
+    {
+        return (true, inner);
+    }
     (false, ty)
 }
 
@@ -420,30 +469,35 @@ fn map_field_type(ty: &Type, core: &TokenStream) -> Result<TokenStream> {
     let type_str = quote!(#ty).to_string().replace(" ", "");
 
     let col_type = match type_str.as_str() {
-        "FieldBool"       => quote! { #core::ColumnType::Bool },
-        "FieldSmallInt"   => quote! { #core::ColumnType::SmallInt },
-        "FieldInt"        => quote! { #core::ColumnType::Int },
-        "FieldBigInt"     => quote! { #core::ColumnType::BigInt },
-        "FieldFloat"      => quote! { #core::ColumnType::Float },
-        "FieldDouble"     => quote! { #core::ColumnType::Double },
-        "FieldText"       => quote! { #core::ColumnType::Text },
-        "FieldEmail"      => quote! { #core::ColumnType::Varchar(254) },
-        "FieldUrl"        => quote! { #core::ColumnType::Varchar(2048) },
-        "FieldBytes"      => quote! { #core::ColumnType::Bytea },
-        "FieldUuid"       => quote! { #core::ColumnType::Uuid },
-        "FieldDate"       => quote! { #core::ColumnType::Date },
-        "FieldTime"       => quote! { #core::ColumnType::Time },
-        "FieldDateTime"   => quote! { #core::ColumnType::DateTime },
-        "FieldJson"       => quote! { #core::ColumnType::Jsonb },
-        s if s.starts_with("ForeignKey<")    => quote! { #core::ColumnType::Uuid },
-        s if s.starts_with("FieldVarchar<")  => parse_varchar(s, core)?,
-        s if s.starts_with("FieldDecimal<")  => parse_decimal(s, core)?,
+        "FieldBool" => quote! { #core::ColumnType::Bool },
+        "FieldSmallInt" => quote! { #core::ColumnType::SmallInt },
+        "FieldInt" => quote! { #core::ColumnType::Int },
+        "FieldBigInt" => quote! { #core::ColumnType::BigInt },
+        "FieldFloat" => quote! { #core::ColumnType::Float },
+        "FieldDouble" => quote! { #core::ColumnType::Double },
+        "FieldText" => quote! { #core::ColumnType::Text },
+        "FieldEmail" => quote! { #core::ColumnType::Varchar(254) },
+        "FieldUrl" => quote! { #core::ColumnType::Varchar(2048) },
+        "FieldBytes" => quote! { #core::ColumnType::Bytea },
+        "FieldUuid" => quote! { #core::ColumnType::Uuid },
+        "FieldDate" => quote! { #core::ColumnType::Date },
+        "FieldTime" => quote! { #core::ColumnType::Time },
+        "FieldDateTime" => quote! { #core::ColumnType::DateTime },
+        "FieldJson" => quote! { #core::ColumnType::Jsonb },
+        s if s.starts_with("ForeignKey<") => quote! { #core::ColumnType::Uuid },
+        s if s.starts_with("FieldVarchar<") => parse_varchar(s, core)?,
+        s if s.starts_with("FieldDecimal<") => parse_decimal(s, core)?,
         s if s.starts_with("FieldPassword<") => parse_password(s, core)?,
-        s if s.starts_with("FieldRange<")    => quote! { #core::ColumnType::BigInt },
-        _ => return Err(syn::Error::new(
-            proc_macro2::Span::call_site(),
-            format!("Unknown Rango field type: `{}`. Use a FieldXxx type.", type_str),
-        )),
+        s if s.starts_with("FieldRange<") => quote! { #core::ColumnType::BigInt },
+        _ => {
+            return Err(syn::Error::new(
+                proc_macro2::Span::call_site(),
+                format!(
+                    "Unknown Rango field type: `{}`. Use a FieldXxx type.",
+                    type_str
+                ),
+            ));
+        }
     };
     Ok(col_type)
 }
@@ -452,31 +506,40 @@ fn parse_varchar(s: &str, core: &TokenStream) -> Result<TokenStream> {
     let inner = s.trim_start_matches("FieldVarchar<").trim_end_matches('>');
     let parts: Vec<&str> = inner.split(',').collect();
     if parts.len() == 2
-        && let Ok(max) = parts[1].trim().parse::<u32>() {
-            return Ok(quote! { #core::ColumnType::Varchar(#max) });
-        }
-    Err(syn::Error::new(proc_macro2::Span::call_site(),
-        format!("Invalid FieldVarchar syntax: `{}`", s)))
+        && let Ok(max) = parts[1].trim().parse::<u32>()
+    {
+        return Ok(quote! { #core::ColumnType::Varchar(#max) });
+    }
+    Err(syn::Error::new(
+        proc_macro2::Span::call_site(),
+        format!("Invalid FieldVarchar syntax: `{}`", s),
+    ))
 }
 
 fn parse_decimal(s: &str, core: &TokenStream) -> Result<TokenStream> {
     let inner = s.trim_start_matches("FieldDecimal<").trim_end_matches('>');
     let parts: Vec<&str> = inner.split(',').collect();
     if parts.len() == 2
-        && let (Ok(p), Ok(sc)) = (parts[0].trim().parse::<u8>(), parts[1].trim().parse::<u8>()) {
-            return Ok(quote! { #core::ColumnType::Decimal { precision: #p, scale: #sc } });
-        }
-    Err(syn::Error::new(proc_macro2::Span::call_site(),
-        format!("Invalid FieldDecimal syntax: `{}`", s)))
+        && let (Ok(p), Ok(sc)) = (parts[0].trim().parse::<u8>(), parts[1].trim().parse::<u8>())
+    {
+        return Ok(quote! { #core::ColumnType::Decimal { precision: #p, scale: #sc } });
+    }
+    Err(syn::Error::new(
+        proc_macro2::Span::call_site(),
+        format!("Invalid FieldDecimal syntax: `{}`", s),
+    ))
 }
 
 fn parse_password(s: &str, core: &TokenStream) -> Result<TokenStream> {
     let inner = s.trim_start_matches("FieldPassword<").trim_end_matches('>');
     let parts: Vec<&str> = inner.split(',').collect();
     if parts.len() == 2
-        && let Ok(max) = parts[1].trim().parse::<u32>() {
-            return Ok(quote! { #core::ColumnType::Varchar(#max) });
-        }
-    Err(syn::Error::new(proc_macro2::Span::call_site(),
-        format!("Invalid FieldPassword syntax: `{}`", s)))
+        && let Ok(max) = parts[1].trim().parse::<u32>()
+    {
+        return Ok(quote! { #core::ColumnType::Varchar(#max) });
+    }
+    Err(syn::Error::new(
+        proc_macro2::Span::call_site(),
+        format!("Invalid FieldPassword syntax: `{}`", s),
+    ))
 }

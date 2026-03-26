@@ -1,16 +1,28 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use rango_core::{BackendKind, ColumnDef, ColumnType, Constraint, DefaultValue, TableSchema};
 use std::fs;
 
-use crate::scanner::{scan_models, M2MRelation};
-use crate::snapshot::{diff, Snapshot, SchemaDiff};
+use crate::scanner::{M2MRelation, scan_models};
+use crate::snapshot::{SchemaDiff, Snapshot, diff};
 
-pub fn run(src_dir: &str, output_dir: &str, prefix: Option<&str>, dry_run: bool, check: bool) -> Result<()> {
+pub fn run(
+    src_dir: &str,
+    output_dir: &str,
+    prefix: Option<&str>,
+    dry_run: bool,
+    check: bool,
+) -> Result<()> {
     // Detect backend from rango.toml
     let cfg = crate::config::RangoConfig::load().unwrap_or_default();
     let backend = cfg.database.backend_kind();
-    let backend_label = match backend { BackendKind::Sqlite => "sqlite", _ => "postgres" };
-    println!("🔍 Scanning models in {}... (backend: {})", src_dir, backend_label);
+    let backend_label = match backend {
+        BackendKind::Sqlite => "sqlite",
+        _ => "postgres",
+    };
+    println!(
+        "🔍 Scanning models in {}... (backend: {})",
+        src_dir, backend_label
+    );
 
     let prefix = match prefix {
         Some(p) => p.to_string(),
@@ -36,7 +48,8 @@ pub fn run(src_dir: &str, output_dir: &str, prefix: Option<&str>, dry_run: bool,
     }
 
     // Generate M2M pivot tables (also prefixed)
-    let pivot_schemas: Vec<TableSchema> = m2m_relations.iter()
+    let pivot_schemas: Vec<TableSchema> = m2m_relations
+        .iter()
         .map(|rel| generate_pivot_table(rel, &prefix))
         .collect();
 
@@ -78,7 +91,10 @@ pub fn run(src_dir: &str, output_dir: &str, prefix: Option<&str>, dry_run: bool,
     if check {
         let next_num = next_migration_number(output_dir)?;
         let label = migration_label(&diffs);
-        eprintln!("❌ Pending migration detected: {:04}_{}.sql", next_num, label);
+        eprintln!(
+            "❌ Pending migration detected: {:04}_{}.sql",
+            next_num, label
+        );
         eprintln!("   Run `rango makemigrations` to generate it.");
         std::process::exit(1);
     }
@@ -113,15 +129,21 @@ fn generate_sql_from_diff(diffs: &[SchemaDiff], backend: BackendKind) -> String 
             SchemaDiff::AddColumn { table, column } => {
                 let def = column_definition(column, backend);
                 sql.push_str(&format!(
-                    "ALTER TABLE \"{}\" ADD COLUMN {};\n\n", table, def
+                    "ALTER TABLE \"{}\" ADD COLUMN {};\n\n",
+                    table, def
                 ));
             }
             SchemaDiff::DropColumn { table, column } => {
                 sql.push_str(&format!(
-                    "ALTER TABLE \"{}\" DROP COLUMN \"{}\";\n\n", table, column
+                    "ALTER TABLE \"{}\" DROP COLUMN \"{}\";\n\n",
+                    table, column
                 ));
             }
-            SchemaDiff::AlterColumnType { table, column, new_type } => {
+            SchemaDiff::AlterColumnType {
+                table,
+                column,
+                new_type,
+            } => {
                 // SQLite doesn't support ALTER COLUMN TYPE — emit a comment
                 if backend == BackendKind::Sqlite {
                     sql.push_str(&format!(
@@ -131,25 +153,39 @@ fn generate_sql_from_diff(diffs: &[SchemaDiff], backend: BackendKind) -> String 
                 } else {
                     sql.push_str(&format!(
                         "ALTER TABLE \"{}\" ALTER COLUMN \"{}\" TYPE {};\n\n",
-                        table, column, sql_type(new_type, backend)
+                        table,
+                        column,
+                        sql_type(new_type, backend)
                     ));
                 }
             }
-            SchemaDiff::AlterColumnNullable { table, column, nullable } => {
+            SchemaDiff::AlterColumnNullable {
+                table,
+                column,
+                nullable,
+            } => {
                 if backend == BackendKind::Sqlite {
                     sql.push_str(&format!(
                         "-- SQLite does not support SET/DROP NOT NULL on \"{}\".\"{}\" → recreate the table manually.\n\n",
                         table, column
                     ));
                 } else {
-                    let op = if *nullable { "DROP NOT NULL" } else { "SET NOT NULL" };
+                    let op = if *nullable {
+                        "DROP NOT NULL"
+                    } else {
+                        "SET NOT NULL"
+                    };
                     sql.push_str(&format!(
                         "ALTER TABLE \"{}\" ALTER COLUMN \"{}\" {};\n\n",
                         table, column, op
                     ));
                 }
             }
-            SchemaDiff::AlterColumnUnique { table, column, unique } => {
+            SchemaDiff::AlterColumnUnique {
+                table,
+                column,
+                unique,
+            } => {
                 if *unique {
                     sql.push_str(&format!(
                         "ALTER TABLE \"{}\" ADD CONSTRAINT \"{}_{}_unique\" UNIQUE (\"{}\");\n\n",
@@ -182,8 +218,10 @@ fn generate_create_table(schema: &TableSchema, backend: BackendKind) -> String {
 
     // Detect pivot table: 2 UUID NOT NULL non-PK columns → composite PK
     let is_pivot = schema.columns.len() == 2
-        && schema.columns.iter().all(|c| !c.primary_key && !c.nullable
-            && c.col_type == rango_core::ColumnType::Uuid);
+        && schema
+            .columns
+            .iter()
+            .all(|c| !c.primary_key && !c.nullable && c.col_type == rango_core::ColumnType::Uuid);
 
     if is_pivot {
         let col1 = &schema.columns[0].name;
@@ -203,7 +241,9 @@ fn generate_create_table(schema: &TableSchema, backend: BackendKind) -> String {
                 lines.push(format!("    CONSTRAINT \"{}\" CHECK ({})", name, cc.sql));
             }
             Constraint::Unique(uc) if uc.condition.is_none() => {
-                let cols = uc.fields.iter()
+                let cols = uc
+                    .fields
+                    .iter()
                     .map(|f| format!("\"{}\"", f))
                     .collect::<Vec<_>>()
                     .join(", ");
@@ -216,7 +256,9 @@ fn generate_create_table(schema: &TableSchema, backend: BackendKind) -> String {
             }
             Constraint::Unique(uc) => {
                 // Partial unique constraint → separate CREATE UNIQUE INDEX (PostgreSQL)
-                let cols = uc.fields.iter()
+                let cols = uc
+                    .fields
+                    .iter()
                     .map(|f| format!("\"{}\"", f))
                     .collect::<Vec<_>>()
                     .join(", ");
@@ -263,8 +305,8 @@ fn column_definition(col: &ColumnDef, backend: BackendKind) -> String {
     if let Some(default) = &col.default {
         match default {
             DefaultValue::CurrentTimestamp => def.push_str(" DEFAULT now()"),
-            DefaultValue::Literal(v)       => def.push_str(&format!(" DEFAULT {}", v)),
-            DefaultValue::GeneratedUuid    => def.push_str(" DEFAULT gen_random_uuid()"),
+            DefaultValue::Literal(v) => def.push_str(&format!(" DEFAULT {}", v)),
+            DefaultValue::GeneratedUuid => def.push_str(" DEFAULT gen_random_uuid()"),
         }
     }
     def
@@ -273,56 +315,65 @@ fn column_definition(col: &ColumnDef, backend: BackendKind) -> String {
 fn sql_type(col_type: &ColumnType, backend: BackendKind) -> &'static str {
     match backend {
         BackendKind::Sqlite => match col_type {
-            ColumnType::Bool                      => "INTEGER",  // 0/1
-            ColumnType::SmallInt                  => "INTEGER",
-            ColumnType::Int                       => "INTEGER",
-            ColumnType::BigInt                    => "INTEGER",
-            ColumnType::Float                     => "REAL",
-            ColumnType::Double                    => "REAL",
-            ColumnType::Decimal { .. }            => "REAL",
-            ColumnType::Text                      => "TEXT",
-            ColumnType::Bytea                     => "BLOB",
-            ColumnType::Uuid                      => "TEXT",    // stored as UUID string
-            ColumnType::Date                      => "TEXT",    // ISO 8601
-            ColumnType::Time                      => "TEXT",
-            ColumnType::DateTime                  => "TEXT",    // ISO 8601
-            ColumnType::Json | ColumnType::Jsonb  => "TEXT",    // serialized JSON
-            ColumnType::Varchar(_)                => "TEXT",
+            ColumnType::Bool => "INTEGER", // 0/1
+            ColumnType::SmallInt => "INTEGER",
+            ColumnType::Int => "INTEGER",
+            ColumnType::BigInt => "INTEGER",
+            ColumnType::Float => "REAL",
+            ColumnType::Double => "REAL",
+            ColumnType::Decimal { .. } => "REAL",
+            ColumnType::Text => "TEXT",
+            ColumnType::Bytea => "BLOB",
+            ColumnType::Uuid => "TEXT", // stored as UUID string
+            ColumnType::Date => "TEXT", // ISO 8601
+            ColumnType::Time => "TEXT",
+            ColumnType::DateTime => "TEXT", // ISO 8601
+            ColumnType::Json | ColumnType::Jsonb => "TEXT", // serialized JSON
+            ColumnType::Varchar(_) => "TEXT",
         },
         _ => match col_type {
-            ColumnType::Bool           => "BOOLEAN",
-            ColumnType::SmallInt       => "SMALLINT",
-            ColumnType::Int            => "INTEGER",
-            ColumnType::BigInt         => "BIGINT",
-            ColumnType::Float          => "REAL",
-            ColumnType::Double         => "DOUBLE PRECISION",
-            ColumnType::Text           => "TEXT",
-            ColumnType::Bytea          => "BYTEA",
-            ColumnType::Uuid           => "UUID",
-            ColumnType::Date           => "DATE",
-            ColumnType::Time           => "TIME",
-            ColumnType::DateTime       => "TIMESTAMPTZ",
-            ColumnType::Json           => "JSON",
-            ColumnType::Jsonb          => "JSONB",
-            ColumnType::Varchar(_)     => "VARCHAR",
+            ColumnType::Bool => "BOOLEAN",
+            ColumnType::SmallInt => "SMALLINT",
+            ColumnType::Int => "INTEGER",
+            ColumnType::BigInt => "BIGINT",
+            ColumnType::Float => "REAL",
+            ColumnType::Double => "DOUBLE PRECISION",
+            ColumnType::Text => "TEXT",
+            ColumnType::Bytea => "BYTEA",
+            ColumnType::Uuid => "UUID",
+            ColumnType::Date => "DATE",
+            ColumnType::Time => "TIME",
+            ColumnType::DateTime => "TIMESTAMPTZ",
+            ColumnType::Json => "JSON",
+            ColumnType::Jsonb => "JSONB",
+            ColumnType::Varchar(_) => "VARCHAR",
             ColumnType::Decimal { .. } => "NUMERIC",
         },
     }
 }
 
 fn migration_label(diffs: &[SchemaDiff]) -> String {
-    let mut tables: Vec<String> = diffs.iter().map(|d| match d {
-        SchemaDiff::CreateTable(s)              => s.table_name.clone(),
-        SchemaDiff::DropTable(t)                => t.clone(),
-        SchemaDiff::AddColumn { table, .. }     => table.clone(),
-        SchemaDiff::DropColumn { table, .. }    => table.clone(),
-        SchemaDiff::AlterColumnType { table, .. }     => table.clone(),
-        SchemaDiff::AlterColumnNullable { table, .. } => table.clone(),
-        SchemaDiff::AlterColumnUnique { table, .. }   => table.clone(),
-    }).collect::<std::collections::HashSet<_>>().into_iter().collect();
+    let mut tables: Vec<String> = diffs
+        .iter()
+        .map(|d| match d {
+            SchemaDiff::CreateTable(s) => s.table_name.clone(),
+            SchemaDiff::DropTable(t) => t.clone(),
+            SchemaDiff::AddColumn { table, .. } => table.clone(),
+            SchemaDiff::DropColumn { table, .. } => table.clone(),
+            SchemaDiff::AlterColumnType { table, .. } => table.clone(),
+            SchemaDiff::AlterColumnNullable { table, .. } => table.clone(),
+            SchemaDiff::AlterColumnUnique { table, .. } => table.clone(),
+        })
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
     tables.sort();
     let joined = tables.join("_");
-    if joined.len() <= 40 { joined } else { "auto".to_string() }
+    if joined.len() <= 40 {
+        joined
+    } else {
+        "auto".to_string()
+    }
 }
 
 fn next_migration_number(dir: &str) -> Result<u32> {
@@ -332,9 +383,10 @@ fn next_migration_number(dir: &str) -> Result<u32> {
             let name = entry.file_name();
             let name = name.to_string_lossy();
             if let Some(num_str) = name.split('_').next()
-                && let Ok(n) = num_str.parse::<u32>() {
-                    max = max.max(n);
-                }
+                && let Ok(n) = num_str.parse::<u32>()
+            {
+                max = max.max(n);
+            }
         }
     }
     Ok(max + 1)
@@ -375,8 +427,8 @@ fn generate_pivot_table(rel: &M2MRelation, prefix: &str) -> TableSchema {
 #[cfg(test)]
 mod tests {
     use super::{generate_sql_from_diff, migration_label};
-    use rango_core::{ColumnDef, ColumnType, TableSchema};
     use crate::snapshot::SchemaDiff;
+    use rango_core::{ColumnDef, ColumnType, TableSchema};
 
     fn uuid_col(name: &str, pk: bool) -> ColumnDef {
         ColumnDef {
@@ -450,7 +502,11 @@ mod tests {
             column: "old_col".to_string(),
         };
         let sql = generate_sql_from_diff(&[diff], rango_core::BackendKind::Postgres);
-        assert!(sql.contains("ALTER TABLE \"x\" DROP COLUMN"), "got: {}", sql);
+        assert!(
+            sql.contains("ALTER TABLE \"x\" DROP COLUMN"),
+            "got: {}",
+            sql
+        );
         assert!(sql.contains("\"old_col\""), "got: {}", sql);
     }
 
@@ -493,7 +549,11 @@ mod tests {
     #[test]
     fn test_empty_diff_produces_empty_string() {
         let sql = generate_sql_from_diff(&[], rango_core::BackendKind::Postgres);
-        assert!(sql.is_empty(), "empty diff should produce empty string; got: {:?}", sql);
+        assert!(
+            sql.is_empty(),
+            "empty diff should produce empty string; got: {:?}",
+            sql
+        );
     }
 
     // ── migration_label ───────────────────────────────────────────────────────
@@ -529,9 +589,10 @@ fn detect_project_name() -> Result<String> {
     for line in cargo_toml.lines() {
         let line = line.trim();
         if line.starts_with("name")
-            && let Some(val) = line.split_once('=').map(|x| x.1) {
-                return Ok(val.trim().trim_matches('"').to_string());
-            }
+            && let Some(val) = line.split_once('=').map(|x| x.1)
+        {
+            return Ok(val.trim().trim_matches('"').to_string());
+        }
     }
     bail!("Could not detect project name from Cargo.toml — use --prefix")
 }

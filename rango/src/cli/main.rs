@@ -10,7 +10,6 @@ mod migrate;
 mod scanner;
 mod snapshot;
 
-
 #[derive(Parser)]
 #[command(name = "rango", about = "Rango ORM CLI")]
 struct Cli {
@@ -110,29 +109,56 @@ fn main() -> Result<()> {
         Command::Init { backend } => {
             init::run(&backend)?;
         }
-        Command::Makemigrations { path, output, prefix, dry_run, check } => {
+        Command::Makemigrations {
+            path,
+            output,
+            prefix,
+            dry_run,
+            check,
+        } => {
             let cfg = config::RangoConfig::load()?;
-            let prefix = prefix
-                .or(cfg.models.prefix)
-                .map(|s| s.as_str().to_string());
+            let prefix = prefix.or(cfg.models.prefix).map(|s| s.as_str().to_string());
             makemigrations::run(&path, &output, prefix.as_deref(), dry_run, check)?;
         }
-        Command::Export { table, format, output, database_url } => {
+        Command::Export {
+            table,
+            format,
+            output,
+            database_url,
+        } => {
             let cfg = config::RangoConfig::load()?;
             let url = cfg.resolve_database_url(database_url.as_deref())?;
             let fmt = export::Format::from_str(&format)?;
-            tokio::runtime::Runtime::new()?
-                .block_on(export::run(&url, table.as_deref(), fmt, output.as_deref()))?;
+            tokio::runtime::Runtime::new()?.block_on(export::run(
+                &url,
+                table.as_deref(),
+                fmt,
+                output.as_deref(),
+            ))?;
         }
 
-        Command::Import { input, table, format, replace, database_url } => {
+        Command::Import {
+            input,
+            table,
+            format,
+            replace,
+            database_url,
+        } => {
             let cfg = config::RangoConfig::load()?;
             let url = cfg.resolve_database_url(database_url.as_deref())?;
-            tokio::runtime::Runtime::new()?
-                .block_on(import::run(&url, &input, table.as_deref(), format.as_deref(), replace))?;
+            tokio::runtime::Runtime::new()?.block_on(import::run(
+                &url,
+                &input,
+                table.as_deref(),
+                format.as_deref(),
+                replace,
+            ))?;
         }
 
-        Command::Migrate { database_url, migrations } => {
+        Command::Migrate {
+            database_url,
+            migrations,
+        } => {
             let cfg = config::RangoConfig::load()?;
             let url = cfg.resolve_database_url(database_url.as_deref())?;
             let dir = if migrations == "migrations" {
@@ -140,8 +166,11 @@ fn main() -> Result<()> {
             } else {
                 migrations
             };
-            tokio::runtime::Runtime::new()?
-                .block_on(migrate::run(&url, &dir, &cfg.database.after_connect))?;
+            tokio::runtime::Runtime::new()?.block_on(migrate::run(
+                &url,
+                &dir,
+                &cfg.database.after_connect,
+            ))?;
         }
     }
 
