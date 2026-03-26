@@ -23,6 +23,7 @@ struct TestUser {
     score: Option<FieldInt>,
 }
 
+#[allow(dead_code)]
 #[derive(Model, Debug, Clone)]
 #[model(table = "rango_test_post")]
 struct TestPost {
