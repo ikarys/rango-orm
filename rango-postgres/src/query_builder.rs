@@ -2,7 +2,7 @@ use std::any::{Any, TypeId};
 use std::collections::HashMap;
 
 use rango_core::{FromRow, Model, ModelValues, RowError, SqlValue};
-use sqlx::PgPool;
+use sqlx::{PgPool, Postgres};
 use anyhow::Result;
 
 use crate::ops::DEFAULT_QUERY_LIMIT;
@@ -511,6 +511,85 @@ where
     /// Check if any matching row exists.
     pub async fn exists(self) -> Result<bool> {
         Ok(self.count().await? > 0)
+    }
+
+    /// SELECT SUM(col) FROM ... WHERE ... — returns None if the table is empty or all values are NULL.
+    pub async fn sum(self, col: &str) -> Result<Option<f64>> {
+        let table = M::table_name();
+        let (where_clause, binds) = self.build_where();
+        let mut sql = format!("SELECT SUM(\"{}\") FROM \"{}\"", col, table);
+        if !where_clause.is_empty() { sql.push(' '); sql.push_str(&where_clause); }
+        let row = bind_and_fetch_one(&self.pool, &sql, binds).await?;
+        Ok(row.try_get::<Option<f64>, _>(0).unwrap_or(None))
+    }
+
+    /// SELECT AVG(col) FROM ... WHERE ... — returns None if the table is empty or all values are NULL.
+    pub async fn avg(self, col: &str) -> Result<Option<f64>> {
+        let table = M::table_name();
+        let (where_clause, binds) = self.build_where();
+        let mut sql = format!("SELECT AVG(\"{}\") FROM \"{}\"", col, table);
+        if !where_clause.is_empty() { sql.push(' '); sql.push_str(&where_clause); }
+        let row = bind_and_fetch_one(&self.pool, &sql, binds).await?;
+        Ok(row.try_get::<Option<f64>, _>(0).unwrap_or(None))
+    }
+
+    /// SELECT MIN(col) FROM ... WHERE ...
+    ///
+    /// Generic over the return type — works for numbers, strings, dates, etc.
+    /// Returns `None` if the table is empty or all values are NULL.
+    ///
+    /// # Example
+    /// ```rust
+    /// let oldest: Option<NaiveDate> = Event::filter(&pool).min::<NaiveDate>("date").await?;
+    /// let lowest: Option<f64>       = Order::filter(&pool).min::<f64>("price").await?;
+    /// ```
+    pub async fn min<T>(self, col: &str) -> Result<Option<T>>
+    where
+        T: for<'r> sqlx::Decode<'r, Postgres> + sqlx::Type<Postgres>,
+    {
+        let table = M::table_name();
+        let (where_clause, binds) = self.build_where();
+        let mut sql = format!("SELECT MIN(\"{}\") FROM \"{}\"", col, table);
+        if !where_clause.is_empty() { sql.push(' '); sql.push_str(&where_clause); }
+        let row = bind_and_fetch_one(&self.pool, &sql, binds).await?;
+        Ok(row.try_get::<Option<T>, _>(0).unwrap_or(None))
+    }
+
+    /// SELECT MAX(col) FROM ... WHERE ...
+    ///
+    /// Generic over the return type — works for numbers, strings, dates, etc.
+    /// Returns `None` if the table is empty or all values are NULL.
+    ///
+    /// # Example
+    /// ```rust
+    /// let latest: Option<DateTime<Utc>> = Post::filter(&pool).max::<DateTime<Utc>>("created_at").await?;
+    /// let highest: Option<f64>          = Order::filter(&pool).max::<f64>("price").await?;
+    /// ```
+    pub async fn max<T>(self, col: &str) -> Result<Option<T>>
+    where
+        T: for<'r> sqlx::Decode<'r, Postgres> + sqlx::Type<Postgres>,
+    {
+        let table = M::table_name();
+        let (where_clause, binds) = self.build_where();
+        let mut sql = format!("SELECT MAX(\"{}\") FROM \"{}\"", col, table);
+        if !where_clause.is_empty() { sql.push(' '); sql.push_str(&where_clause); }
+        let row = bind_and_fetch_one(&self.pool, &sql, binds).await?;
+        Ok(row.try_get::<Option<T>, _>(0).unwrap_or(None))
+    }
+
+    /// Returns the SQL that would be executed by `.all()`, for debugging.
+    pub fn explain(&self) -> String {
+        let table = M::table_name();
+        let (where_clause, _) = self.build_where();
+        let mut sql = format!("SELECT * FROM \"{}\"", table);
+        if !where_clause.is_empty() { sql.push(' '); sql.push_str(&where_clause); }
+        if !self.order_by.is_empty() {
+            sql.push_str(&format!(" ORDER BY {}", self.order_by.join(", ")));
+        }
+        if let Some(l) = self.limit { sql.push_str(&format!(" LIMIT {}", l)); }
+        else if !self.explicit_limit { sql.push_str(&format!(" LIMIT {}", DEFAULT_QUERY_LIMIT)); }
+        if let Some(o) = self.offset { sql.push_str(&format!(" OFFSET {}", o)); }
+        sql
     }
 
     /// Execute a closure within a transaction, using this builder's pool.
