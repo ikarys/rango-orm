@@ -360,3 +360,124 @@ async fn test_sqlite_roundtrip() {
         Some(&rango_core::SqlValue::Text("Test User".to_string()))
     );
 }
+
+// ── SqliteQueryExt ────────────────────────────────────────────────────────────
+
+use rango_sqlite::SqliteQueryExt;
+
+#[derive(rango_derive::Model, Debug, Clone)]
+#[model(table = "test_article_sqlite")]
+struct TestArticleSqlite {
+    id: FieldUuid,
+    title: FieldVarchar<1, 255>,
+    metadata: FieldText, // JSON stored as TEXT in SQLite
+}
+
+async fn setup_article(pool: &SqlitePool) {
+    sqlx::query(
+        r#"CREATE TABLE IF NOT EXISTS "test_article_sqlite" (
+            "id"       TEXT PRIMARY KEY,
+            "title"    TEXT NOT NULL,
+            "metadata" TEXT NOT NULL DEFAULT '{}'
+        )"#,
+    )
+    .execute(pool)
+    .await
+    .expect("setup_article failed");
+
+    sqlx::query(r#"TRUNCATE "test_article_sqlite""#)
+        .execute(pool)
+        .await
+        .ok(); // SQLite doesn't support TRUNCATE — ignore
+
+    sqlx::query(r#"DELETE FROM "test_article_sqlite""#)
+        .execute(pool)
+        .await
+        .ok();
+}
+
+fn article_sqlite(title: &str, metadata: &str) -> TestArticleSqlite {
+    TestArticleSqlite {
+        id: FieldUuid(uuid::Uuid::new_v4()),
+        title: FieldVarchar(title.to_string()),
+        metadata: FieldText(metadata.to_string()),
+    }
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-sqlite"), ignore)]
+async fn test_sqlite_json_extract_eq() {
+    let pool = pool().await;
+    setup_article(&pool).await;
+
+    insert(
+        &pool,
+        article_sqlite("Published", r#"{"status":"published"}"#),
+    )
+    .await
+    .unwrap();
+    insert(&pool, article_sqlite("Draft", r#"{"status":"draft"}"#))
+        .await
+        .unwrap();
+
+    let results = TestArticleSqlite::filter(&pool)
+        .json_extract_eq("metadata", "$.status", "published")
+        .all()
+        .await
+        .expect("json_extract_eq failed");
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].title.0, "Published");
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-sqlite"), ignore)]
+async fn test_sqlite_json_extract_like() {
+    let pool = pool().await;
+    setup_article(&pool).await;
+
+    insert(
+        &pool,
+        article_sqlite("Rust ORM", r#"{"tags":"rust,orm,async"}"#),
+    )
+    .await
+    .unwrap();
+    insert(
+        &pool,
+        article_sqlite("Python web", r#"{"tags":"python,flask"}"#),
+    )
+    .await
+    .unwrap();
+
+    let results = TestArticleSqlite::filter(&pool)
+        .json_extract_like("metadata", "$.tags", "%rust%")
+        .all()
+        .await
+        .expect("json_extract_like failed");
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].title.0, "Rust ORM");
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-sqlite"), ignore)]
+async fn test_sqlite_json_extract_exists() {
+    let pool = pool().await;
+    setup_article(&pool).await;
+
+    insert(&pool, article_sqlite("With views", r#"{"views":42}"#))
+        .await
+        .unwrap();
+    insert(&pool, article_sqlite("No views", r#"{"status":"draft"}"#))
+        .await
+        .unwrap();
+
+    let results = TestArticleSqlite::filter(&pool)
+        .json_extract_exists("metadata", "$.views")
+        .all()
+        .await
+        .expect("json_extract_exists failed");
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].title.0, "With views");
+}

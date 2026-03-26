@@ -4,11 +4,13 @@ pub use ops::{
     all, bulk_create, delete, get, get_or_create, insert, raw, raw_execute, raw_scalar, update,
 };
 pub use query_builder::{QueryBuilder, RangoFilterExt};
+pub use sqlite_ext::SqliteQueryExt;
 pub use transaction::{atomic, SqliteTransaction};
 
 mod ops;
 mod query_builder;
 mod row;
+mod sqlite_ext;
 mod transaction;
 
 /// Newtype wrapper around SqlitePool that implements RangoBackend.
