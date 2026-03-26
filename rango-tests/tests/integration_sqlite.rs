@@ -244,3 +244,29 @@ async fn test_sqlite_raw_scalar() {
 
     assert_eq!(count, 1);
 }
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-sqlite"), ignore)]
+async fn test_sqlite_values_projection() {
+    let pool = pool().await;
+    setup(&pool).await;
+
+    insert(&pool, user("values@sqlite.com")).await.unwrap();
+
+    let rows = TestUser::filter(&pool)
+        .eq("email", "values@sqlite.com")
+        .values(&["email", "active"])
+        .await
+        .expect("values failed");
+
+    assert_eq!(rows.len(), 1);
+    assert!(rows[0].contains_key("email"));
+    assert!(rows[0].contains_key("active"));
+    assert!(!rows[0].contains_key("name"));
+
+    if let SqlValue::Text(email) = &rows[0]["email"] {
+        assert_eq!(email, "values@sqlite.com");
+    } else {
+        panic!("email should be SqlValue::Text");
+    }
+}
