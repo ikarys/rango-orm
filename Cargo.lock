@@ -1223,6 +1223,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "rango-sqlite"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "rango-core",
+ "serde_json",
+ "sqlx",
+ "uuid",
+]
+
+[[package]]
 name = "rango-tests"
 version = "0.1.0"
 dependencies = [
