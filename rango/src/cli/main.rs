@@ -2,6 +2,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 
 mod config;
+mod init;
 mod makemigrations;
 mod migrate;
 mod scanner;
@@ -17,6 +18,13 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Initialize a new Rango project (creates rango.toml and migrations/)
+    Init {
+        /// Database backend: sqlite (default) or postgres
+        #[arg(long, default_value = "sqlite")]
+        backend: String,
+    },
+
     /// Scan models and generate migration files
     Makemigrations {
         /// Directory to scan (default: src/)
@@ -56,6 +64,9 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
+        Command::Init { backend } => {
+            init::run(&backend)?;
+        }
         Command::Makemigrations { path, output, prefix, dry_run, check } => {
             let cfg = config::RangoConfig::load()?;
             let prefix = prefix

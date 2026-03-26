@@ -1,3 +1,4 @@
+pub mod backend;
 pub mod config;
 pub mod constraints;
 pub mod fields;
@@ -7,6 +8,7 @@ pub mod query;
 pub mod row;
 pub mod schema;
 
+pub use backend::RangoBackend;
 pub use config::{BackendKind, DatabaseConfig};
 pub use constraints::{
     asc, desc,
