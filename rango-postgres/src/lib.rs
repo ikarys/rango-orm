@@ -1,5 +1,6 @@
 pub mod executor;
 pub mod m2m;
+pub mod related;
 mod ops;
 mod query_builder;
 mod row;
@@ -14,8 +15,8 @@ pub use ops::{all, delete, get, get_or_create, insert, update, update_or_create,
 pub use transaction::{atomic, transaction, RangoTransaction};
 pub use executor::RangoExecutor;
 pub use m2m::M2M;
-pub(crate) use row::PgRangoRow2;
 pub use query_builder::QueryBuilder;
+pub use related::WithRelated;
 
 use rango_core::{Filterable, FromRow, Model, ModelValues};
 

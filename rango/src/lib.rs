@@ -29,7 +29,7 @@ pub use rango_postgres::{
     insert, update, update_or_create,
     M2M,
 };
-pub use rango_postgres::{QueryBuilder, RangoFilterExt};
+pub use rango_postgres::{QueryBuilder, RangoFilterExt, WithRelated};
 pub use rango_postgres::{RangoExecutor, RangoTransaction};
 
 /// Connect to a PostgreSQL database.
@@ -50,7 +50,7 @@ pub mod prelude {
     pub use rango_postgres::{
         all, atomic, transaction, delete, get, get_or_create,
         insert, update, update_or_create,
-        PgPool, QueryBuilder, RangoFilterExt, M2M,
+        PgPool, QueryBuilder, RangoFilterExt, WithRelated, M2M,
         RangoExecutor, RangoTransaction,
     };
     pub use rango_core::ModelHooks;
