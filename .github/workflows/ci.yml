@@ -93,7 +93,7 @@ jobs:
           key: ${{ runner.os }}-cargo-integration-${{ hashFiles('**/Cargo.lock') }}
 
       - name: cargo test (integration)
-        run: cargo test --workspace
+        run: cargo test --workspace --features rango-tests/integration
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/rango_test
 
@@ -137,7 +137,7 @@ jobs:
         uses: taiki-e/install-action@cargo-llvm-cov
 
       - name: Generate coverage report
-        run: cargo llvm-cov --workspace --lcov --output-path lcov.info
+        run: cargo llvm-cov --workspace --features rango-tests/integration --lcov --output-path lcov.info
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/rango_test
 
@@ -150,6 +150,6 @@ jobs:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
       - name: Enforce 80% coverage threshold
-        run: cargo llvm-cov report --fail-under-lines 80
+        run: cargo llvm-cov report --features rango-tests/integration --fail-under-lines 80
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/rango_test
