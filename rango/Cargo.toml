@@ -7,11 +7,17 @@ edition = "2024"
 name = "rango"
 path = "src/cli/main.rs"
 
+[features]
+default = ["sqlite"]
+sqlite = ["dep:rango-sqlite"]
+# postgres is always available (required by the CLI migrate command)
+
 [dependencies]
 # Internal crates
-rango-core = { path = "../rango-core" }
+rango-core   = { path = "../rango-core" }
 rango-derive = { path = "../rango-derive" }
-rango-postgres = { path = "../rango-postgres" }
+rango-postgres = { path = "../rango-postgres" }  # always needed for the CLI (migrate command)
+rango-sqlite   = { path = "../rango-sqlite", optional = true }
 
 # CLI
 clap = { version = "4", features = ["derive", "env"] }
@@ -31,6 +37,6 @@ anyhow = "1"
 dotenvy = "0.15"
 toml = "0.8"
 
-# DB
-sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "sqlite", "mysql"] }
+# DB (runtime only — actual features come from the backend crates)
+sqlx = { version = "0.8", features = ["runtime-tokio"] }
 tokio = { version = "1", features = ["full"] }

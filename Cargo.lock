@@ -1177,6 +1177,7 @@ dependencies = [
  "rango-core",
  "rango-derive",
  "rango-postgres",
+ "rango-sqlite",
  "serde",
  "serde_json",
  "sqlx",
