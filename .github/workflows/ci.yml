@@ -58,6 +58,9 @@ jobs:
       - name: cargo test (unit)
         run: cargo test --workspace
 
+      - name: cargo test (SQLite integration — in-memory)
+        run: cargo test --test integration_sqlite --features rango-tests/integration-sqlite -- --test-threads=1
+
   integration:
     name: Integration tests (Postgres)
     runs-on: ubuntu-latest

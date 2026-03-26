@@ -74,6 +74,7 @@ where
     pub fn is_not_null(self, col: &str) -> Self { self.add(col, Op::IsNotNull, None, None) }
 
     pub fn or(mut self) -> Self { self.next_connector = Connector::Or; self }
+    #[allow(clippy::should_implement_trait)]
     pub fn not(mut self) -> Self { self.next_connector = Connector::AndNot; self }
     pub fn or_not(mut self) -> Self { self.next_connector = Connector::OrNot; self }
     pub fn xor(mut self) -> Self { self.next_connector = Connector::Xor; self }
@@ -89,8 +90,8 @@ where
     }
 
     pub fn order_by(mut self, col: &str) -> Self {
-        let order = if col.starts_with('-') {
-            format!("\"{}\" DESC", &col[1..])
+        let order = if let Some(col) = col.strip_prefix('-') {
+            format!("\"{}\" DESC", col)
         } else {
             format!("\"{}\" ASC", col)
         };
