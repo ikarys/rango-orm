@@ -1,6 +1,6 @@
 /// A SQL-compatible value — used to bind field values to queries
 /// without requiring sqlx as a direct dependency of rango-core.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum SqlValue {
     // Typed nulls — carry the column type so the DB can infer correctly.
     NullBool,

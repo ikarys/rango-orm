@@ -546,3 +546,64 @@ async fn test_pg_json_field_eq() {
 
     teardown(&pool).await;
 }
+
+// ── Export / Import CLI ───────────────────────────────────────────────────────
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration"), ignore)]
+async fn test_export_import_roundtrip() {
+    let pool = pool().await;
+    setup(&pool).await;
+
+    // Insert test data
+    insert(&pool, user("roundtrip1@test.com")).await.unwrap();
+    insert(&pool, user("roundtrip2@test.com")).await.unwrap();
+
+    // Export via values() — mirrors rango export behavior
+    let rows = TestUser::filter(&pool)
+        .values(&["id", "email", "name", "active"])
+        .await
+        .expect("export via values failed");
+
+    assert_eq!(rows.len(), 2);
+
+    // Verify exported data is complete
+    let emails: Vec<String> = rows.iter()
+        .filter_map(|r| match r.get("email") {
+            Some(SqlValue::Text(s)) => Some(s.clone()),
+            _ => None,
+        })
+        .collect();
+
+    assert!(emails.contains(&"roundtrip1@test.com".to_string()));
+    assert!(emails.contains(&"roundtrip2@test.com".to_string()));
+
+    teardown(&pool).await;
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration"), ignore)]
+async fn test_values_all_types() {
+    let pool = pool().await;
+    setup(&pool).await;
+
+    let mut u = user("types@test.com");
+    u.score = Some(FieldInt(42));
+    insert(&pool, u).await.unwrap();
+
+    let rows = TestUser::filter(&pool)
+        .eq("email", "types@test.com")
+        .values(&["email", "score", "active"])
+        .await
+        .expect("values failed");
+
+    assert_eq!(rows.len(), 1);
+
+    // Check integer type
+    assert_eq!(rows[0].get("score"), Some(&SqlValue::BigInt(42)));
+
+    // Check bool type
+    assert_eq!(rows[0].get("active"), Some(&SqlValue::Bool(true)));
+
+    teardown(&pool).await;
+}

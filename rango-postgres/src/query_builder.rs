@@ -570,21 +570,35 @@ where
         let rows = bind_and_fetch_all(&self.pool, &sql, binds).await?;
 
         rows.into_iter().map(|row| {
+            use sqlx::{Column, TypeInfo};
             let mut map = std::collections::HashMap::new();
             for &col in cols {
-                // Try common types in order; fall back to string representation
-                let val: SqlValue = if let Ok(Some(v)) = row.try_get::<Option<i64>, _>(col) {
-                    SqlValue::BigInt(v)
-                } else if let Ok(Some(v)) = row.try_get::<Option<f64>, _>(col) {
-                    SqlValue::Double(v)
-                } else if let Ok(Some(v)) = row.try_get::<Option<bool>, _>(col) {
-                    SqlValue::Bool(v)
-                } else if let Ok(Some(v)) = row.try_get::<Option<uuid::Uuid>, _>(col) {
-                    SqlValue::Uuid(v)
-                } else if let Ok(Some(v)) = row.try_get::<Option<String>, _>(col) {
-                    SqlValue::Text(v)
-                } else {
-                    SqlValue::NullText
+                let type_name = row.column(col).type_info().name().to_uppercase();
+                let val: SqlValue = match type_name.as_str() {
+                    "BOOL" => row.try_get::<Option<bool>, _>(col).ok()
+                        .map(|v| v.map(SqlValue::Bool).unwrap_or(SqlValue::NullBool))
+                        .unwrap_or(SqlValue::NullBool),
+                    "INT2" => row.try_get::<Option<i16>, _>(col).ok()
+                        .map(|v| v.map(|n| SqlValue::BigInt(n as i64)).unwrap_or(SqlValue::NullBigInt))
+                        .unwrap_or(SqlValue::NullBigInt),
+                    "INT4" | "SERIAL" => row.try_get::<Option<i32>, _>(col).ok()
+                        .map(|v| v.map(|n| SqlValue::BigInt(n as i64)).unwrap_or(SqlValue::NullBigInt))
+                        .unwrap_or(SqlValue::NullBigInt),
+                    "INT8" | "BIGSERIAL" => row.try_get::<Option<i64>, _>(col).ok()
+                        .map(|v| v.map(SqlValue::BigInt).unwrap_or(SqlValue::NullBigInt))
+                        .unwrap_or(SqlValue::NullBigInt),
+                    "FLOAT4" => row.try_get::<Option<f32>, _>(col).ok()
+                        .map(|v| v.map(|n| SqlValue::Double(n as f64)).unwrap_or(SqlValue::NullDouble))
+                        .unwrap_or(SqlValue::NullDouble),
+                    "FLOAT8" | "NUMERIC" => row.try_get::<Option<f64>, _>(col).ok()
+                        .map(|v| v.map(SqlValue::Double).unwrap_or(SqlValue::NullDouble))
+                        .unwrap_or(SqlValue::NullDouble),
+                    "UUID" => row.try_get::<Option<uuid::Uuid>, _>(col).ok()
+                        .map(|v| v.map(SqlValue::Uuid).unwrap_or(SqlValue::NullUuid))
+                        .unwrap_or(SqlValue::NullUuid),
+                    _ => row.try_get::<Option<String>, _>(col).ok()
+                        .map(|v| v.map(SqlValue::Text).unwrap_or(SqlValue::NullText))
+                        .unwrap_or(SqlValue::NullText),
                 };
                 map.insert(col.to_string(), val);
             }
