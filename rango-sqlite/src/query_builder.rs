@@ -171,6 +171,37 @@ where
 
     pub async fn exists(self) -> Result<bool> { Ok(self.count().await? > 0) }
 
+    /// SELECT only the specified columns — returns raw rows as `Vec<HashMap<String, SqlValue>>`.
+    pub async fn values(self, cols: &[&str]) -> Result<Vec<std::collections::HashMap<String, SqlValue>>> {
+        use sqlx::Row;
+        let table = M::table_name();
+        let (where_clause, binds) = self.build_where();
+        let col_list = cols.iter().map(|c| format!("\"{}\"", c)).collect::<Vec<_>>().join(", ");
+        let mut sql = format!("SELECT {} FROM \"{}\"", col_list, table);
+        if !where_clause.is_empty() { sql.push(' '); sql.push_str(&where_clause); }
+        if !self.order_by.is_empty() { sql.push_str(&format!(" ORDER BY {}", self.order_by.join(", "))); }
+        if !self.explicit_limit { sql.push_str(&format!(" LIMIT {}", DEFAULT_QUERY_LIMIT)); }
+        else if let Some(l) = self.limit { sql.push_str(&format!(" LIMIT {}", l)); }
+        if let Some(o) = self.offset { sql.push_str(&format!(" OFFSET {}", o)); }
+        let rows = bind_and_fetch_all(&self.pool, &sql, binds).await?;
+        rows.into_iter().map(|row| {
+            let mut map = std::collections::HashMap::new();
+            for &col in cols {
+                let val: SqlValue = if let Ok(Some(v)) = row.try_get::<Option<i64>, _>(col) {
+                    SqlValue::BigInt(v)
+                } else if let Ok(Some(v)) = row.try_get::<Option<f64>, _>(col) {
+                    SqlValue::Double(v)
+                } else if let Ok(Some(v)) = row.try_get::<Option<String>, _>(col) {
+                    SqlValue::Text(v)
+                } else {
+                    SqlValue::NullText
+                };
+                map.insert(col.to_string(), val);
+            }
+            Ok(map)
+        }).collect()
+    }
+
     pub async fn sum(self, col: &str) -> Result<Option<f64>> {
         use sqlx::Row;
         let table = M::table_name();
