@@ -79,5 +79,5 @@ pub mod prelude {
     #[cfg(feature = "sqlite")]
     pub use crate::sqlite::*;
     #[cfg(feature = "sqlite")]
-    pub use rango_sqlite::SqlitePool;
+    pub use rango_sqlite::{SqlitePool, SqliteQueryExt};
 }

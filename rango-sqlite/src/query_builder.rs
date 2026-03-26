@@ -59,6 +59,8 @@ pub struct QueryBuilder<M> {
     offset: Option<i64>,
     explicit_limit: bool,
     next_connector: Connector,
+    /// Raw WHERE clauses injected by SqliteQueryExt. Each entry is (sql_fragment, binds).
+    pub(crate) raw_conditions: Vec<(String, Vec<SqlValue>)>,
     _phantom: std::marker::PhantomData<M>,
 }
 
@@ -75,8 +77,19 @@ where
             offset: None,
             explicit_limit: false,
             next_connector: Connector::And,
+            raw_conditions: Vec::new(),
             _phantom: std::marker::PhantomData,
         }
+    }
+
+    pub(crate) fn raw_where(mut self, sql: String, binds: Vec<SqlValue>) -> Self {
+        self.raw_conditions.push((sql, binds));
+        self
+    }
+
+    pub(crate) fn raw_where_no_bind(mut self, sql: String) -> Self {
+        self.raw_conditions.push((sql, vec![]));
+        self
     }
 
     pub fn eq(self, col: &str, val: impl Into<SqlValue>) -> Self {
@@ -190,12 +203,26 @@ where
     }
 
     fn build_where(&self) -> (String, Vec<SqlValue>) {
-        if self.conditions.is_empty() {
+        let has_conditions = !self.conditions.is_empty();
+        let has_raw = !self.raw_conditions.is_empty();
+
+        if !has_conditions && !has_raw {
             return (String::new(), Vec::new());
         }
+
         let mut binds = Vec::new();
-        let expr = build_conditions(&self.conditions, &mut binds);
-        (format!("WHERE {}", expr), binds)
+        let mut parts: Vec<String> = Vec::new();
+
+        if has_conditions {
+            parts.push(build_conditions(&self.conditions, &mut binds));
+        }
+
+        for (sql, raw_binds) in &self.raw_conditions {
+            binds.extend(raw_binds.clone());
+            parts.push(sql.clone());
+        }
+
+        (format!("WHERE {}", parts.join(" AND ")), binds)
     }
 
     pub fn explain(&self) -> String {
