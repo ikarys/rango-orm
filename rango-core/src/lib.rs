@@ -17,5 +17,5 @@ pub use hooks::ModelHooks;
 pub use model::{Model, ModelMixin};
 pub use query::{Filterable, ModelValues, SqlValue, ToSqlValue};
 pub use row::{FromRow, RangoRow, RowError};
-pub use schema::{ColumnDef, ColumnType, DefaultValue, ForeignKey, ReferentialAction, TableSchema};
+pub use schema::{ColumnDef, ColumnType, DefaultValue, FkReference, ReferentialAction, TableSchema};
 
