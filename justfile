@@ -20,6 +20,15 @@ check:
     cargo fmt --all -- --check
     cargo clippy --workspace -- -D warnings
 
+# Run SQLite benchmarks (no DB required)
+bench-sqlite:
+    cargo bench -p rango-bench --bench sqlite
+
+# Run Postgres benchmarks (requires DB)
+bench-postgres: db
+    DATABASE_URL={{database_url}} cargo bench -p rango-bench --bench postgres; \
+    docker compose down -v
+
 # Run unit tests only (no DB required)
 test:
     cargo test --workspace
