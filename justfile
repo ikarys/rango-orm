@@ -4,7 +4,7 @@ database_url := "postgres://postgres:postgres@localhost:5433/rango_test"
 help:
     @just --list
 
-# Start local Postgres (Docker)
+# Start local Postgres (Docker) on port 5433
 db:
     docker compose up -d
     @echo "Waiting for Postgres..."
@@ -15,19 +15,29 @@ db:
 db-stop:
     docker compose down
 
-# Run unit tests (no DB required)
+# Run unit tests only (no DB required)
 test:
     cargo test --workspace
 
-# Run all tests including integration (starts DB if needed)
-# Run unit tests + integration tests — spins up a dedicated Postgres, runs all tests, tears it down
-test-all:
+# Run SQLite integration tests (in-memory, no Docker needed)
+test-sqlite:
+    cargo test --test integration_sqlite --features rango-tests/integration-sqlite -- --test-threads=1
+
+# Run Postgres integration tests (requires Docker)
+test-postgres:
     docker compose up -d
-    @echo "Waiting for Postgres..."
     @until docker compose exec postgres pg_isready -U postgres > /dev/null 2>&1; do sleep 1; done
     DATABASE_URL={{database_url}} cargo test --workspace --features rango-tests/integration -- --test-threads=1; \
     docker compose down -v
 
-# Generate coverage report with HTML output (starts DB if needed)
-coverage: db
-    DATABASE_URL={{database_url}} cargo llvm-cov --workspace --features rango-tests/integration --open
+# Run all tests: unit + sqlite + postgres
+test-all: test test-sqlite test-postgres
+
+# Generate coverage report with HTML output
+coverage:
+    docker compose up -d
+    @until docker compose exec postgres pg_isready -U postgres > /dev/null 2>&1; do sleep 1; done
+    DATABASE_URL={{database_url}} cargo llvm-cov --workspace \
+        --features rango-tests/integration,rango-tests/integration-sqlite \
+        --open; \
+    docker compose down -v
