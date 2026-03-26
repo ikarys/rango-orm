@@ -516,6 +516,65 @@ where
         Ok(self.count().await? > 0)
     }
 
+    /// SELECT only the specified columns — returns raw rows as `Vec<HashMap<String, SqlValue>>`.
+    ///
+    /// Use when you need a subset of columns without deserializing a full model.
+    ///
+    /// # Example
+    /// ```rust,ignore
+    /// let rows = User::filter(&pool)
+    ///     .eq("active", true)
+    ///     .values(&["id", "email"])
+    ///     .await?;
+    ///
+    /// for row in rows {
+    ///     println!("{:?}", row["email"]);
+    /// }
+    /// ```
+    pub async fn values(self, cols: &[&str]) -> Result<Vec<std::collections::HashMap<String, SqlValue>>> {
+        use sqlx::Row;
+        let table = M::table_name();
+        let (where_clause, binds) = self.build_where();
+
+        let col_list = cols.iter()
+            .map(|c| format!("\"{}\"", c))
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        let mut sql = format!("SELECT {} FROM \"{}\"", col_list, table);
+        if !where_clause.is_empty() { sql.push(' '); sql.push_str(&where_clause); }
+        if !self.order_by.is_empty() {
+            sql.push_str(&format!(" ORDER BY {}", self.order_by.join(", ")));
+        }
+        if !self.explicit_limit { sql.push_str(&format!(" LIMIT {}", DEFAULT_QUERY_LIMIT)); }
+        else if let Some(l) = self.limit { sql.push_str(&format!(" LIMIT {}", l)); }
+        if let Some(o) = self.offset { sql.push_str(&format!(" OFFSET {}", o)); }
+
+        let rows = bind_and_fetch_all(&self.pool, &sql, binds).await?;
+
+        rows.into_iter().map(|row| {
+            let mut map = std::collections::HashMap::new();
+            for &col in cols {
+                // Try common types in order; fall back to string representation
+                let val: SqlValue = if let Ok(Some(v)) = row.try_get::<Option<i64>, _>(col) {
+                    SqlValue::BigInt(v)
+                } else if let Ok(Some(v)) = row.try_get::<Option<f64>, _>(col) {
+                    SqlValue::Double(v)
+                } else if let Ok(Some(v)) = row.try_get::<Option<bool>, _>(col) {
+                    SqlValue::Bool(v)
+                } else if let Ok(Some(v)) = row.try_get::<Option<uuid::Uuid>, _>(col) {
+                    SqlValue::Uuid(v)
+                } else if let Ok(Some(v)) = row.try_get::<Option<String>, _>(col) {
+                    SqlValue::Text(v)
+                } else {
+                    SqlValue::NullText
+                };
+                map.insert(col.to_string(), val);
+            }
+            Ok(map)
+        }).collect()
+    }
+
     /// SELECT SUM(col) FROM ... WHERE ... — returns None if the table is empty or all values are NULL.
     pub async fn sum(self, col: &str) -> Result<Option<f64>> {
         let table = M::table_name();
