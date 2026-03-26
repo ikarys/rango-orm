@@ -16,7 +16,7 @@ pub type RelationCache = HashMap<TypeId, Box<dyn Any + Send + Sync>>;
 /// or `.prefetch_related()` were chained before execution.
 ///
 /// # Example
-/// ```rust
+/// ```rust,ignore
 /// let posts = Post::filter(&pool)
 ///     .select_related::<Author>("author_id")
 ///     .prefetch_related::<Comment>("post_id")

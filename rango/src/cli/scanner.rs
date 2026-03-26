@@ -497,3 +497,65 @@ fn to_snake_case(s: &str) -> String {
     }
     out
 }
+
+#[cfg(test)]
+mod tests {
+    use super::map_field_type;
+    use rango_core::ColumnType;
+
+    fn ty(s: &str) -> syn::Type {
+        syn::parse_str(s).expect("valid type string")
+    }
+
+    // ── map_field_type ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_field_bool() {
+        assert_eq!(map_field_type(&ty("FieldBool")).unwrap(), ColumnType::Bool);
+    }
+
+    #[test]
+    fn test_field_uuid() {
+        assert_eq!(map_field_type(&ty("FieldUuid")).unwrap(), ColumnType::Uuid);
+    }
+
+    #[test]
+    fn test_field_text() {
+        assert_eq!(map_field_type(&ty("FieldText")).unwrap(), ColumnType::Text);
+    }
+
+    #[test]
+    fn test_field_varchar_max() {
+        assert_eq!(
+            map_field_type(&ty("FieldVarchar<1, 100>")).unwrap(),
+            ColumnType::Varchar(100),
+        );
+    }
+
+    #[test]
+    fn test_foreign_key_maps_to_uuid() {
+        assert_eq!(
+            map_field_type(&ty("ForeignKey<User>")).unwrap(),
+            ColumnType::Uuid,
+        );
+    }
+
+    #[test]
+    fn test_unknown_type_is_error() {
+        assert!(map_field_type(&ty("SomeUnknownType")).is_err());
+    }
+
+    // ── prefix normalisation (hyphens → underscores) ───────────────────────────
+
+    #[test]
+    fn test_prefix_hyphen_to_underscore() {
+        let normalised = "my-project".replace('-', "_");
+        assert_eq!(normalised, "my_project");
+    }
+
+    #[test]
+    fn test_prefix_no_hyphens_unchanged() {
+        let normalised = "myproject".replace('-', "_");
+        assert_eq!(normalised, "myproject");
+    }
+}

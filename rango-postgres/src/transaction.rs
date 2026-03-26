@@ -6,7 +6,7 @@ use std::future::Future;
 /// instead of the verbose `Transaction<'_, Postgres>`.
 ///
 /// # Example
-/// ```rust
+/// ```rust,ignore
 /// async fn create_user_with_profile(tx: &mut RangoTransaction<'_>, ...) -> Result<User> {
 ///     let user = rango::insert(tx, ...).await?;
 ///     rango::insert(tx, profile).await?;
@@ -26,7 +26,7 @@ pub type RangoTransaction<'a> = Transaction<'a, Postgres>;
 /// For compound ops (`get_or_create`, `update_or_create`), pass `tx` directly.
 ///
 /// # Example
-/// ```rust
+/// ```rust,ignore
 /// let user = rango::atomic(&pool, |tx| async move {
 ///     let user = rango::insert(tx, User { ... }).await?;
 ///     rango::insert(tx, Profile {

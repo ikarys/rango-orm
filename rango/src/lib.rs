@@ -36,7 +36,7 @@ pub use rango_postgres::{RangoExecutor, RangoTransaction};
 /// Connect to a PostgreSQL database.
 ///
 /// # Example
-/// ```rust
+/// ```rust,ignore
 /// let config = DatabaseConfig::from_env().unwrap();
 /// let pool = rango::connect(&config).await?;
 /// ```

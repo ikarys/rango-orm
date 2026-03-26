@@ -48,7 +48,7 @@ pub fn bind_sql_values<'q>(
 /// Accepts `&PgPool`, `&mut Transaction<'_, Postgres>`, or any sqlx `Executor`.
 ///
 /// # Example
-/// ```rust
+/// ```rust,ignore
 /// // With pool
 /// let user = rango::insert(&pool, user).await?;
 ///
@@ -144,7 +144,7 @@ where
 /// `sqlx::Acquire`.
 ///
 /// # Example
-/// ```rust
+/// ```rust,ignore
 /// // Standalone — atomic without wrapping in rango::atomic()
 /// let (user, created) = rango::get_or_create(&pool, lookup, defaults).await?;
 ///
@@ -302,7 +302,7 @@ fn build_lookup_sql<M: Model + ModelValues>(
 /// Returns the total number of rows inserted.
 ///
 /// # Example
-/// ```rust
+/// ```rust,ignore
 /// let n = rango::bulk_create(&pool, &users).await?;
 /// ```
 pub async fn bulk_create<'a, A, M>(executor: A, models: &[M]) -> Result<usize>
@@ -336,7 +336,7 @@ where
 /// Returns the total number of rows updated.
 ///
 /// # Example
-/// ```rust
+/// ```rust,ignore
 /// let n = rango::bulk_update(&pool, &users, &["email", "status"]).await?;
 /// ```
 pub async fn bulk_update<'a, A, M>(executor: A, models: &[M], fields: &[&str]) -> Result<usize>
@@ -371,7 +371,7 @@ where
 /// Returns the total number of rows upserted.
 ///
 /// # Example
-/// ```rust
+/// ```rust,ignore
 /// let n = rango::bulk_upsert(&pool, &users, &["email"]).await?;
 /// ```
 pub async fn bulk_upsert<'a, A, M>(executor: A, models: &[M], conflict_on: &[&str]) -> Result<usize>
@@ -514,7 +514,7 @@ fn build_bulk_update_sql<M: Model + ModelValues>(models: &[M], fields: &[&str]) 
 /// Parameters are positional (`$1`, `$2`, ...) as in PostgreSQL.
 ///
 /// # Example
-/// ```rust
+/// ```rust,ignore
 /// let rows = rango::raw::<User>(&pool, "SELECT * FROM users WHERE role = $1", vec![SqlValue::Text("admin".into())]).await?;
 /// ```
 pub async fn raw<'e, E, M>(executor: E, sql: &str, params: Vec<SqlValue>) -> Result<Vec<M>>

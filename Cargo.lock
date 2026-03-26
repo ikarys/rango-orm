@@ -1130,6 +1130,8 @@ version = "0.1.0"
 dependencies = [
  "rango-core",
  "rango-derive",
+ "rango-postgres",
+ "tokio",
 ]
 
 [[package]]

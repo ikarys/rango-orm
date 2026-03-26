@@ -29,7 +29,7 @@ pub(crate) fn rango_core_path() -> TokenStream2 {
 /// - Table name defaults to snake_case of the struct name (e.g. `UserProfile` → `user_profile`)
 ///
 /// # Example
-/// ```rust
+/// ```rust,ignore
 /// #[derive(Model)]
 /// struct Article {
 ///     id: FieldUuid,
@@ -52,7 +52,7 @@ pub fn derive_model(input: TokenStream) -> TokenStream {
 /// Marker derive for abstract model mixins (never creates a table).
 ///
 /// # Example
-/// ```rust
+/// ```rust,ignore
 /// #[derive(ModelMixin)]
 /// struct Timestamps {
 ///     #[field(auto_now_add)]

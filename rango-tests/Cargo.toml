@@ -7,3 +7,7 @@ publish = false
 [dependencies]
 rango-core = { path = "../rango-core" }
 rango-derive = { path = "../rango-derive" }
+
+[dev-dependencies]
+rango-postgres = { path = "../rango-postgres" }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
