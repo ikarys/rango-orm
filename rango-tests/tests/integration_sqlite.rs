@@ -270,3 +270,65 @@ async fn test_sqlite_values_projection() {
         panic!("email should be SqlValue::Text");
     }
 }
+
+// ── Export / Import ───────────────────────────────────────────────────────────
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-sqlite"), ignore)]
+async fn test_sqlite_export_json() {
+    let pool = pool().await;
+    setup(&pool).await;
+
+    insert(&pool, user("export1@sqlite.com")).await.unwrap();
+    insert(&pool, user("export2@sqlite.com")).await.unwrap();
+
+    // Export via raw query — mirrors what rango export does
+    let rows = TestUser::filter(&pool)
+        .values(&["id", "email", "active"])
+        .await
+        .expect("values failed");
+
+    assert_eq!(rows.len(), 2);
+
+    // Serialize to JSON
+    let json = serde_json::to_string(&rows.iter().map(|r| {
+        r.iter().map(|(k, v)| {
+            let jv = match v {
+                rango_core::SqlValue::Text(s) => serde_json::Value::String(s.clone()),
+                rango_core::SqlValue::BigInt(n) => serde_json::Value::Number((*n).into()),
+                _ => serde_json::Value::Null,
+            };
+            (k.clone(), jv)
+        }).collect::<serde_json::Map<_,_>>()
+    }).collect::<Vec<_>>()).unwrap();
+
+    assert!(json.contains("export1@sqlite.com"));
+    assert!(json.contains("export2@sqlite.com"));
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-sqlite"), ignore)]
+async fn test_sqlite_roundtrip() {
+    // Insert → export via values() → verify data integrity
+    let pool = pool().await;
+    setup(&pool).await;
+
+    let u = user("roundtrip@sqlite.com");
+    insert(&pool, u.clone()).await.unwrap();
+
+    let rows = TestUser::filter(&pool)
+        .eq("email", "roundtrip@sqlite.com")
+        .values(&["email", "name"])
+        .await
+        .expect("values failed");
+
+    assert_eq!(rows.len(), 1);
+    assert_eq!(
+        rows[0].get("email"),
+        Some(&rango_core::SqlValue::Text("roundtrip@sqlite.com".to_string()))
+    );
+    assert_eq!(
+        rows[0].get("name"),
+        Some(&rango_core::SqlValue::Text("Test User".to_string()))
+    );
+}
