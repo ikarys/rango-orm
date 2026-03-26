@@ -66,6 +66,7 @@ pub fn expand(input: DeriveInput) -> Result<TokenStream> {
     let mut field_value_entries = Vec::new();
     let mut pk_value_expr = quote! { #core::SqlValue::Null };
     let mut pk_col_name = "id".to_string();
+    let mut pk_found = false;
 
     for f in fields.iter() {
         if is_many_to_many(&f.ty) { continue; }
@@ -74,6 +75,7 @@ pub fn expand(input: DeriveInput) -> Result<TokenStream> {
         let col_name = fname.to_string();
 
         if is_pk {
+            pk_found = true;
             pk_col_name = col_name.clone();
             pk_value_expr = quote! {
                 #core::ToSqlValue::to_sql_value(&self.#fname)
@@ -83,6 +85,13 @@ pub fn expand(input: DeriveInput) -> Result<TokenStream> {
                 (#col_name, #core::ToSqlValue::to_sql_value(&self.#fname))
             });
         }
+    }
+
+    if !pk_found {
+        return Err(syn::Error::new_spanned(
+            struct_name,
+            "Rango: no primary key found. Declare a field named `id` or annotate one with `#[field(primary_key)]`",
+        ));
     }
 
     // Generate FromRow impl (ManyToMany fields are always empty — loaded separately)
