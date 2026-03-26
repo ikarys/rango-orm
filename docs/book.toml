@@ -1,0 +1,15 @@
+[book]
+title = "Rango ORM"
+authors = ["Ikarys"]
+description = "A Django-inspired ORM for Rust — define structs, not schemas."
+language = "en"
+src = "src"
+
+[output.html]
+site-url = "/rango-orm/"
+git-repository-url = "https://github.com/ikarys/rango-orm"
+# git-repository-icon = "fa-github"  # requires FontAwesome
+edit-url-template = "https://github.com/ikarys/rango-orm/edit/wip/docs/src/{path}"
+
+[output.html.search]
+enable = true
