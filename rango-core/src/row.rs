@@ -1,4 +1,3 @@
-use crate::fields::*;
 
 /// Error when reading a row.
 #[derive(Debug)]

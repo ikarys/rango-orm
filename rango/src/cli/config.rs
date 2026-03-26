@@ -13,6 +13,7 @@ pub struct RangoConfig {
     pub models: ModelsConfig,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 pub struct DatabaseConfig {
     #[serde(default = "default_max_connections")]
@@ -47,6 +48,7 @@ fn default_min_connections() -> u32 { 2 }
 fn default_connect_timeout() -> u64 { 10 }
 fn default_idle_timeout() -> u64 { 600 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 pub struct MigrationsConfig {
     #[serde(default = "default_migrations_dir")]
@@ -64,6 +66,7 @@ impl Default for MigrationsConfig {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 pub struct ModelsConfig {
     pub prefix: Option<String>,

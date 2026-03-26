@@ -10,7 +10,6 @@
 ///     email: FieldEmail,
 /// }
 /// ```
-
 // Re-export core types
 pub use rango_core::*;
 
