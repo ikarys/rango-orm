@@ -95,7 +95,10 @@ where
 
     fn json_extract_exists(self, col: impl ColumnRef<M>, path: &str) -> Self {
         self.raw_where(
-            format!("json_extract({}, ?) IS NOT NULL", quote_ident(col.column_name())),
+            format!(
+                "json_extract({}, ?) IS NOT NULL",
+                quote_ident(col.column_name())
+            ),
             vec![SqlValue::Text(path.to_string())],
         )
     }

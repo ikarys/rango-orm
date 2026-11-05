@@ -2,7 +2,7 @@
 
 use crate::error::db_err;
 use crate::executor::RangoExecutor;
-use crate::row::{decode_all, PgRangoRow};
+use crate::row::{PgRangoRow, decode_all};
 use rango_core::{Error, Result};
 use rango_core::{FromRow, Model, ModelValues, SqlValue, quote_ident};
 use sqlx::{Acquire, Executor, Postgres};
