@@ -1,0 +1,16 @@
+[package]
+name = "rango"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+default = ["postgres"]
+postgres = ["dep:rango-postgres"]
+sqlite = ["dep:rango-sqlite"]
+
+[dependencies]
+rango-core     = { path = "../rango-core" }
+rango-derive   = { path = "../rango-derive" }
+rango-postgres = { path = "../rango-postgres", optional = true }
+rango-sqlite   = { path = "../rango-sqlite", optional = true }
+sqlx = { version = "0.8", default-features = false }
