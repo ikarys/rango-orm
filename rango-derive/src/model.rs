@@ -122,7 +122,8 @@ pub fn expand(input: DeriveInput) -> Result<TokenStream> {
         from_row_fields.push(quote! { #fname: #getter });
     }
 
-    // Typed column constants: `User::EMAIL` → `Column<User>`, checked at compile time.
+    // Typed column constants: `User::AGE` → `Column<User, FieldInt>`; filters check
+    // the column and the value type at compile time.
     let mut column_consts = Vec::new();
     for f in fields.iter().filter(|f| !is_many_to_many(&f.ty)) {
         let fname = f.ident.as_ref().unwrap();
@@ -131,10 +132,11 @@ pub fn expand(input: DeriveInput) -> Result<TokenStream> {
             &fname.to_string().trim_start_matches("r#").to_uppercase(),
             fname.span(),
         );
+        let (_, field_ty) = extract_option(&f.ty);
         let doc = format!("Typed reference to the `{col_name}` column.");
         column_consts.push(quote! {
             #[doc = #doc]
-            pub const #const_name: #core::Column<Self> = #core::Column::new(#col_name);
+            pub const #const_name: #core::Column<Self, #field_ty> = #core::Column::new(#col_name);
         });
     }
 

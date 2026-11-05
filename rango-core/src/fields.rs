@@ -621,3 +621,66 @@ mod tests {
         assert!(debug.contains("FieldPassword(<redacted>)"));
     }
 }
+
+// ─── FilterValue: plain Rust values accepted by typed column filters ────────
+
+use crate::column::FilterValue;
+
+macro_rules! filter_values {
+    ($($field:ty => $($value:ty),+;)+) => {$($(
+        impl FilterValue<$field> for $value {
+            fn into_sql_value(self) -> SqlValue {
+                self.into()
+            }
+        }
+    )+)+};
+}
+
+filter_values! {
+    FieldBool => bool;
+    FieldSmallInt => i16;
+    FieldInt => i32;
+    FieldBigInt => i64;
+    FieldFloat => f32;
+    FieldDouble => f64;
+    FieldText => String, &str;
+    FieldEmail => String, &str;
+    FieldUrl => String, &str;
+    FieldBytes => Vec<u8>;
+    FieldUuid => Uuid;
+    FieldDateTime => DateTime<Utc>;
+    FieldDate => NaiveDate;
+    FieldTime => NaiveTime;
+    FieldJson => serde_json::Value;
+}
+
+impl<const MIN: usize, const MAX: usize> FilterValue<FieldVarchar<MIN, MAX>> for String {
+    fn into_sql_value(self) -> SqlValue {
+        SqlValue::Text(self)
+    }
+}
+impl<const MIN: usize, const MAX: usize> FilterValue<FieldVarchar<MIN, MAX>> for &str {
+    fn into_sql_value(self) -> SqlValue {
+        SqlValue::Text(self.to_string())
+    }
+}
+impl<const MIN: i64, const MAX: i64> FilterValue<FieldRange<MIN, MAX>> for i64 {
+    fn into_sql_value(self) -> SqlValue {
+        SqlValue::BigInt(self)
+    }
+}
+impl<const P: u8, const S: u8> FilterValue<FieldDecimal<P, S>> for f64 {
+    fn into_sql_value(self) -> SqlValue {
+        SqlValue::Double(self)
+    }
+}
+impl<M> FilterValue<ForeignKey<M>> for Uuid {
+    fn into_sql_value(self) -> SqlValue {
+        SqlValue::Uuid(self)
+    }
+}
+impl<M> FilterValue<ForeignKey<M>> for FieldUuid {
+    fn into_sql_value(self) -> SqlValue {
+        SqlValue::Uuid(self.0)
+    }
+}

@@ -1,4 +1,4 @@
-use rango_core::{quote_ident, ColumnRef, FromRow, Model, ModelValues, OrderRef, SqlValue};
+use rango_core::{quote_ident, ColumnRef, FilterColumn, FromRow, Model, ModelValues, OrderRef, SqlValue};
 use sqlx::SqlitePool;
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -27,28 +27,34 @@ where
         self
     }
 
-    pub fn eq(self, col: impl ColumnRef<M>, val: impl Into<SqlValue>) -> Self {
-        self.add(col.column_name(), Op::Eq, Some(val.into()), None)
+    pub fn eq<V>(self, col: impl FilterColumn<M, V>, val: V) -> Self {
+        let val = col.bind(val);
+        self.add(col.column_name(), Op::Eq, Some(val), None)
     }
 
-    pub fn ne(self, col: impl ColumnRef<M>, val: impl Into<SqlValue>) -> Self {
-        self.add(col.column_name(), Op::Ne, Some(val.into()), None)
+    pub fn ne<V>(self, col: impl FilterColumn<M, V>, val: V) -> Self {
+        let val = col.bind(val);
+        self.add(col.column_name(), Op::Ne, Some(val), None)
     }
 
-    pub fn gt(self, col: impl ColumnRef<M>, val: impl Into<SqlValue>) -> Self {
-        self.add(col.column_name(), Op::Gt, Some(val.into()), None)
+    pub fn gt<V>(self, col: impl FilterColumn<M, V>, val: V) -> Self {
+        let val = col.bind(val);
+        self.add(col.column_name(), Op::Gt, Some(val), None)
     }
 
-    pub fn gte(self, col: impl ColumnRef<M>, val: impl Into<SqlValue>) -> Self {
-        self.add(col.column_name(), Op::Gte, Some(val.into()), None)
+    pub fn gte<V>(self, col: impl FilterColumn<M, V>, val: V) -> Self {
+        let val = col.bind(val);
+        self.add(col.column_name(), Op::Gte, Some(val), None)
     }
 
-    pub fn lt(self, col: impl ColumnRef<M>, val: impl Into<SqlValue>) -> Self {
-        self.add(col.column_name(), Op::Lt, Some(val.into()), None)
+    pub fn lt<V>(self, col: impl FilterColumn<M, V>, val: V) -> Self {
+        let val = col.bind(val);
+        self.add(col.column_name(), Op::Lt, Some(val), None)
     }
 
-    pub fn lte(self, col: impl ColumnRef<M>, val: impl Into<SqlValue>) -> Self {
-        self.add(col.column_name(), Op::Lte, Some(val.into()), None)
+    pub fn lte<V>(self, col: impl FilterColumn<M, V>, val: V) -> Self {
+        let val = col.bind(val);
+        self.add(col.column_name(), Op::Lte, Some(val), None)
     }
 
     pub fn like(self, col: impl ColumnRef<M>, pattern: impl Into<String>) -> Self {

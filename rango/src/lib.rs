@@ -19,6 +19,52 @@
 //!     email: FieldEmail,
 //! }
 //! ```
+//!
+//! # Typed filters
+//!
+//! `#[derive(Model)]` generates one typed column per field. Filters check the
+//! column *and* the value type at compile time:
+//!
+//! ```rust,no_run
+//! # #[cfg(feature = "postgres")] {
+//! use rango::prelude::*;
+//!
+//! #[derive(Model)]
+//! struct User {
+//!     id: FieldUuid,
+//!     email: FieldEmail,
+//!     age: FieldInt,
+//!     score: Option<FieldBigInt>,
+//! }
+//!
+//! fn adults(pool: &PgPool) -> QueryBuilder<User> {
+//!     User::filter(pool)
+//!         .gte(User::AGE, 18)
+//!         .gt(User::SCORE, 100)
+//!         .eq(User::EMAIL, "a@b.c")
+//!         .order_by(User::AGE.desc())
+//! }
+//! # }
+//! ```
+//!
+//! A value of the wrong type does not compile:
+//!
+//! ```rust,compile_fail
+//! # #[cfg(feature = "postgres")] {
+//! use rango::prelude::*;
+//!
+//! #[derive(Model)]
+//! struct User {
+//!     id: FieldUuid,
+//!     age: FieldInt,
+//! }
+//!
+//! fn broken(pool: &PgPool) -> QueryBuilder<User> {
+//!     User::filter(pool).eq(User::AGE, "text")
+//! }
+//! # }
+//! # #[cfg(not(feature = "postgres"))] compile_error!("needs the postgres feature");
+//! ```
 #![forbid(unsafe_code)]
 // Re-export core types — always available
 pub use rango_core::*;
