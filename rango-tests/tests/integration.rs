@@ -173,6 +173,33 @@ async fn test_update() {
     teardown(&pool).await;
 }
 
+/// Regression: a non-text nullable column holding a value must not decode as NULL.
+#[tokio::test]
+#[cfg_attr(not(feature = "integration"), ignore)]
+async fn test_option_non_text_roundtrip() {
+    let pool = pool().await;
+    setup(&pool).await;
+
+    let mut u = user("option@test.com");
+    u.score = Some(FieldInt(42));
+    insert(&pool, u.clone()).await.unwrap();
+    let none = user("none@test.com");
+    insert(&pool, none.clone()).await.unwrap();
+
+    let fetched = get::<_, TestUser>(&pool, &u.id.to_sql_value())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(fetched.score, Some(FieldInt(42)));
+    let fetched = get::<_, TestUser>(&pool, &none.id.to_sql_value())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(fetched.score, None);
+
+    teardown(&pool).await;
+}
+
 #[tokio::test]
 #[cfg_attr(not(feature = "integration"), ignore)]
 async fn test_delete() {
@@ -524,6 +551,41 @@ async fn test_pg_fts() {
 
 #[tokio::test]
 #[cfg_attr(not(feature = "integration"), ignore)]
+async fn test_pg_fts_lang_binds_language() {
+    let pool = pool().await;
+    setup(&pool).await;
+
+    insert(
+        &pool,
+        article(
+            "Guide",
+            "Les chats mangent des souris",
+            serde_json::json!({}),
+        ),
+    )
+    .await
+    .unwrap();
+
+    // "chat" only matches "chats" through the French stemmer.
+    let results = TestArticle::filter(&pool)
+        .fts_lang("content", "chat", "french")
+        .all()
+        .await
+        .expect("fts_lang failed");
+    assert_eq!(results.len(), 1);
+
+    // The language is a bound parameter: a quote is an unknown config, not SQL.
+    let injected = TestArticle::filter(&pool)
+        .fts_lang("content", "chat", "french') OR true --")
+        .all()
+        .await;
+    assert!(injected.is_err());
+
+    teardown(&pool).await;
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration"), ignore)]
 async fn test_pg_json_contains() {
     let pool = pool().await;
     setup(&pool).await;
@@ -691,4 +753,133 @@ async fn test_values_all_types() {
     assert_eq!(rows[0].get("active"), Some(&SqlValue::Bool(true)));
 
     teardown(&pool).await;
+}
+
+// ── Typed errors ──────────────────────────────────────────────────────────────
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration"), ignore)]
+async fn test_typed_errors() {
+    let pool = pool().await;
+    setup(&pool).await;
+
+    insert(&pool, user("dup@test.com")).await.unwrap();
+    let err = insert(&pool, user("dup@test.com")).await.unwrap_err();
+    assert!(
+        matches!(
+            err,
+            Error::UniqueViolation {
+                constraint: Some(_)
+            }
+        ),
+        "{err:?}"
+    );
+    assert!(
+        !err.to_string().contains("INSERT"),
+        "error leaks SQL: {err}"
+    );
+
+    let err = atomic(&pool, |tx| {
+        Box::pin(async move {
+            insert(&mut **tx, user("aborted@test.com")).await?;
+            Err::<(), _>(Error::abort("business rule"))
+        })
+    })
+    .await
+    .unwrap_err();
+    assert!(matches!(err, Error::Aborted(_)));
+    let exists = TestUser::filter(&pool)
+        .eq("email", "aborted@test.com")
+        .exists()
+        .await
+        .unwrap();
+    assert!(!exists, "atomic must roll back on Err");
+
+    teardown(&pool).await;
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration"), ignore)]
+async fn test_atomic_retry() {
+    let pool = pool().await;
+    setup(&pool).await;
+
+    let counter = std::sync::atomic::AtomicU32::new(0);
+
+    let result = atomic_retry(&pool, 5, |tx| {
+        let n = counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+        Box::pin(async move {
+            insert(&mut **tx, user("retry@test.com")).await?;
+            if n < 3 { Err(Error::Conflict) } else { Ok(()) }
+        })
+    })
+    .await;
+    assert!(result.is_ok(), "{result:?}");
+    assert_eq!(counter.load(std::sync::atomic::Ordering::SeqCst), 3);
+    let count = TestUser::filter(&pool)
+        .eq("email", "retry@test.com")
+        .count()
+        .await
+        .unwrap();
+    assert_eq!(count, 1);
+
+    let counter = std::sync::atomic::AtomicU32::new(0);
+    let err = atomic_retry(&pool, 2, |tx| {
+        let n = counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+        let _ = tx;
+        Box::pin(async move {
+            let _ = n;
+            Err::<(), _>(Error::Conflict)
+        })
+    })
+    .await
+    .unwrap_err();
+    assert!(matches!(err, Error::Conflict), "{err:?}");
+    assert_eq!(counter.load(std::sync::atomic::Ordering::SeqCst), 2);
+
+    let counter = std::sync::atomic::AtomicU32::new(0);
+    let err = atomic_retry(&pool, 5, |tx| {
+        let n = counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+        let _ = tx;
+        Box::pin(async move {
+            let _ = n;
+            Err::<(), _>(Error::abort("no"))
+        })
+    })
+    .await
+    .unwrap_err();
+    assert!(matches!(err, Error::Aborted(_)), "{err:?}");
+    assert_eq!(counter.load(std::sync::atomic::Ordering::SeqCst), 1);
+
+    teardown(&pool).await;
+}
+
+// ── Connection settings ───────────────────────────────────────────────────────
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration"), ignore)]
+async fn test_connect_applies_timeouts() {
+    let url = std::env::var("DATABASE_URL")
+        .unwrap_or_else(|_| "postgres://postgres:postgres@localhost:5432/rango_test".to_string());
+    let mut config = DatabaseConfig::from_url(url);
+    config.statement_timeout_ms = Some(1234);
+    config.lock_timeout_ms = Some(567);
+    let pool = connect(&config).await.unwrap();
+
+    let st: String = sqlx::query_scalar("SHOW statement_timeout")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let lt: String = sqlx::query_scalar("SHOW lock_timeout")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!((st.as_str(), lt.as_str()), ("1234ms", "567ms"));
+
+    let err = sqlx::query("SELECT pg_sleep(2)")
+        .execute(&pool)
+        .await
+        .map_err(|e| e.to_string())
+        .unwrap_err();
+    assert!(err.contains("statement timeout"), "{err}");
 }

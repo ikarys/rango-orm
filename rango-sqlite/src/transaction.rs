@@ -1,17 +1,22 @@
-use anyhow::Result;
+use crate::error::db_err;
+use rango_core::Result;
 use sqlx::{Sqlite, SqlitePool};
 
 pub type SqliteTransaction<'a> = sqlx::Transaction<'a, Sqlite>;
 
-pub async fn atomic<F, Fut, T>(pool: &SqlitePool, f: F) -> Result<T>
+/// Future returned by an [`atomic`] closure: wrap the body in `Box::pin(async move { ... })`.
+pub type TxFuture<'c, T> =
+    std::pin::Pin<Box<dyn std::future::Future<Output = Result<T>> + Send + 'c>>;
+
+/// Run `f` in a transaction: commit on `Ok`, roll back on `Err`.
+pub async fn atomic<F, T>(pool: &SqlitePool, f: F) -> Result<T>
 where
-    F: FnOnce(&mut SqliteTransaction<'_>) -> Fut,
-    Fut: std::future::Future<Output = Result<T>>,
+    F: for<'c> FnOnce(&'c mut SqliteTransaction<'_>) -> TxFuture<'c, T>,
 {
-    let mut tx = pool.begin().await?;
+    let mut tx = pool.begin().await.map_err(db_err)?;
     match f(&mut tx).await {
         Ok(val) => {
-            tx.commit().await?;
+            tx.commit().await.map_err(db_err)?;
             Ok(val)
         }
         Err(e) => {

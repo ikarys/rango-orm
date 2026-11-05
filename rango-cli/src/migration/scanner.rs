@@ -1,8 +1,9 @@
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use rango_core::{
-    CheckConstraint, ColumnDef, ColumnType, Constraint, DefaultValue, OrderBy, OrderDir,
-    TableSchema, UniqueConstraint,
+    CheckConstraint, ColumnDef, ColumnType, Constraint, DefaultValue, FkReference, OrderBy,
+    OrderDir, ReferentialAction, TableSchema, UniqueConstraint,
 };
+use std::collections::HashMap;
 use std::path::Path;
 use syn::{File, ItemStruct, Type, visit::Visit};
 use walkdir::WalkDir;
@@ -11,15 +12,13 @@ use walkdir::WalkDir;
 pub fn scan_models(src_dir: &str) -> Result<(Vec<TableSchema>, Vec<M2MRelation>)> {
     let mut schemas = Vec::new();
     let mut m2m_relations = Vec::new();
+    let mut model_tables: HashMap<String, String> = HashMap::new();
+    let mut errors: Vec<String> = Vec::new();
 
     for entry in WalkDir::new(src_dir)
         .into_iter()
         .filter_map(|e| e.ok())
         .filter(|e| e.path().extension().map(|x| x == "rs").unwrap_or(false))
-        .filter(|e| {
-            let name = e.path().file_name().unwrap_or_default();
-            !matches!(name.to_str().unwrap_or(""), "mod.rs" | "main.rs" | "lib.rs")
-        })
     {
         let path = entry.path();
         let content = std::fs::read_to_string(path)
@@ -36,7 +35,15 @@ pub fn scan_models(src_dir: &str) -> Result<(Vec<TableSchema>, Vec<M2MRelation>)
         visitor.visit_file(&file);
         schemas.extend(visitor.schemas);
         m2m_relations.extend(visitor.m2m_relations);
+        model_tables.extend(visitor.model_tables);
+        errors.extend(visitor.errors);
     }
+
+    if !errors.is_empty() {
+        bail!("Field errors:\n{}", errors.join("\n"));
+    }
+
+    resolve_model_tables(&mut schemas, &mut m2m_relations, &model_tables);
 
     Ok((schemas, m2m_relations))
 }
@@ -59,6 +66,8 @@ struct ModelVisitor<'a> {
     path: &'a Path,
     pub schemas: Vec<TableSchema>,
     pub m2m_relations: Vec<M2MRelation>,
+    pub model_tables: HashMap<String, String>,
+    pub errors: Vec<String>,
 }
 
 impl<'a> ModelVisitor<'a> {
@@ -67,6 +76,8 @@ impl<'a> ModelVisitor<'a> {
             path,
             schemas: Vec::new(),
             m2m_relations: Vec::new(),
+            model_tables: HashMap::new(),
+            errors: Vec::new(),
         }
     }
 }
@@ -78,6 +89,8 @@ impl<'ast> Visit<'ast> for ModelVisitor<'_> {
         }
 
         let table_name = extract_table_name(node);
+        self.model_tables
+            .insert(node.ident.to_string(), table_name.clone());
         let mut columns = Vec::new();
 
         if let syn::Fields::Named(fields) = &node.fields {
@@ -89,7 +102,8 @@ impl<'ast> Visit<'ast> for ModelVisitor<'_> {
                         .trim_start_matches("ManyToMany<")
                         .trim_end_matches('>')
                         .to_string();
-                    let to_table = to_snake_case(&to_model);
+                    let to_ident = to_model.rsplit("::").next().unwrap_or(&to_model);
+                    let to_table = to_snake_case(to_ident);
                     self.m2m_relations.push(M2MRelation {
                         from_table: table_name.clone(),
                         to_table,
@@ -99,12 +113,10 @@ impl<'ast> Visit<'ast> for ModelVisitor<'_> {
 
                 match build_column_def(field) {
                     Ok(col) => columns.push(col),
-                    Err(e) => eprintln!(
-                        "Warning: skipping field in {} ({}): {}",
-                        self.path.display(),
-                        node.ident,
-                        e
-                    ),
+                    Err(e) => {
+                        self.errors
+                            .push(format!("{}: {}: {}", self.path.display(), node.ident, e))
+                    }
                 }
             }
         }
@@ -183,7 +195,26 @@ fn build_column_def(field: &syn::Field) -> Result<ColumnDef> {
     let is_pk = field_attrs.primary_key || field_name == "id";
 
     let (nullable, inner_ty) = extract_option(&field.ty);
+    let type_str = quote::quote!(#inner_ty).to_string().replace(" ", "");
+    let is_foreign_key = type_str.starts_with("ForeignKey<");
     let col_type = map_field_type(inner_ty)?;
+
+    let on_delete = parse_on_delete(&field_attrs.on_delete)?;
+    if on_delete == ReferentialAction::SetNull && !nullable {
+        bail!("on_delete = \"set_null\" requires an Option<ForeignKey<...>> field");
+    }
+
+    let references = if is_foreign_key {
+        let table = extract_foreign_key_target(inner_ty).unwrap_or_default();
+        Some(FkReference {
+            table,
+            column: "id".to_string(),
+            on_delete,
+            on_update: ReferentialAction::NoAction,
+        })
+    } else {
+        None
+    };
 
     let default = if field_attrs.auto_now_add || field_attrs.auto_now {
         Some(DefaultValue::CurrentTimestamp)
@@ -198,7 +229,8 @@ fn build_column_def(field: &syn::Field) -> Result<ColumnDef> {
         primary_key: is_pk,
         unique: is_pk || field_attrs.unique,
         default,
-        references: None,
+        references,
+        index: field_attrs.index || is_foreign_key,
     })
 }
 
@@ -211,6 +243,7 @@ struct FieldAttrs {
     auto_now: bool,
     column: Option<String>,
     default: Option<String>,
+    on_delete: Option<String>,
 }
 
 fn parse_field_attrs(field: &syn::Field) -> FieldAttrs {
@@ -241,6 +274,13 @@ fn parse_field_attrs(field: &syn::Field) -> FieldAttrs {
                             && let syn::Lit::Str(s) = &e.lit
                         {
                             attrs.default = Some(s.value());
+                        }
+                    }
+                    syn::Meta::NameValue(nv) if nv.path.is_ident("on_delete") => {
+                        if let syn::Expr::Lit(e) = &nv.value
+                            && let syn::Lit::Str(s) = &e.lit
+                        {
+                            attrs.on_delete = Some(s.value());
                         }
                     }
                     _ => {}
@@ -305,10 +345,8 @@ fn parse_varchar(s: &str) -> Result<ColumnType> {
 fn parse_password(s: &str) -> Result<ColumnType> {
     let inner = s.trim_start_matches("FieldPassword<").trim_end_matches('>');
     let parts: Vec<&str> = inner.split(',').collect();
-    if parts.len() == 2
-        && let Ok(max) = parts[1].trim().parse::<u32>()
-    {
-        return Ok(ColumnType::Varchar(max));
+    if parts.len() == 2 && parts[1].trim().parse::<u32>().is_ok() {
+        return Ok(ColumnType::Text);
     }
     anyhow::bail!("Invalid FieldPassword: {}", s)
 }
@@ -520,6 +558,48 @@ fn extract_str_slice_from_args(args: &[syn::Expr], idx: usize) -> Option<Vec<Str
     None
 }
 
+fn parse_on_delete(value: &Option<String>) -> Result<ReferentialAction> {
+    match value.as_deref() {
+        None | Some("cascade") => Ok(ReferentialAction::Cascade),
+        Some("set_null") => Ok(ReferentialAction::SetNull),
+        Some("set_default") => Ok(ReferentialAction::SetDefault),
+        Some("restrict") => Ok(ReferentialAction::Restrict),
+        Some("no_action") => Ok(ReferentialAction::NoAction),
+        Some(other) => bail!("Invalid on_delete value: {}", other),
+    }
+}
+
+fn extract_foreign_key_target(ty: &Type) -> Option<String> {
+    let s = quote::quote!(#ty).to_string().replace(" ", "");
+    let inner = s.strip_prefix("ForeignKey<")?.strip_suffix('>')?;
+    let last = inner.rsplit("::").next()?;
+    Some(last.to_string())
+}
+
+fn resolve_model_tables(
+    schemas: &mut [TableSchema],
+    m2m_relations: &mut [M2MRelation],
+    model_tables: &HashMap<String, String>,
+) {
+    for schema in schemas {
+        for col in &mut schema.columns {
+            if let Some(fk) = &mut col.references {
+                fk.table = model_tables
+                    .get(&fk.table)
+                    .cloned()
+                    .unwrap_or_else(|| fk.table.clone());
+            }
+        }
+    }
+
+    for rel in m2m_relations {
+        rel.to_table = model_tables
+            .get(&rel.to_table)
+            .cloned()
+            .unwrap_or_else(|| rel.to_table.clone());
+    }
+}
+
 fn to_snake_case(s: &str) -> String {
     let mut out = String::new();
     for (i, ch) in s.chars().enumerate() {
@@ -531,9 +611,54 @@ fn to_snake_case(s: &str) -> String {
     out
 }
 
+/// Generate a pivot table schema for a M2M relation.
+pub(crate) fn generate_pivot_table(rel: &M2MRelation, prefix: &str) -> TableSchema {
+    let from_table = format!("{}_{}", prefix, rel.from_table);
+    let to_table = format!("{}_{}", prefix, rel.to_table);
+    let pivot_name = format!("{}_{}", from_table, to_table);
+
+    TableSchema {
+        table_name: pivot_name.clone(),
+        columns: vec![
+            rango_core::ColumnDef {
+                name: format!("{}_id", from_table),
+                col_type: rango_core::ColumnType::Uuid,
+                nullable: false,
+                primary_key: false,
+                unique: false,
+                default: None,
+                references: Some(rango_core::FkReference {
+                    table: from_table,
+                    column: "id".to_string(),
+                    on_delete: rango_core::ReferentialAction::Cascade,
+                    on_update: rango_core::ReferentialAction::NoAction,
+                }),
+                index: false,
+            },
+            rango_core::ColumnDef {
+                name: format!("{}_id", to_table),
+                col_type: rango_core::ColumnType::Uuid,
+                nullable: false,
+                primary_key: false,
+                unique: false,
+                default: None,
+                references: Some(rango_core::FkReference {
+                    table: to_table,
+                    column: "id".to_string(),
+                    on_delete: rango_core::ReferentialAction::Cascade,
+                    on_update: rango_core::ReferentialAction::NoAction,
+                }),
+                index: true,
+            },
+        ],
+        ..Default::default()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::map_field_type;
+    use super::scan_models;
     use rango_core::ColumnType;
 
     fn ty(s: &str) -> syn::Type {
@@ -566,6 +691,14 @@ mod tests {
     }
 
     #[test]
+    fn test_field_password_maps_to_text() {
+        assert_eq!(
+            map_field_type(&ty("FieldPassword<8, 128>")).unwrap(),
+            ColumnType::Text,
+        );
+    }
+
+    #[test]
     fn test_foreign_key_maps_to_uuid() {
         assert_eq!(
             map_field_type(&ty("ForeignKey<User>")).unwrap(),
@@ -590,5 +723,75 @@ mod tests {
     fn test_prefix_no_hyphens_unchanged() {
         let normalised = "myproject".replace('-', "_");
         assert_eq!(normalised, "myproject");
+    }
+
+    // ── scanner ───────────────────────────────────────────────────────────────
+
+    fn write_temp_models(name: &str, content: &str) -> std::path::PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("rango_scanner_{}_{}", name, std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("models.rs"), content).unwrap();
+        dir
+    }
+
+    #[test]
+    fn test_scanner_fk_resolves_model_table() {
+        let dir = write_temp_models(
+            "fk_table",
+            r#"
+use rango_core::Model;
+
+#[derive(Model)]
+#[model(table = "people")]
+pub struct Person {
+    id: FieldUuid,
+    name: FieldText,
+}
+
+#[derive(Model)]
+pub struct Profile {
+    id: FieldUuid,
+    person: ForeignKey<Person>,
+}
+"#,
+        );
+
+        let (schemas, _) = scan_models(dir.to_str().unwrap()).unwrap();
+        let profile = schemas.iter().find(|s| s.table_name == "profile").unwrap();
+        let col = profile.columns.iter().find(|c| c.name == "person").unwrap();
+        let fk = col.references.as_ref().unwrap();
+        assert_eq!(fk.table, "people");
+        assert_eq!(fk.column, "id");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_scanner_invalid_on_delete_is_error() {
+        let dir = write_temp_models(
+            "bad_on_delete",
+            r#"
+use rango_core::Model;
+
+#[derive(Model)]
+pub struct Person {
+    id: FieldUuid,
+}
+
+#[derive(Model)]
+pub struct Profile {
+    id: FieldUuid,
+    #[field(on_delete = "bogus")]
+    person: ForeignKey<Person>,
+}
+"#,
+        );
+
+        let result = scan_models(dir.to_str().unwrap());
+        assert!(result.is_err());
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

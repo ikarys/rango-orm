@@ -1,10 +1,16 @@
-database_url := "postgres://postgres:postgres@localhost:5433/rango_test"
+# Override when 5433 is taken: `RANGO_PG_PORT=5434 just test-postgres`
+pg_port := env_var_or_default("RANGO_PG_PORT", "5433")
+database_url := "postgres://postgres:postgres@localhost:" + pg_port + "/rango_test"
+export RANGO_PG_PORT := pg_port
 
 # Show available commands
 help:
     @just --list
 
-# Start local Postgres (Docker) on port 5433
+# Dev environment: Rango is a library, so this is just the local Postgres
+dev: db
+
+# Start local Postgres (Docker) on RANGO_PG_PORT (default 5433)
 db:
     docker compose up -d
     @echo "Waiting for Postgres..."
@@ -18,7 +24,7 @@ db-stop:
 # Run fmt + clippy checks (same as pre-push hook)
 check:
     cargo fmt --all -- --check
-    cargo clippy --workspace -- -D warnings
+    cargo clippy --workspace --all-targets -- -D warnings
 
 # Run SQLite benchmarks (no DB required)
 bench-sqlite:
@@ -28,6 +34,12 @@ bench-sqlite:
 bench-postgres: db
     DATABASE_URL={{database_url}} cargo bench -p rango-bench --bench postgres; \
     docker compose down -v
+
+# Compare Rango vs sqlx raw, SeaORM and Diesel on Postgres (requires Docker), prints a Markdown table
+bench-compare: db
+    cd benchmarks && for p in sqlx-raw rango seaorm diesel; do \
+        DATABASE_URL={{database_url}} cargo bench -p bench-$p; done
+    python3 benchmarks/compare.py
 
 # Run unit tests only (no DB required)
 test:
@@ -41,7 +53,7 @@ test-sqlite:
 test-postgres:
     docker compose up -d
     @until docker compose exec postgres pg_isready -U postgres > /dev/null 2>&1; do sleep 1; done
-    DATABASE_URL={{database_url}} cargo test --workspace --features rango-tests/integration -- --test-threads=1; \
+    DATABASE_URL={{database_url}} cargo test --workspace --features rango-tests/integration,rango-cli/integration -- --test-threads=1; \
     docker compose down -v
 
 # Run all tests: unit + sqlite + postgres
@@ -55,3 +67,7 @@ coverage:
         --features rango-tests/integration,rango-tests/integration-sqlite \
         --open; \
     docker compose down -v
+
+# Scan dependencies for known vulnerabilities (RustSec)
+audit:
+    cargo audit

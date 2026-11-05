@@ -481,3 +481,49 @@ async fn test_sqlite_json_extract_exists() {
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].title.0, "With views");
 }
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-sqlite"), ignore)]
+async fn test_sqlite_unique_violation_is_typed() {
+    let pool = pool().await;
+    setup(&pool).await;
+
+    insert(&pool, user("dup@sqlite.com")).await.unwrap();
+    let err = insert(&pool, user("dup@sqlite.com")).await.unwrap_err();
+    assert!(matches!(err, Error::UniqueViolation { .. }), "{err:?}");
+}
+
+// ── Typed columns ─────────────────────────────────────────────────────────────
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-sqlite"), ignore)]
+async fn test_sqlite_typed_columns() {
+    let pool = pool().await;
+    setup(&pool).await;
+
+    let mut a = user("a@typed.com");
+    a.score = Some(FieldInt(1));
+    let mut b = user("b@typed.com");
+    b.score = Some(FieldInt(2));
+    b.active = FieldBool(false);
+    bulk_create(&pool, &[a, b]).await.unwrap();
+
+    assert_eq!(TestUser::EMAIL.name(), "email");
+
+    let actives = TestUser::filter(&pool)
+        .eq(TestUser::ACTIVE, 1i32)
+        .all()
+        .await
+        .unwrap();
+    assert_eq!(actives.len(), 1);
+
+    let desc = TestUser::filter(&pool)
+        .order_by(TestUser::SCORE.desc())
+        .all()
+        .await
+        .unwrap();
+    assert_eq!(desc[0].email, FieldEmail("b@typed.com".to_string()));
+
+    let sum = TestUser::filter(&pool).sum(TestUser::SCORE).await.unwrap();
+    assert_eq!(sum, Some(3.0));
+}

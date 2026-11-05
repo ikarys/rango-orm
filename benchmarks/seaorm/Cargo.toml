@@ -1,0 +1,16 @@
+[package]
+name = "bench-seaorm"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dev-dependencies]
+sea-orm = { version = "2", features = ["sqlx-postgres", "runtime-tokio-rustls", "macros", "with-uuid", "with-chrono"], default-features = false }
+tokio = { version = "1", features = ["full"] }
+uuid = { version = "1", features = ["v4"] }
+chrono = "0.4"
+criterion = { version = "0.5", features = ["async_tokio"] }
+
+[[bench]]
+name = "postgres"
+harness = false

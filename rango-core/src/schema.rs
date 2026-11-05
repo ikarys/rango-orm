@@ -34,6 +34,8 @@ pub struct ColumnDef {
     pub unique: bool,
     pub default: Option<DefaultValue>,
     pub references: Option<FkReference>,
+    /// Create a b-tree index on this column.
+    pub index: bool,
 }
 
 /// Common column types, backend-agnostic.
@@ -66,7 +68,7 @@ pub enum DefaultValue {
 }
 
 /// Foreign key reference.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FkReference {
     pub table: String,
     pub column: String,

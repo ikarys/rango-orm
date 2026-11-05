@@ -212,6 +212,14 @@ mod tests {
             !schema.columns.iter().any(|c| c.name == "renamed"),
             "original rust field name should NOT appear as column",
         );
+        // INSERT/UPDATE values and typed constants must use the DB column name too
+        let m = FieldAttrModel {
+            id: FieldUuid::default(),
+            indexed_col: FieldText("a".into()),
+            renamed: FieldText("b".into()),
+        };
+        assert!(m.field_values().iter().any(|(c, _)| *c == "custom_col"));
+        assert_eq!(FieldAttrModel::RENAMED.name(), "custom_col");
     }
 
     // ── Full schema shape ──────────────────────────────────────────────────────
@@ -242,6 +250,13 @@ mod tests {
         let email = schema.columns.iter().find(|c| c.name == "email").unwrap();
         assert!(email.unique);
         assert_eq!(email.col_type, ColumnType::Varchar(254));
+
+        let password = schema
+            .columns
+            .iter()
+            .find(|c| c.name == "password")
+            .unwrap();
+        assert_eq!(password.col_type, ColumnType::Text);
 
         let created = schema
             .columns

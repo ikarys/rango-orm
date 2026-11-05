@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "rango",
+    "rango-cli",
     "rango-bench",
     "rango-core",
     "rango-derive",

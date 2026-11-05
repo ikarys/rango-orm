@@ -1,5 +1,5 @@
 use anyhow::{Context, Result, bail};
-use rango_core::BackendKind;
+use rango_core::{BackendKind, quote_ident};
 use std::fs;
 
 pub async fn run(
@@ -159,7 +159,7 @@ async fn insert_rows_postgres(
     for row in rows {
         let col_list = cols
             .iter()
-            .map(|c| format!("\"{}\"", c))
+            .map(|c| quote_ident(c))
             .collect::<Vec<_>>()
             .join(", ");
         let placeholders = (1..=cols.len())
@@ -169,7 +169,7 @@ async fn insert_rows_postgres(
         let conflict = if replace {
             let updates = cols
                 .iter()
-                .map(|c| format!("\"{}\" = EXCLUDED.\"{}\"", c, c))
+                .map(|c| format!("{} = EXCLUDED.{}", quote_ident(c), quote_ident(c)))
                 .collect::<Vec<_>>()
                 .join(", ");
             format!("ON CONFLICT DO UPDATE SET {}", updates)
@@ -177,8 +177,11 @@ async fn insert_rows_postgres(
             "ON CONFLICT DO NOTHING".to_string()
         };
         let sql = format!(
-            "INSERT INTO \"{}\" ({}) VALUES ({}) {}",
-            table, col_list, placeholders, conflict
+            "INSERT INTO {} ({}) VALUES ({}) {}",
+            quote_ident(table),
+            col_list,
+            placeholders,
+            conflict
         );
 
         let mut q = sqlx::query(&sql);
@@ -255,7 +258,7 @@ async fn insert_rows_sqlite(
     for row in rows {
         let col_list = cols
             .iter()
-            .map(|c| format!("\"{}\"", c))
+            .map(|c| quote_ident(c))
             .collect::<Vec<_>>()
             .join(", ");
         let placeholders = cols.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
@@ -266,8 +269,11 @@ async fn insert_rows_sqlite(
             "INSERT OR IGNORE"
         };
         let sql = format!(
-            "{} INTO \"{}\" ({}) VALUES ({})",
-            verb, table, col_list, placeholders
+            "{} INTO {} ({}) VALUES ({})",
+            verb,
+            quote_ident(table),
+            col_list,
+            placeholders
         );
 
         let mut q = sqlx::query(&sql);

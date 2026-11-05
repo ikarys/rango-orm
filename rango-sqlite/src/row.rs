@@ -1,5 +1,5 @@
 use rango_core::{RangoRow, RowError};
-use sqlx::{sqlite::SqliteRow, Row};
+use sqlx::{sqlite::SqliteRow, Row, ValueRef};
 
 pub struct SqliteRangoRow(pub SqliteRow);
 
@@ -88,9 +88,9 @@ impl RangoRow for SqliteRangoRow {
         serde_json::from_str(&s).map_err(|e| RowError(format!("{}: {}", col, e)))
     }
     fn is_null(&self, col: &str) -> bool {
-        self.0
-            .try_get::<Option<String>, _>(col)
-            .map(|v| v.is_none())
-            .unwrap_or(true)
+        match self.0.try_get_raw(col) {
+            Ok(value) => value.is_null(),
+            Err(_) => false,
+        }
     }
 }

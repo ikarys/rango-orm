@@ -1,0 +1,269 @@
+//! Single-row CRUD operations.
+
+use crate::error::db_err;
+use crate::executor::RangoExecutor;
+use crate::row::PgRangoRow;
+use rango_core::{Error, Result};
+use rango_core::{FromRow, Model, ModelValues, SqlValue, quote_ident};
+use sqlx::{Acquire, Executor, Postgres};
+
+use super::*;
+
+// ─── Single-query ops — transparent over PgPool, Transaction, and any connection ─
+/// INSERT → returns the model as stored.
+/// Accepts `&PgPool`, `&mut Transaction<'_, Postgres>`, or any sqlx `Executor`.
+///
+/// # Example
+/// ```rust,ignore
+/// // With pool
+/// let user = rango::insert(&pool, user).await?;
+///
+/// // Inside rango::atomic()
+/// let user = rango::atomic(&pool, |tx| async move {
+///     let user = rango::insert(tx, user).await?;
+///     rango::insert(tx, profile).await?;
+///     Ok(user)
+/// }).await?;
+/// ```
+pub async fn insert<'e, E, M>(executor: E, model: M) -> Result<M>
+where
+    E: Executor<'e, Database = Postgres>,
+    M: Model + ModelValues + FromRow,
+{
+    let (sql, values) = build_insert_sql::<M>(&model);
+    let q = bind_sql_values(sqlx::query(&sql), values);
+    let row = q.fetch_one(executor).await.map_err(db_err)?;
+    M::from_row(&PgRangoRow(row)).map_err(Error::from)
+}
+
+/// UPDATE → returns the updated model.
+pub async fn update<'e, E, M>(executor: E, model: M) -> Result<M>
+where
+    E: Executor<'e, Database = Postgres>,
+    M: Model + ModelValues + FromRow,
+{
+    let (sql, values) = build_update_sql::<M>(&model);
+    let q = bind_sql_values(sqlx::query(&sql), values);
+    let row = q.fetch_one(executor).await.map_err(db_err)?;
+    M::from_row(&PgRangoRow(row)).map_err(Error::from)
+}
+
+/// DELETE a model.
+pub async fn delete<'e, E, M>(executor: E, model: &M) -> Result<()>
+where
+    E: Executor<'e, Database = Postgres>,
+    M: Model + ModelValues,
+{
+    let (sql, values) = build_delete_sql::<M>(model);
+    let q = bind_sql_values(sqlx::query(&sql), values);
+    q.execute(executor).await.map(|_| ()).map_err(db_err)
+}
+
+/// GET by primary key.
+/// Accepts `&PgPool`, `&mut Transaction<'_, Postgres>`, or any sqlx `Executor`.
+pub async fn get<'e, E, M>(executor: E, pk: &SqlValue) -> Result<Option<M>>
+where
+    E: Executor<'e, Database = Postgres>,
+    M: Model + ModelValues + FromRow,
+{
+    let sql = format!(
+        "SELECT * FROM {} WHERE {} = $1 LIMIT 1",
+        quote_ident(M::table_name()),
+        quote_ident(M::pk_column())
+    );
+    let q = bind_sql_values(sqlx::query(&sql), vec![pk.clone()]);
+    let row = q.fetch_optional(executor).await.map_err(db_err)?;
+    match row {
+        Some(r) => Ok(Some(M::from_row(&PgRangoRow(r)).map_err(Error::from)?)),
+        None => Ok(None),
+    }
+}
+
+/// GET ALL rows.
+/// Accepts `&PgPool`, `&mut Transaction<'_, Postgres>`, or any sqlx `Executor`.
+pub async fn all<'e, E, M>(executor: E) -> Result<Vec<M>>
+where
+    E: Executor<'e, Database = Postgres>,
+    M: Model + ModelValues + FromRow,
+{
+    let sql = format!("SELECT * FROM {}", quote_ident(M::table_name()));
+    let rows = sqlx::query(&sql)
+        .fetch_all(executor)
+        .await
+        .map_err(db_err)?;
+    rows.into_iter()
+        .map(|r| M::from_row(&PgRangoRow(r)).map_err(Error::from))
+        .collect()
+}
+
+// ─── Compound ops — require RangoExecutor (pool or transaction, sequential queries) ─
+/// GET OR CREATE — atomic, race-free. Returns `(model, created: bool)`.
+///
+/// Uses `INSERT ... ON CONFLICT (lookup_cols) DO NOTHING RETURNING *` in a single
+/// round-trip. If the row already exists (conflict), falls back to a SELECT on the
+/// same connection. No need to wrap in `atomic()`.
+///
+/// Accepts `&PgPool`, `&mut Transaction<'_, Postgres>`, or any type implementing
+/// `sqlx::Acquire`.
+///
+/// # Example
+/// ```rust,ignore
+/// // Standalone — atomic without wrapping in rango::atomic()
+/// let (user, created) = rango::get_or_create(&pool, lookup, defaults).await?;
+///
+/// // Inside a transaction
+/// let (user, created) = rango::atomic(&pool, |tx| async move {
+///     rango::get_or_create(&mut *tx, lookup, defaults).await
+/// }).await?;
+/// ```
+pub async fn get_or_create<'a, A, M>(
+    executor: A,
+    lookup: Vec<(&'static str, SqlValue)>,
+    defaults: M,
+) -> Result<(M, bool)>
+where
+    A: Acquire<'a, Database = Postgres>,
+    M: Model + ModelValues + FromRow,
+{
+    let mut conn = executor.acquire().await.map_err(db_err)?;
+
+    let conflict_cols: Vec<&str> = lookup.iter().map(|(col, _)| *col).collect();
+    let (insert_sql, insert_vals) = build_get_or_create_sql(&defaults, &conflict_cols);
+    let q = bind_sql_values(sqlx::query(&insert_sql), insert_vals);
+    let row = q.fetch_optional(&mut *conn).await.map_err(db_err)?;
+
+    if let Some(r) = row {
+        return Ok((M::from_row(&PgRangoRow(r)).map_err(Error::from)?, true));
+    }
+
+    // Conflict — row already exists; fetch it
+    let (select_sql, select_vals) = build_lookup_sql::<M>(&lookup);
+    let q = bind_sql_values(sqlx::query(&select_sql), select_vals);
+    let row = q.fetch_one(&mut *conn).await.map_err(db_err)?;
+
+    Ok((M::from_row(&PgRangoRow(row)).map_err(Error::from)?, false))
+}
+
+/// UPDATE OR CREATE.
+///
+/// Accepts `&mut pool` (for standalone use) or `tx` (inside `atomic()`).
+/// For atomicity, wrap in `atomic()`.
+pub async fn update_or_create<E, M>(
+    exec: &mut E,
+    lookup: Vec<(&'static str, SqlValue)>,
+    values: M,
+) -> Result<M>
+where
+    E: RangoExecutor,
+    M: Model + ModelValues + FromRow,
+{
+    let (lookup_sql, lookup_vals) = build_lookup_sql::<M>(&lookup);
+    let q = bind_sql_values(sqlx::query(&lookup_sql), lookup_vals);
+    let row = exec.fetch_optional_query(q).await.map_err(db_err)?;
+    if row.is_some() {
+        let (update_sql, update_vals) = build_update_sql::<M>(&values);
+        let q = bind_sql_values(sqlx::query(&update_sql), update_vals);
+        let row = exec.fetch_one_query(q).await.map_err(db_err)?;
+        M::from_row(&PgRangoRow(row)).map_err(Error::from)
+    } else {
+        let (insert_sql, insert_vals) = build_insert_sql::<M>(&values);
+        let q = bind_sql_values(sqlx::query(&insert_sql), insert_vals);
+        let row = exec.fetch_one_query(q).await.map_err(db_err)?;
+        M::from_row(&PgRangoRow(row)).map_err(Error::from)
+    }
+}
+
+// ─── SQL builders ─────────────────────────────────────────────────────────────
+fn build_insert_sql<M: Model + ModelValues>(model: &M) -> (String, Vec<SqlValue>) {
+    let fields = model.field_values();
+    let pk_col = M::pk_column();
+    let pk_val = model.pk_value();
+    let mut cols = vec![quote_ident(pk_col)];
+    cols.extend(fields.iter().map(|(c, _)| quote_ident(c)));
+    let placeholders: Vec<String> = (1..=cols.len()).map(|i| format!("${}", i)).collect();
+    let sql = format!(
+        "INSERT INTO {} ({}) VALUES ({}) RETURNING *",
+        quote_ident(M::table_name()),
+        cols.join(", "),
+        placeholders.join(", ")
+    );
+    let mut values = vec![pk_val];
+    values.extend(fields.into_iter().map(|(_, v)| v));
+    (sql, values)
+}
+
+fn build_update_sql<M: Model + ModelValues>(model: &M) -> (String, Vec<SqlValue>) {
+    let fields = model.field_values();
+    let pk_col = M::pk_column();
+    let pk_val = model.pk_value();
+    let set_clauses: Vec<String> = fields
+        .iter()
+        .enumerate()
+        .map(|(i, (col, _))| format!("{} = ${}", quote_ident(col), i + 1))
+        .collect();
+    let sql = format!(
+        "UPDATE {} SET {} WHERE {} = ${} RETURNING *",
+        quote_ident(M::table_name()),
+        set_clauses.join(", "),
+        quote_ident(pk_col),
+        fields.len() + 1
+    );
+    let mut values: Vec<SqlValue> = fields.into_iter().map(|(_, v)| v).collect();
+    values.push(pk_val);
+    (sql, values)
+}
+
+fn build_delete_sql<M: Model + ModelValues>(model: &M) -> (String, Vec<SqlValue>) {
+    (
+        format!(
+            "DELETE FROM {} WHERE {} = $1",
+            quote_ident(M::table_name()),
+            quote_ident(M::pk_column())
+        ),
+        vec![model.pk_value()],
+    )
+}
+
+fn build_get_or_create_sql<M: Model + ModelValues>(
+    model: &M,
+    conflict_cols: &[&str],
+) -> (String, Vec<SqlValue>) {
+    let fields = model.field_values();
+    let pk_col = M::pk_column();
+    let pk_val = model.pk_value();
+    let mut cols = vec![quote_ident(pk_col)];
+    cols.extend(fields.iter().map(|(c, _)| quote_ident(c)));
+    let placeholders: Vec<String> = (1..=cols.len()).map(|i| format!("${}", i)).collect();
+    let conflict_clause = conflict_cols
+        .iter()
+        .map(|c| quote_ident(c))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let sql = format!(
+        "INSERT INTO {} ({}) VALUES ({}) ON CONFLICT ({}) DO NOTHING RETURNING *",
+        quote_ident(M::table_name()),
+        cols.join(", "),
+        placeholders.join(", "),
+        conflict_clause
+    );
+    let mut values = vec![pk_val];
+    values.extend(fields.into_iter().map(|(_, v)| v));
+    (sql, values)
+}
+
+fn build_lookup_sql<M: Model + ModelValues>(
+    lookup: &[(&'static str, SqlValue)],
+) -> (String, Vec<SqlValue>) {
+    let conditions: Vec<String> = lookup
+        .iter()
+        .enumerate()
+        .map(|(i, (col, _))| format!("{} = ${}", quote_ident(col), i + 1))
+        .collect();
+    let sql = format!(
+        "SELECT * FROM {} WHERE {} LIMIT 1",
+        quote_ident(M::table_name()),
+        conditions.join(" AND ")
+    );
+    let values = lookup.iter().map(|(_, v)| v.clone()).collect();
+    (sql, values)
+}
