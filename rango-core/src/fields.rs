@@ -1,3 +1,7 @@
+use argon2::Argon2;
+use argon2::password_hash::{
+    PasswordHash, PasswordHasher, PasswordVerifier, SaltString, rand_core::OsRng,
+};
 use chrono::{DateTime, NaiveDate, NaiveTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -68,21 +72,68 @@ impl FieldEmail {
     }
 }
 
-/// Password field — length validated on construction. Value is stored as-is.
-/// Hashing is the application's responsibility.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct FieldPassword<const MIN: usize, const MAX: usize>(pub String);
+/// Password field — stores an Argon2id PHC hash, never the plaintext.
+///
+/// The plaintext is length-validated, then hashed with a random salt.
+/// `Debug` prints a redacted value. This type intentionally does not implement
+/// `Serialize`/`Deserialize`; if a model must be serialized, skip the field
+/// or use a DTO:
+///
+/// ```rust,ignore
+/// #[derive(serde::Serialize)]
+/// struct UserDto {
+///     #[serde(skip)]
+///     password: FieldPassword<8, 128>,
+/// }
+/// ```
+#[derive(Clone, PartialEq)]
+pub struct FieldPassword<const MIN: usize, const MAX: usize> {
+    hash: String,
+}
+
+impl<const MIN: usize, const MAX: usize> std::fmt::Debug for FieldPassword<MIN, MAX> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "FieldPassword(<redacted>)")
+    }
+}
 
 impl<const MIN: usize, const MAX: usize> FieldPassword<MIN, MAX> {
-    pub fn new(s: impl Into<String>) -> Result<Self, FieldError> {
-        let s = s.into();
-        if s.len() < MIN {
+    pub fn new(plain: impl AsRef<str>) -> Result<Self, FieldError> {
+        let plain = plain.as_ref();
+        let len = plain.chars().count();
+        if len < MIN {
             return Err(FieldError(format!("Password too short (min {})", MIN)));
         }
-        if s.len() > MAX {
+        if len > MAX {
             return Err(FieldError(format!("Password too long (max {})", MAX)));
         }
-        Ok(Self(s))
+
+        let salt = SaltString::generate(&mut OsRng);
+        let hash = Argon2::default()
+            .hash_password(plain.as_bytes(), &salt)
+            .map_err(|e| FieldError(e.to_string()))?;
+
+        Ok(Self {
+            hash: hash.to_string(),
+        })
+    }
+
+    pub fn verify(&self, candidate: &str) -> bool {
+        let Ok(parsed) = PasswordHash::new(&self.hash) else {
+            return false;
+        };
+
+        Argon2::default()
+            .verify_password(candidate.as_bytes(), &parsed)
+            .is_ok()
+    }
+
+    pub fn from_hash(hash: String) -> Self {
+        Self { hash }
+    }
+
+    pub fn hash(&self) -> &str {
+        &self.hash
     }
 }
 
@@ -262,7 +313,7 @@ impl<const MIN: usize, const MAX: usize> ToSqlValue for FieldVarchar<MIN, MAX> {
 }
 impl<const MIN: usize, const MAX: usize> ToSqlValue for FieldPassword<MIN, MAX> {
     fn to_sql_value(&self) -> SqlValue {
-        SqlValue::Text(self.0.clone())
+        SqlValue::Text(self.hash().to_string())
     }
 }
 impl<const MIN: i64, const MAX: i64> ToSqlValue for FieldRange<MIN, MAX> {
@@ -531,5 +582,42 @@ impl From<DateTime<Utc>> for FieldDateTime {
 impl From<serde_json::Value> for FieldJson {
     fn from(v: serde_json::Value) -> Self {
         Self(v)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn field_password_new_rejects_too_short() {
+        assert!(FieldPassword::<8, 128>::new("short").is_err());
+    }
+
+    #[test]
+    fn field_password_new_rejects_too_long() {
+        let long = "a".repeat(129);
+        assert!(FieldPassword::<8, 128>::new(long).is_err());
+    }
+
+    #[test]
+    fn field_password_verify_accepts_correct_and_rejects_wrong() {
+        let password = FieldPassword::<8, 128>::new("correct horse battery staple").unwrap();
+        assert!(password.verify("correct horse battery staple"));
+        assert!(!password.verify("wrong password"));
+    }
+
+    #[test]
+    fn field_password_hash_is_argon2id() {
+        let password = FieldPassword::<8, 128>::new("secret password").unwrap();
+        assert!(password.hash().starts_with("$argon2id$"));
+    }
+
+    #[test]
+    fn field_password_debug_does_not_leak_plaintext() {
+        let password = FieldPassword::<8, 128>::new("super secret").unwrap();
+        let debug = format!("{:?}", password);
+        assert!(!debug.contains("super secret"));
+        assert!(debug.contains("FieldPassword(<redacted>)"));
     }
 }

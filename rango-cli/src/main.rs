@@ -1,14 +1,12 @@
+#![forbid(unsafe_code)]
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
+mod commands;
 mod config;
-mod export;
-mod import;
-mod init;
-mod makemigrations;
-mod migrate;
-mod scanner;
-mod snapshot;
+mod migration;
+
+use commands::{export, import, init, makemigrations, migrate};
 
 #[derive(Parser)]
 #[command(name = "rango", about = "Rango ORM CLI")]
@@ -47,6 +45,10 @@ enum Command {
         /// Exit with code 1 if there are pending migrations (useful in CI)
         #[arg(long)]
         check: bool,
+
+        /// Answer yes to every prompt (renames, destructive changes). Review the SQL!
+        #[arg(short, long)]
+        yes: bool,
     },
 
     /// Export data to JSON or CSV
@@ -115,10 +117,11 @@ fn main() -> Result<()> {
             prefix,
             dry_run,
             check,
+            yes,
         } => {
             let cfg = config::RangoConfig::load()?;
             let prefix = prefix.or(cfg.models.prefix).map(|s| s.as_str().to_string());
-            makemigrations::run(&path, &output, prefix.as_deref(), dry_run, check)?;
+            makemigrations::run(&path, &output, prefix.as_deref(), dry_run, check, yes)?;
         }
         Command::Export {
             table,

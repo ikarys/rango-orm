@@ -115,3 +115,23 @@ pub trait ModelValues {
     /// Returns the primary key column name.
     fn pk_column() -> &'static str;
 }
+
+/// Quote a SQL identifier (table or column name), doubling embedded `"`.
+/// Valid for PostgreSQL and SQLite.
+pub fn quote_ident(ident: &str) -> String {
+    format!("\"{}\"", ident.replace('"', "\"\""))
+}
+
+#[cfg(test)]
+mod quote_ident_tests {
+    use super::quote_ident;
+
+    #[test]
+    fn test_quote_ident_escapes_double_quotes() {
+        assert_eq!(quote_ident("name"), "\"name\"");
+        assert_eq!(
+            quote_ident("a\"; DROP TABLE x; --"),
+            "\"a\"\"; DROP TABLE x; --\""
+        );
+    }
+}

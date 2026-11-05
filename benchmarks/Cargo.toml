@@ -1,3 +1,3 @@
 [workspace]
-members = ["rango", "sqlx-raw"]
+members = ["rango", "sqlx-raw", "seaorm", "diesel"]
 resolver = "2"

@@ -1,6 +1,6 @@
 use rango_core::row::{RangoRow, RowError};
-use sqlx::Row;
 use sqlx::postgres::PgRow;
+use sqlx::{Row, ValueRef};
 
 /// Owned row — used for simple queries
 pub struct PgRangoRow(pub PgRow);
@@ -48,10 +48,10 @@ macro_rules! impl_rangorow {
             }
 
             fn is_null(&self, col: &str) -> bool {
-                self.0
-                    .try_get::<Option<String>, _>(col)
-                    .map(|v| v.is_none())
-                    .unwrap_or(true)
+                match self.0.try_get_raw(col) {
+                    Ok(value) => value.is_null(),
+                    Err(_) => false,
+                }
             }
         }
     };

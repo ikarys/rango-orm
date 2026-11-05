@@ -1,12 +1,22 @@
+#![forbid(unsafe_code)]
+use crate::error::db_err;
+use std::str::FromStr;
+use std::time::Duration;
+
 pub use sqlx::SqlitePool;
+use sqlx::{
+    sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous},
+    ConnectOptions,
+};
 
 pub use ops::{
     all, bulk_create, delete, get, get_or_create, insert, raw, raw_execute, raw_scalar, update,
 };
 pub use query_builder::{QueryBuilder, RangoFilterExt};
 pub use sqlite_ext::SqliteQueryExt;
-pub use transaction::{atomic, SqliteTransaction};
+pub use transaction::{atomic, SqliteTransaction, TxFuture};
 
+mod error;
 mod ops;
 mod query_builder;
 mod row;
@@ -34,8 +44,20 @@ impl rango_core::RangoBackend for RangoSqlitePool {
     }
 }
 
-pub async fn connect(url: &str) -> anyhow::Result<SqlitePool> {
-    SqlitePool::connect(url)
+/// Connect with WAL (concurrent readers, one writer), `synchronous=NORMAL`, a 5s busy timeout to avoid SQLITE_BUSY, and foreign keys.
+pub async fn connect(url: &str) -> rango_core::Result<SqlitePool> {
+    let opts = SqliteConnectOptions::from_str(url)
+        .map_err(db_err)?
+        .create_if_missing(true)
+        .journal_mode(SqliteJournalMode::Wal)
+        .synchronous(SqliteSynchronous::Normal)
+        .busy_timeout(Duration::from_secs(5))
+        .foreign_keys(true)
+        .log_slow_statements(log::LevelFilter::Warn, Duration::from_millis(500));
+
+    SqlitePoolOptions::new()
+        .test_before_acquire(false)
+        .connect_with(opts)
         .await
-        .map_err(|e| anyhow::anyhow!(e))
+        .map_err(db_err)
 }

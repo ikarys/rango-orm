@@ -32,9 +32,10 @@ You never touch migration files unless you want to. They're generated artifacts.
 
 This is the **#1 differentiator** vs other Rust ORMs:
 - Diesel → write SQL migrations by hand
-- SeaORM → generate from existing DB
+- SeaORM → write migrations in Rust by hand (entity-first schema sync is newer and less mature)
 - sqlx → manual migrations
-- **Rango → change your struct, run `rango makemigrations`. Done.**
+- Butane → auto-generated migrations too, but a small, less active ecosystem
+- **Rango → Django-style: change your struct, run `rango makemigrations`. Done. Async, ergonomic, production-grade.**
 
 ### 3. Zero ceremony
 - No `impl Model for Article { ... }` by hand
@@ -62,10 +63,14 @@ This is by design — Rango should be portable.
 
 | Crate | Role |
 |---|---|
-| `rango-core` | Traits (`Model`, `Backend`), types (`TableSchema`, `Column`, `Migration`), query builder |
+| `rango-core` | DB-free: traits (`Model`, `FromRow`, `ModelValues`), schema types (`TableSchema`, `ColumnDef`, constraints), field types, `quote_ident` |
 | `rango-derive` | `#[derive(Model)]` proc-macro — generates `TableSchema` from struct fields |
-| `rango-postgres` | PostgreSQL backend (sqlx) |
-| `rango-cli` | `makemigrations` and `migrate` commands |
+| `rango-postgres` | PostgreSQL backend (sqlx): `ops/` (crud, bulk, raw), `query_builder/` (filter, exec, relations), M2M, `PgQueryExt` |
+| `rango-sqlite` | SQLite backend (sqlx), same layout as `rango-postgres` |
+| `rango` | Facade crate: re-exports core + derive + backends, selected by features (`postgres` default, `sqlite`) |
+| `rango-cli` | `rango` binary: `commands/` (init, makemigrations, migrate, export, import) and `migration/` (scanner, snapshot, diff, renames, sql) |
+| `rango-tests` | Integration tests against real Postgres / SQLite |
+| `rango-bench` | Criterion benchmarks |
 
 ## CLI — commandes prévues
 
@@ -242,6 +247,65 @@ backend = "postgres"
 Some features are engine-specific (Postgres JSON operators, full-text search, etc.).
 These are exposed via backend-specific traits (`PgQueryExt`, `SqliteQueryExt`) — not the generic QueryBuilder.
 If you use them, your code is explicitly tied to that backend. No silent portability issues.
+
+## Hardening plan — security, observability, performance
+
+Goal: production-grade by default. Status as of 2026-11-01. P0 = blocks real use, P1 = needed for production, P2 = next.
+
+### Security
+
+| Prio | Item | Status / notes |
+|---|---|---|
+| P0 | Identifier escaping — every table/column name goes through `quote_ident` (doubles `"`) | ✅ query builder, ops, CLI SQL generation, `import`/`export` (names from files and the catalog are untrusted) |
+| P0 | `FieldPassword` stores plaintext, derives `Debug` + `Serialize` | ✅ argon2id hash on write, redacted `Debug`, no serde, `verify(&self, candidate)` |
+| P0 | `DatabaseConfig` derives `Debug` → password in logs | ✅ manual `Debug` with `redact_url`; CLI config has no `Debug` |
+| P0 | TLS for Postgres (`sslmode=require/verify-full`) | ✅ `tls-rustls`; remote hosts default to `require` when no `sslmode` is given (no silent cleartext fallback); use `verify-full` in prod |
+| P1 | Validate filter/order columns against `M::schema()` | Unknown column → typed error instead of a DB error; defense in depth on top of escaping |
+| P1 | Per-connection `statement_timeout` / `lock_timeout` in `DatabaseConfig` | ✅ `statement_timeout_ms` / `lock_timeout_ms`, sent in the startup packet (no extra round-trip; PgBouncer needs `ignore_startup_parameters`) |
+| P1 | Never log bound values by default | ✅ sqlx only logs SQL text, never bound values; no opt-in added |
+| P1 | Typed errors (`rango::Error`: `NotFound`, `UniqueViolation`, `ForeignKeyViolation`, `Timeout`, `Connection`, …) instead of `anyhow` in library crates | ✅ `rango_core::Error`; each backend maps sqlx errors in `error.rs` (`db_err`); no SQL text in errors; `anyhow` only in `rango-cli` |
+| P1 | `#![forbid(unsafe_code)]` in every crate; `cargo audit` + `cargo deny` in CI | 🚧 `forbid(unsafe_code)` in every crate root ✅; `cargo audit` in CI + `just audit` (exceptions in `.cargo/audit.toml`) ✅; `cargo deny` pending |
+| P2 | Least-privilege guide: a migration role (DDL) separate from the app role (DML only) | `rango migrate` can take its own `MIGRATE_DATABASE_URL` |
+| P2 | `dump` / `backup` files written with `0600` permissions; `restore` refuses non-Rango dumps | |
+
+Developer-controlled strings (`CheckConstraint` SQL, partial-unique conditions, `#[field(default = "...")]`, `raw*`) are trusted SQL by design. Document them as such; never build them from user input.
+
+Known-CVE checklist (reviewed 2026-11-01) — keep new APIs out of these classes:
+
+| Class | Reference CVEs | Rango rule |
+|---|---|---|
+| Unescaped / badly escaped identifiers (`order_by`, aliases, `sql.identifier`) | Django CVE-2021-35042, CVE-2026-1312, CVE-2026-1287; Drizzle CVE-2026-39356 | Only `quote_ident` builds identifiers; never `format!("\"{}\"")` |
+| JSON key / path interpolated into SQL | Django CVE-2024-42005; Sequelize CVE-2026-30951 | JSON keys, paths, FTS configs and array values are bound parameters |
+| Query structure from user dicts (`**kwargs`, `_connector`, nested objects) | Django CVE-2025-64459, CVE-2025-59681; TypeORM CVE-2025-60542 | Operators and connectors are Rust enums, never strings from input |
+| Protocol length overflow (> 4 GiB values) | RUSTSEC-2024-0363 (sqlx), RUSTSEC-2024-0365 (diesel) | sqlx ≥ 0.8.1 required (`cargo audit` in CI) |
+| Object names from a dump turned into SQL on restore | PostgreSQL CVE-2025-8714, CVE-2025-8715 | `import`/`restore` treat file contents as untrusted: names quoted, values bound; covered by an e2e test |
+| TLS downgrade (`sslmode=prefer`) | — | Remote hosts default to `require` |
+| Bundled SQLite engine bugs | SQLite CVE-2025-6965, CVE-2025-29087 (fixed in 3.50.2 / 3.49.1) | Need attacker-controlled SQL, which Rango never runs; bump `libsqlite3-sys` with sqlx (0.8 bundles 3.46) |
+
+### Observability
+
+| Prio | Item | Notes |
+|---|---|---|
+| P1 | `tracing` spans per query: `db.system`, `db.operation`, `db.sql.table`, rows, duration (OpenTelemetry semantic conventions) | 🚧 sqlx already emits one event per query on target `sqlx::query` (`db.statement`, `rows_affected`, `rows_returned`, `elapsed`); Rango-level spans with `db.sql.table` pending |
+| P1 | Slow query log: `slow_query_threshold` in config (default 500 ms) → `WARN` with SQL (no values) and duration | ✅ `slow_query_threshold_ms` (Postgres), fixed 500 ms on SQLite |
+| P1 | Pool metrics: `pool.size()`, idle, wait time on acquire | sqlx already exposes `pool.size()` / `pool.num_idle()`; acquire wait time pending |
+| P2 | N+1 detector (debug builds): warn when the same query shape runs > N times within a span | Matches the "Rango detects N+1" vision |
+| P2 | `.explain_analyze()` next to `.explain()` | |
+
+### Performance
+
+| Prio | Item | Notes |
+|---|---|---|
+| P0 | Index every FK column, index M2M pivots, real `REFERENCES … ON DELETE` | ✅ derive marks every FK `index`; CLI emits `CREATE INDEX` on create/add column and on pivots |
+| P0 | `rango-core` must not depend on sqlx (currently pulls postgres + mysql + sqlite drivers) | Core stays pure; compile time and binary size drop for every app |
+| P1 | Pool tuning: `test_before_acquire(false)` (sqlx pings on every acquire by default), `max_lifetime`, configurable from `rango.toml` | ✅ `max_lifetime` (1800 s), `test_before_acquire` (false) in `DatabaseConfig`; not yet in `rango.toml` |
+| P1 | Row decoding by column index instead of by name, without `dyn` dispatch | Benchmarks show 2× overhead on `select_all_1000` |
+| P1 | Postgres `bulk_create` via `UNNEST` (one statement, no 65 535-param chunking) | +21% at 1000 rows in benchmarks |
+| P1 | Keyset pagination helper (`.after(col, value)`) | `OFFSET` is O(n) on large tables |
+| P1 | Transaction retry on serialization failure / deadlock (`40001`, `40P01`) in `atomic()`, opt-in, bounded | ✅ `atomic_retry(&pool, max_attempts, f)` (Postgres), exponential backoff without jitter |
+| P1 | SQLite table rebuild for ALTER TYPE / NULL / FK changes (create new → copy → drop → rename, in one transaction) | Same migration UX on every backend; today SQLite only gets a comment |
+| P2 | Optimistic locking (`#[field(version)]` → `UPDATE … WHERE version = $n`) | Safe concurrent updates without row locks |
+| P2 | Read-replica routing (writes → primary, reads → replica) | |
 
 ## Style
 

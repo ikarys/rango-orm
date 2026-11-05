@@ -3,7 +3,7 @@ use serde::Deserialize;
 use std::fs;
 
 /// Configuration loaded from rango.toml
-#[derive(Debug, Deserialize, Default)]
+#[derive(Deserialize, Default)]
 pub struct RangoConfig {
     #[serde(default)]
     pub database: DatabaseConfig,
@@ -14,7 +14,7 @@ pub struct RangoConfig {
 }
 
 #[allow(dead_code)]
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 pub struct DatabaseConfig {
     /// Database backend: "sqlite" or "postgres" (default: "postgres").
     #[serde(default = "default_backend")]
@@ -76,7 +76,7 @@ fn default_idle_timeout() -> u64 {
 }
 
 #[allow(dead_code)]
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 pub struct MigrationsConfig {
     #[serde(default = "default_migrations_dir")]
     pub dir: String,
@@ -94,7 +94,7 @@ impl Default for MigrationsConfig {
 }
 
 #[allow(dead_code)]
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 pub struct ModelsConfig {
     pub prefix: Option<String>,
     #[serde(default = "default_src_dir")]

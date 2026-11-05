@@ -1,5 +1,5 @@
 use anyhow::{Context, Result, bail};
-use rango_core::BackendKind;
+use rango_core::{BackendKind, quote_ident};
 use std::fs;
 
 #[derive(Debug, Clone, Copy)]
@@ -67,7 +67,7 @@ async fn export_postgres(
 
     let mut all_rows = Vec::new();
     for t in &tables {
-        let sql = format!("SELECT * FROM \"{}\"", t);
+        let sql = format!("SELECT * FROM {}", quote_ident(t));
         let rows = sqlx::query(&sql)
             .fetch_all(&pool)
             .await
@@ -187,7 +187,7 @@ async fn export_sqlite(
 
     let mut all_rows = Vec::new();
     for t in &tables {
-        let sql = format!("SELECT * FROM \"{}\"", t);
+        let sql = format!("SELECT * FROM {}", quote_ident(t));
         let rows = sqlx::query(&sql)
             .fetch_all(&pool)
             .await
@@ -273,7 +273,11 @@ fn serialize_csv(
                 match row.get(h) {
                     Some(serde_json::Value::String(s)) => {
                         // Quote strings containing commas or newlines
-                        if s.contains(',') || s.contains('\n') || s.contains('"') {
+                        if s.contains(',')
+                            || s.contains('\n')
+                            || s.contains('"')
+                            || s.contains('\r')
+                        {
                             format!("\"{}\"", s.replace('"', "\"\""))
                         } else {
                             s.clone()

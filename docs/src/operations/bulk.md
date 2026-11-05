@@ -60,9 +60,9 @@ Rango automatically splits large batches into chunks — transparent to the call
 All bulk ops accept a transaction executor:
 
 ```rust
-atomic(&pool, |tx| async move {
-    bulk_create(tx, &users).await?;
-    bulk_create(tx, &posts).await?;
+atomic(&pool, |tx| Box::pin(async move {
+    bulk_create(&mut **tx, &users).await?;
+    bulk_create(&mut **tx, &posts).await?;
     Ok(())
-}).await?;
+})).await?;
 ```

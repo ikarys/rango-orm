@@ -1,18 +1,18 @@
-/// SQLite-specific query extensions.
-///
-/// Import this trait to unlock SQLite-only filter methods on any `QueryBuilder`.
-/// These methods generate SQL that is specific to SQLite and not portable to other backends.
-///
-/// # Example
-/// ```rust,ignore
-/// use rango_sqlite::SqliteQueryExt;
-///
-/// let posts = Post::filter(&pool)
-///     .json_extract_eq("metadata", "$.status", "published")
-///     .all()
-///     .await?;
-/// ```
-use rango_core::{FromRow, Model, ModelValues, SqlValue};
+//! SQLite-specific query extensions.
+//!
+//! Import this trait to unlock SQLite-only filter methods on any `QueryBuilder`.
+//! These methods generate SQL that is specific to SQLite and not portable to other backends.
+//!
+//! # Example
+//! ```rust,ignore
+//! use rango_sqlite::SqliteQueryExt;
+//!
+//! let posts = Post::filter(&pool)
+//!     .json_extract_eq("metadata", "$.status", "published")
+//!     .all()
+//!     .await?;
+//! ```
+use rango_core::{quote_ident, ColumnRef, FromRow, Model, ModelValues, SqlValue};
 
 use crate::query_builder::QueryBuilder;
 
@@ -32,21 +32,21 @@ where
     ///     .json_extract_eq("metadata", "$.status", "published")
     ///     .all().await?
     /// ```
-    fn json_extract_eq(self, col: &str, path: &str, value: &str) -> Self;
+    fn json_extract_eq(self, col: impl ColumnRef<M>, path: &str, value: &str) -> Self;
 
     /// Filter by a JSON field using LIKE.
     ///
     /// ```sql
     /// WHERE json_extract("col", '$.key') LIKE ?
     /// ```
-    fn json_extract_like(self, col: &str, path: &str, pattern: &str) -> Self;
+    fn json_extract_like(self, col: impl ColumnRef<M>, path: &str, pattern: &str) -> Self;
 
     /// Filter by a JSON field being NOT NULL (key exists).
     ///
     /// ```sql
     /// WHERE json_extract("col", '$.key') IS NOT NULL
     /// ```
-    fn json_extract_exists(self, col: &str, path: &str) -> Self;
+    fn json_extract_exists(self, col: impl ColumnRef<M>, path: &str) -> Self;
 
     /// Full-text search using SQLite FTS5.
     ///
@@ -73,29 +73,39 @@ impl<M> SqliteQueryExt<M> for QueryBuilder<M>
 where
     M: Model + ModelValues + FromRow,
 {
-    fn json_extract_eq(self, col: &str, path: &str, value: &str) -> Self {
+    fn json_extract_eq(self, col: impl ColumnRef<M>, path: &str, value: &str) -> Self {
         self.raw_where(
-            format!("json_extract(\"{}\", '{}') = ?", col, path),
-            vec![SqlValue::Text(value.to_string())],
+            format!("json_extract({}, ?) = ?", quote_ident(col.column_name())),
+            vec![
+                SqlValue::Text(path.to_string()),
+                SqlValue::Text(value.to_string()),
+            ],
         )
     }
 
-    fn json_extract_like(self, col: &str, path: &str, pattern: &str) -> Self {
+    fn json_extract_like(self, col: impl ColumnRef<M>, path: &str, pattern: &str) -> Self {
         self.raw_where(
-            format!("json_extract(\"{}\", '{}') LIKE ?", col, path),
-            vec![SqlValue::Text(pattern.to_string())],
+            format!("json_extract({}, ?) LIKE ?", quote_ident(col.column_name())),
+            vec![
+                SqlValue::Text(path.to_string()),
+                SqlValue::Text(pattern.to_string()),
+            ],
         )
     }
 
-    fn json_extract_exists(self, col: &str, path: &str) -> Self {
-        self.raw_where_no_bind(format!("json_extract(\"{}\", '{}') IS NOT NULL", col, path))
+    fn json_extract_exists(self, col: impl ColumnRef<M>, path: &str) -> Self {
+        self.raw_where(
+            format!("json_extract({}, ?) IS NOT NULL", quote_ident(col.column_name())),
+            vec![SqlValue::Text(path.to_string())],
+        )
     }
 
     fn fts5(self, fts_table: &str, query: &str) -> Self {
         self.raw_where(
             format!(
-                "rowid IN (SELECT rowid FROM \"{}\" WHERE \"{}\" MATCH ?)",
-                fts_table, fts_table
+                "rowid IN (SELECT rowid FROM {} WHERE {} MATCH ?)",
+                quote_ident(fts_table),
+                quote_ident(fts_table)
             ),
             vec![SqlValue::Text(query.to_string())],
         )

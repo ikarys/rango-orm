@@ -37,6 +37,15 @@ jobs:
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
+  audit:
+    name: Security audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
   test:
     name: Unit tests
     runs-on: ubuntu-latest
@@ -96,7 +105,7 @@ jobs:
           key: ${{ runner.os }}-cargo-integration-${{ hashFiles('**/Cargo.lock') }}
 
       - name: cargo test (integration)
-        run: cargo test --workspace --features rango-tests/integration -- --test-threads=1
+        run: cargo test --workspace --features rango-tests/integration,rango-cli/integration -- --test-threads=1
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/rango_test
 

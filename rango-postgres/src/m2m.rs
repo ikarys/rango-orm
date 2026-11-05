@@ -1,5 +1,6 @@
-use anyhow::{Context, Result};
-use rango_core::{FromRow, Model, ModelValues};
+use crate::error::db_err;
+use rango_core::{Error, Result};
+use rango_core::{FromRow, Model, ModelValues, quote_ident};
 use sqlx::PgPool;
 
 use crate::ops::bind_sql_values;
@@ -39,13 +40,13 @@ where
         let from_col = Self::from_col();
         let to_col = Self::to_col();
         let sql = format!(
-            "INSERT INTO \"{}\" (\"{}\", \"{}\") VALUES ($1, $2) ON CONFLICT DO NOTHING",
-            pivot, from_col, to_col
+            "INSERT INTO {} ({}, {}) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+            quote_ident(&pivot),
+            quote_ident(&from_col),
+            quote_ident(&to_col)
         );
         let q = bind_sql_values(sqlx::query(&sql), vec![from.pk_value(), to.pk_value()]);
-        q.execute(pool)
-            .await
-            .with_context(|| format!("M2M add on {} failed", pivot))?;
+        q.execute(pool).await.map_err(db_err)?;
         Ok(())
     }
 
@@ -55,13 +56,13 @@ where
         let from_col = Self::from_col();
         let to_col = Self::to_col();
         let sql = format!(
-            "DELETE FROM \"{}\" WHERE \"{}\" = $1 AND \"{}\" = $2",
-            pivot, from_col, to_col
+            "DELETE FROM {} WHERE {} = $1 AND {} = $2",
+            quote_ident(&pivot),
+            quote_ident(&from_col),
+            quote_ident(&to_col)
         );
         let q = bind_sql_values(sqlx::query(&sql), vec![from.pk_value(), to.pk_value()]);
-        q.execute(pool)
-            .await
-            .with_context(|| format!("M2M remove on {} failed", pivot))?;
+        q.execute(pool).await.map_err(db_err)?;
         Ok(())
     }
 
@@ -69,11 +70,13 @@ where
     pub async fn clear(pool: &PgPool, from: &From) -> Result<()> {
         let pivot = Self::pivot_table();
         let from_col = Self::from_col();
-        let sql = format!("DELETE FROM \"{}\" WHERE \"{}\" = $1", pivot, from_col);
+        let sql = format!(
+            "DELETE FROM {} WHERE {} = $1",
+            quote_ident(&pivot),
+            quote_ident(&from_col)
+        );
         let q = bind_sql_values(sqlx::query(&sql), vec![from.pk_value()]);
-        q.execute(pool)
-            .await
-            .with_context(|| format!("M2M clear on {} failed", pivot))?;
+        q.execute(pool).await.map_err(db_err)?;
         Ok(())
     }
 
@@ -86,18 +89,20 @@ where
         let to_col = Self::to_col();
 
         let sql = format!(
-            r#"SELECT t.* FROM "{to_table}" t
-               INNER JOIN "{pivot}" p ON t."{to_pk}" = p."{to_col}"
-               WHERE p."{from_col}" = $1"#,
+            r#"SELECT t.* FROM {to_table} t
+               INNER JOIN {pivot} p ON t.{to_pk} = p.{to_col}
+               WHERE p.{from_col} = $1"#,
+            to_table = quote_ident(to_table),
+            pivot = quote_ident(&pivot),
+            to_pk = quote_ident(to_pk),
+            to_col = quote_ident(&to_col),
+            from_col = quote_ident(&from_col),
         );
         let q = bind_sql_values(sqlx::query(&sql), vec![from.pk_value()]);
-        let rows = q
-            .fetch_all(pool)
-            .await
-            .with_context(|| format!("M2M all on {} failed", pivot))?;
+        let rows = q.fetch_all(pool).await.map_err(db_err)?;
 
         rows.into_iter()
-            .map(|r| To::from_row(&PgRangoRow(r)).map_err(|e| anyhow::anyhow!("{}", e)))
+            .map(|r| To::from_row(&PgRangoRow(r)).map_err(Error::from))
             .collect()
     }
 
@@ -113,18 +118,20 @@ where
         let from_col = Self::from_col();
 
         let sql = format!(
-            r#"SELECT f.* FROM "{from_table}" f
-               INNER JOIN "{pivot}" p ON f."{from_pk}" = p."{from_col}"
-               WHERE p."{to_col}" = $1"#,
+            r#"SELECT f.* FROM {from_table} f
+               INNER JOIN {pivot} p ON f.{from_pk} = p.{from_col}
+               WHERE p.{to_col} = $1"#,
+            from_table = quote_ident(from_table),
+            pivot = quote_ident(&pivot),
+            from_pk = quote_ident(from_pk),
+            from_col = quote_ident(&from_col),
+            to_col = quote_ident(&to_col),
         );
         let q = bind_sql_values(sqlx::query(&sql), vec![to.pk_value()]);
-        let rows = q
-            .fetch_all(pool)
-            .await
-            .with_context(|| format!("M2M reverse on {} failed", pivot))?;
+        let rows = q.fetch_all(pool).await.map_err(db_err)?;
 
         rows.into_iter()
-            .map(|r| From::from_row(&PgRangoRow(r)).map_err(|e| anyhow::anyhow!("{}", e)))
+            .map(|r| From::from_row(&PgRangoRow(r)).map_err(Error::from))
             .collect()
     }
 
@@ -143,14 +150,13 @@ where
         let from_col = Self::from_col();
         let to_col = Self::to_col();
         let sql = format!(
-            "SELECT 1 FROM \"{}\" WHERE \"{}\" = $1 AND \"{}\" = $2 LIMIT 1",
-            pivot, from_col, to_col
+            "SELECT 1 FROM {} WHERE {} = $1 AND {} = $2 LIMIT 1",
+            quote_ident(&pivot),
+            quote_ident(&from_col),
+            quote_ident(&to_col)
         );
         let q = bind_sql_values(sqlx::query(&sql), vec![from.pk_value(), to.pk_value()]);
-        let row = q
-            .fetch_optional(pool)
-            .await
-            .with_context(|| format!("M2M exists on {} failed", pivot))?;
+        let row = q.fetch_optional(pool).await.map_err(db_err)?;
         Ok(row.is_some())
     }
 }

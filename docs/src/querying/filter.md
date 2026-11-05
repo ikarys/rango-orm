@@ -18,6 +18,29 @@ let users = User::filter(&pool)
     .await?;
 ```
 
+## Typed columns
+
+`#[derive(Model)]` generates one constant per field (`User::EMAIL`, `User::SCORE`, …).
+Use them instead of strings: a typo, a renamed field, or a column from another model
+becomes a compile error instead of a database error.
+
+```rust
+let users = User::filter(&pool)
+    .eq(User::ACTIVE, true)
+    .gt(User::SCORE, 100)
+    .order_by(User::CREATED_AT.desc())
+    .all()
+    .await?;
+
+let total = Order::filter(&pool).sum(Order::PRICE).await?;
+
+// Compile error: `Article::TITLE` is a `Column<Article>`, not a `Column<User>`
+// User::filter(&pool).eq(Article::TITLE, "x");
+```
+
+String names (`"email"`, `"-created_at"`) are still accepted everywhere. Only the column
+name is checked today, not the type of the value.
+
 ## Operators
 
 | Method | SQL | Example |

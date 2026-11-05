@@ -81,8 +81,9 @@ pub fn expand(input: DeriveInput) -> Result<TokenStream> {
             continue;
         }
         let fname = f.ident.as_ref().unwrap();
-        let is_pk = fname == "id" || parse_field_attr(f)?.primary_key;
-        let col_name = fname.to_string();
+        let attr = parse_field_attr(f)?;
+        let is_pk = fname == "id" || attr.primary_key;
+        let col_name = column_name(fname, attr.column);
 
         if is_pk {
             pk_found = true;
@@ -113,12 +114,28 @@ pub fn expand(input: DeriveInput) -> Result<TokenStream> {
             continue;
         }
         let fname = f.ident.as_ref().unwrap();
-        let col_name = fname.to_string();
+        let col_name = column_name(fname, parse_field_attr(f)?.column);
         let (nullable, inner_ty) = extract_option(&f.ty);
         let type_str = quote!(#inner_ty).to_string().replace(" ", "");
 
         let getter = field_type_to_getter(&type_str, &col_name, nullable, &core);
         from_row_fields.push(quote! { #fname: #getter });
+    }
+
+    // Typed column constants: `User::EMAIL` → `Column<User>`, checked at compile time.
+    let mut column_consts = Vec::new();
+    for f in fields.iter().filter(|f| !is_many_to_many(&f.ty)) {
+        let fname = f.ident.as_ref().unwrap();
+        let col_name = column_name(fname, parse_field_attr(f)?.column);
+        let const_name = syn::Ident::new(
+            &fname.to_string().trim_start_matches("r#").to_uppercase(),
+            fname.span(),
+        );
+        let doc = format!("Typed reference to the `{col_name}` column.");
+        column_consts.push(quote! {
+            #[doc = #doc]
+            pub const #const_name: #core::Column<Self> = #core::Column::new(#col_name);
+        });
     }
 
     let comment_expr = match &model_attr.comment {
@@ -162,6 +179,11 @@ pub fn expand(input: DeriveInput) -> Result<TokenStream> {
 
         impl #core2::Filterable for #struct_name {}
 
+        #[allow(dead_code)]
+        impl #struct_name {
+            #(#column_consts)*
+        }
+
         impl #core2::ModelValues for #struct_name {
             fn field_values(&self) -> Vec<(&'static str, #core2::SqlValue)> {
                 vec![#(#field_value_entries),*]
@@ -176,6 +198,11 @@ pub fn expand(input: DeriveInput) -> Result<TokenStream> {
             }
         }
     })
+}
+
+/// DB column name: `#[field(column = "...")]` override, else the field name (without `r#`).
+fn column_name(field: &syn::Ident, column: Option<String>) -> String {
+    column.unwrap_or_else(|| field.to_string().trim_start_matches("r#").to_string())
 }
 
 /// Parse `#[model(table = "...", comment = "...")]`
@@ -275,17 +302,22 @@ fn generate_column_def(field: &Field, core: &TokenStream) -> Result<TokenStream>
     let attr = parse_field_attr(field)?;
 
     // Column name: explicit override or snake_case field name
-    let col_name = attr.column.unwrap_or_else(|| field_name.to_string());
+    let col_name = column_name(field_name, attr.column);
 
     // Detect nullable: if the type is Option<T>
     let (nullable, inner_ty) = extract_option(&field.ty);
 
     // Auto-detect primary key: field named "id" gets PK by default
     let is_pk = attr.primary_key || field_name == "id";
+    let is_index = attr.index;
     let is_unique = is_pk || attr.unique; // PK implies unique
 
     // Map Rust field type to ColumnType
     let col_type = map_field_type(inner_ty, core)?;
+    let is_foreign_key = quote!(#inner_ty)
+        .to_string()
+        .replace(" ", "")
+        .starts_with("ForeignKey<");
 
     // Validate: auto_now_add / auto_now only on date/time fields
     if attr.auto_now_add || attr.auto_now {
@@ -319,6 +351,7 @@ fn generate_column_def(field: &Field, core: &TokenStream) -> Result<TokenStream>
             unique: #is_unique,
             default: #default_val,
             references: None,
+            index: #is_index || #is_foreign_key,
         }
     })
 }
@@ -360,7 +393,7 @@ fn field_type_to_getter(
             let (min, max) = parse_two_generics(s, "FieldPassword");
             let min_lit = proc_macro2::Literal::usize_unsuffixed(min);
             let max_lit = proc_macro2::Literal::usize_unsuffixed(max);
-            quote! { row.get_string(#col).map(|s| #core::FieldPassword::<#min_lit, #max_lit>(s))? }
+            quote! { row.get_string(#col).map(|s| #core::FieldPassword::<#min_lit, #max_lit>::from_hash(s))? }
         }
         s if s.starts_with("FieldRange<") => {
             let (min, max) = parse_two_generics_i64(s, "FieldRange");
@@ -533,10 +566,8 @@ fn parse_decimal(s: &str, core: &TokenStream) -> Result<TokenStream> {
 fn parse_password(s: &str, core: &TokenStream) -> Result<TokenStream> {
     let inner = s.trim_start_matches("FieldPassword<").trim_end_matches('>');
     let parts: Vec<&str> = inner.split(',').collect();
-    if parts.len() == 2
-        && let Ok(max) = parts[1].trim().parse::<u32>()
-    {
-        return Ok(quote! { #core::ColumnType::Varchar(#max) });
+    if parts.len() == 2 && parts[1].trim().parse::<u32>().is_ok() {
+        return Ok(quote! { #core::ColumnType::Text });
     }
     Err(syn::Error::new(
         proc_macro2::Span::call_site(),

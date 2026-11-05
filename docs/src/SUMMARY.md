@@ -34,6 +34,7 @@
 - [CRUD](./operations/crud.md)
 - [Bulk Operations](./operations/bulk.md)
 - [Transactions](./operations/transactions.md)
+- [Errors](./operations/errors.md)
 
 # Backends
 

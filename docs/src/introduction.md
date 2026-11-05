@@ -37,14 +37,31 @@ That's it.
 - **Async-first** — built on [sqlx](https://github.com/launchbadge/sqlx) and [tokio](https://tokio.rs)
 - **CLI tools** — `init`, `makemigrations`, `migrate`, `export`, `import`
 
-## Why Not Diesel / SeaORM?
+## How Rango compares
 
-| | Diesel | SeaORM | **Rango** |
-|---|---|---|---|
-| Write migrations | By hand | By hand | **Auto-generated** |
-| Async | ❌ | ✅ | ✅ |
-| Schema from code | ❌ | ❌ | ✅ |
-| Django-like API | ❌ | Partial | ✅ |
+Rango targets Django-style ORM ergonomics on native async SQLx.
+
+| | Diesel | SeaORM | SQLx | Butane | **Rango** |
+|---|---|---|---|---|---|
+| Kind | Query builder + ORM | Async ORM | Raw SQL toolkit (not an ORM) | ORM | Django-style ORM |
+| Migrations | ⚠️ Diesel CLI; SQL by hand | ⚠️ Rust files by hand; schema sync newer | ⚠️ sqlx-cli; SQL by hand | ✅ auto-generated from models | ✅ auto-generated from models (`rango makemigrations`) |
+| Model definition | `table!` macro + struct | Entity + ActiveModel, more boilerplate | None | `#[model]` struct | `#[derive(Model)]` only |
+| Async | ⚠️ via `diesel-async` | ✅ | ✅ | ⚠️ partial | ✅ native (sqlx) |
+| Compile-time column checks | ✅ strong | ❌ runtime | ✅ `query!` macros, needs a dev DB | ✅ | ✅ generated column constants (`User::EMAIL`); string names still accepted |
+| Model hooks | ❌ | ✅ ActiveModelBehavior | ❌ | ❌ | ✅ `ModelHooks` |
+| Relations loading | Manual joins | ✅ | ❌ | ✅ | ✅ `select_related` / `prefetch_related` |
+| Real `ON DELETE CASCADE` | ✅ | ✅ | n/a | ✅ | ✅ |
+| Raw SQL escape hatch | ✅ | ✅ | ✅ it's the point | ✅ | ✅ `raw*` |
+| Backends | PG, MySQL, SQLite | PG, MySQL, SQLite | PG, MySQL, SQLite | PG, SQLite | PG, SQLite (MySQL planned) |
+| Maturity / ecosystem | Large, production at crates.io | Medium, active | Large | Small | Early, API not stable |
+
+### Where Rango is weaker today
+
+- Bulk reads are ~20% slower than raw sqlx on 1000-row selects (on par with SeaORM, Diesel is ~15% faster); row decoding by index is planned — see benchmarks.
+- Value types in filters are not type-checked yet (only column names are).
+- Young project with a small ecosystem.
+
+Comparison inspired by Shuttle's [Best Rust ORMs](https://www.shuttle.dev/blog/2024/01/16/best-orm-rust) (2024), extended with Butane and Rango.
 
 ## Status
 
