@@ -184,12 +184,18 @@ mod tests {
         assert_eq!(age.bind(FieldInt(18)), SqlValue::Int(18));
         let email = Column::<User, FieldEmail>::new("email");
         assert_eq!(email.bind("a@b.c"), SqlValue::Text("a@b.c".into()));
-        assert_eq!(FilterColumn::<User, _>::bind(&"age", 18i64), SqlValue::BigInt(18));
+        assert_eq!(
+            FilterColumn::<User, _>::bind(&"age", 18i64),
+            SqlValue::BigInt(18)
+        );
     }
 
     #[test]
     fn column_name() {
-        assert_eq!(Column::<User, FieldText>::new("email").column_name(), "email");
+        assert_eq!(
+            Column::<User, FieldText>::new("email").column_name(),
+            "email"
+        );
         assert_eq!(ColumnRef::<User>::column_name(&"email"), "email");
     }
 

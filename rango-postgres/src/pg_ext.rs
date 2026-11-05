@@ -135,7 +135,11 @@ pub struct Pg;
 
 impl Pg {
     /// Execute a full-text search and return matching rows.
-    pub async fn fts<M>(pool: &PgPool, col: impl ColumnRef<M>, query: &str) -> Result<Vec<WithRelated<M>>>
+    pub async fn fts<M>(
+        pool: &PgPool,
+        col: impl ColumnRef<M>,
+        query: &str,
+    ) -> Result<Vec<WithRelated<M>>>
     where
         M: Model + ModelValues + FromRow,
     {
@@ -150,7 +154,10 @@ impl Pg {
             .fetch_all(pool)
             .await
             .map_err(db_err)?;
-        Ok(decode_all::<M>(rows)?.into_iter().map(WithRelated::new).collect())
+        Ok(decode_all::<M>(rows)?
+            .into_iter()
+            .map(WithRelated::new)
+            .collect())
     }
 
     /// Get a JSONB field value as a string.

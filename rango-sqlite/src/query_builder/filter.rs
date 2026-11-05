@@ -1,4 +1,6 @@
-use rango_core::{quote_ident, ColumnRef, FilterColumn, FromRow, Model, ModelValues, OrderRef, SqlValue};
+use rango_core::{
+    quote_ident, ColumnRef, FilterColumn, FromRow, Model, ModelValues, OrderRef, SqlValue,
+};
 use sqlx::SqlitePool;
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -58,11 +60,21 @@ where
     }
 
     pub fn like(self, col: impl ColumnRef<M>, pattern: impl Into<String>) -> Self {
-        self.add(col.column_name(), Op::Like, Some(SqlValue::Text(pattern.into())), None)
+        self.add(
+            col.column_name(),
+            Op::Like,
+            Some(SqlValue::Text(pattern.into())),
+            None,
+        )
     }
 
     pub fn ilike(self, col: impl ColumnRef<M>, pattern: impl Into<String>) -> Self {
-        self.add(col.column_name(), Op::ILike, Some(SqlValue::Text(pattern.into())), None)
+        self.add(
+            col.column_name(),
+            Op::ILike,
+            Some(SqlValue::Text(pattern.into())),
+            None,
+        )
     }
 
     pub fn in_values(self, col: impl ColumnRef<M>, vals: Vec<SqlValue>) -> Self {

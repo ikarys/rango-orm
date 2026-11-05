@@ -1,8 +1,8 @@
 use crate::ops::DEFAULT_QUERY_LIMIT;
 use crate::related::WithRelated;
-use crate::row::{decode_all, PgRangoRow, PgRangoRow2};
-use rango_core::{Error, Result};
+use crate::row::{PgRangoRow, PgRangoRow2, decode_all};
 use rango_core::{ColumnRef, FromRow, Model, ModelValues, SqlValue, quote_ident};
+use rango_core::{Error, Result};
 use sqlx::Postgres;
 use std::any::Any;
 use std::collections::HashMap;
@@ -45,8 +45,10 @@ where
         }
 
         let rows = bind_and_fetch_all(&self.pool, &sql, binds).await?;
-        let mut results: Vec<WithRelated<M>> =
-            decode_all::<M>(rows)?.into_iter().map(WithRelated::new).collect();
+        let mut results: Vec<WithRelated<M>> = decode_all::<M>(rows)?
+            .into_iter()
+            .map(WithRelated::new)
+            .collect();
 
         if results.is_empty() {
             return Ok(results);

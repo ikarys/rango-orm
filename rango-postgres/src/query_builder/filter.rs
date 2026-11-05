@@ -1,5 +1,7 @@
 use crate::ops::DEFAULT_QUERY_LIMIT;
-use rango_core::{ColumnRef, FilterColumn, FromRow, Model, ModelValues, OrderRef, SqlValue, quote_ident};
+use rango_core::{
+    ColumnRef, FilterColumn, FromRow, Model, ModelValues, OrderRef, SqlValue, quote_ident,
+};
 use sqlx::PgPool;
 // ─── Bind helpers ─────────────────────────────────────────────────────────────
 
@@ -73,12 +75,22 @@ where
 
     /// WHERE col LIKE pattern
     pub fn like(self, col: impl ColumnRef<M>, pattern: impl Into<String>) -> Self {
-        self.add(col.column_name(), Op::Like, Some(SqlValue::Text(pattern.into())), None)
+        self.add(
+            col.column_name(),
+            Op::Like,
+            Some(SqlValue::Text(pattern.into())),
+            None,
+        )
     }
 
     /// WHERE col ILIKE pattern (case-insensitive, PostgreSQL)
     pub fn ilike(self, col: impl ColumnRef<M>, pattern: impl Into<String>) -> Self {
-        self.add(col.column_name(), Op::ILike, Some(SqlValue::Text(pattern.into())), None)
+        self.add(
+            col.column_name(),
+            Op::ILike,
+            Some(SqlValue::Text(pattern.into())),
+            None,
+        )
     }
 
     /// WHERE col IN (values)
