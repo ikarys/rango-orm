@@ -511,7 +511,7 @@ async fn test_sqlite_typed_columns() {
     assert_eq!(TestUser::EMAIL.name(), "email");
 
     let actives = TestUser::filter(&pool)
-        .eq(TestUser::ACTIVE, 1i32)
+        .eq(TestUser::ACTIVE, true)
         .all()
         .await
         .unwrap();

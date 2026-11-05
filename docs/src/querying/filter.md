@@ -20,8 +20,9 @@ let users = User::filter(&pool)
 
 ## Typed columns
 
-`#[derive(Model)]` generates one constant per field (`User::EMAIL`, `User::SCORE`, …).
-Use them instead of strings: a typo, a renamed field, or a column from another model
+`#[derive(Model)]` generates one constant per field (`User::EMAIL`, `User::SCORE`, …),
+typed by model and field type (`Column<User, FieldInt>`). Use them instead of strings:
+a typo, a renamed field, a column from another model, or a value of the wrong type
 becomes a compile error instead of a database error.
 
 ```rust
@@ -34,12 +35,20 @@ let users = User::filter(&pool)
 
 let total = Order::filter(&pool).sum(Order::PRICE).await?;
 
-// Compile error: `Article::TITLE` is a `Column<Article>`, not a `Column<User>`
-// User::filter(&pool).eq(Article::TITLE, "x");
+// Compile errors:
+// User::filter(&pool).eq(Article::TITLE, "x");    // column of another model
+// User::filter(&pool).eq(User::SCORE, "high");    // `&str` is not a `FieldInt` value
+// User::filter(&pool).eq(User::PASSWORD, "pw");   // passwords are salted hashes
 ```
 
-String names (`"email"`, `"-created_at"`) are still accepted everywhere. Only the column
-name is checked today, not the type of the value.
+A typed column accepts its field type or the plain Rust equivalent: `i32` for `FieldInt`,
+`i64` for `FieldBigInt` and `FieldRange`, `&str`/`String` for `FieldText`, `FieldEmail`,
+`FieldUrl` and `FieldVarchar`, `Uuid` or `FieldUuid` for `ForeignKey<M>`.
+Filter values are not validated like field constructors: searching for
+`"not-an-email"` is allowed.
+
+String names (`"email"`, `"-created_at"`) are still accepted everywhere; they accept any
+value and are checked by the database at runtime.
 
 ## Operators
 

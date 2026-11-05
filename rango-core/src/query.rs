@@ -89,6 +89,16 @@ impl From<chrono::DateTime<chrono::Utc>> for SqlValue {
         SqlValue::DateTime(v)
     }
 }
+impl From<chrono::NaiveDate> for SqlValue {
+    fn from(v: chrono::NaiveDate) -> Self {
+        SqlValue::Date(v)
+    }
+}
+impl From<chrono::NaiveTime> for SqlValue {
+    fn from(v: chrono::NaiveTime) -> Self {
+        SqlValue::Time(v)
+    }
+}
 impl From<Vec<u8>> for SqlValue {
     fn from(v: Vec<u8>) -> Self {
         SqlValue::Bytes(v)

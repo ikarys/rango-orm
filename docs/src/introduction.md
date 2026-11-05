@@ -47,7 +47,7 @@ Rango targets Django-style ORM ergonomics on native async SQLx.
 | Migrations | ⚠️ Diesel CLI; SQL by hand | ⚠️ Rust files by hand; schema sync newer | ⚠️ sqlx-cli; SQL by hand | ✅ auto-generated from models | ✅ auto-generated from models (`rango makemigrations`) |
 | Model definition | `table!` macro + struct | Entity + ActiveModel, more boilerplate | None | `#[model]` struct | `#[derive(Model)]` only |
 | Async | ⚠️ via `diesel-async` | ✅ | ✅ | ⚠️ partial | ✅ native (sqlx) |
-| Compile-time column checks | ✅ strong | ❌ runtime | ✅ `query!` macros, needs a dev DB | ✅ | ✅ generated column constants (`User::EMAIL`); string names still accepted |
+| Compile-time column checks | ✅ strong | ❌ runtime | ✅ `query!` macros, needs a dev DB | ✅ | ✅ generated typed columns (`User::EMAIL`): name and value type checked; string names still accepted |
 | Model hooks | ❌ | ✅ ActiveModelBehavior | ❌ | ❌ | ✅ `ModelHooks` |
 | Relations loading | Manual joins | ✅ | ❌ | ✅ | ✅ `select_related` / `prefetch_related` |
 | Real `ON DELETE CASCADE` | ✅ | ✅ | n/a | ✅ | ✅ |
@@ -58,7 +58,6 @@ Rango targets Django-style ORM ergonomics on native async SQLx.
 ### Where Rango is weaker today
 
 - Bulk reads are ~6% slower than hand-written sqlx on 1000-row selects (on par with SeaORM, Diesel is ~7% faster) — see benchmarks.
-- Value types in filters are not type-checked yet (only column names are).
 - Young project with a small ecosystem.
 
 Comparison inspired by Shuttle's [Best Rust ORMs](https://www.shuttle.dev/blog/2024/01/16/best-orm-rust) (2024), extended with Butane and Rango.
