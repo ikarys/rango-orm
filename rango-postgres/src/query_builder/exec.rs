@@ -1,6 +1,6 @@
 use crate::ops::DEFAULT_QUERY_LIMIT;
 use crate::related::WithRelated;
-use crate::row::{PgRangoRow, PgRangoRow2};
+use crate::row::{decode_all, PgRangoRow, PgRangoRow2};
 use rango_core::{Error, Result};
 use rango_core::{ColumnRef, FromRow, Model, ModelValues, SqlValue, quote_ident};
 use sqlx::Postgres;
@@ -45,14 +45,8 @@ where
         }
 
         let rows = bind_and_fetch_all(&self.pool, &sql, binds).await?;
-        let mut results: Vec<WithRelated<M>> = rows
-            .into_iter()
-            .map(|r| {
-                M::from_row(&PgRangoRow(r))
-                    .map(WithRelated::new)
-                    .map_err(Error::from)
-            })
-            .collect::<Result<Vec<_>>>()?;
+        let mut results: Vec<WithRelated<M>> =
+            decode_all::<M>(rows)?.into_iter().map(WithRelated::new).collect();
 
         if results.is_empty() {
             return Ok(results);

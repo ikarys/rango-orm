@@ -1,8 +1,8 @@
 //! Raw SQL escape hatch. The SQL string is trusted: never build it from user input.
 
 use crate::error::db_err;
-use crate::row::PgRangoRow;
-use rango_core::{Error, Result};
+use crate::row::decode_all;
+use rango_core::Result;
 use rango_core::{FromRow, SqlValue};
 use sqlx::{Executor, Postgres};
 
@@ -24,9 +24,7 @@ where
 {
     let q = bind_sql_values(sqlx::query(sql), params);
     let rows = q.fetch_all(executor).await.map_err(db_err)?;
-    rows.into_iter()
-        .map(|r| M::from_row(&PgRangoRow(r)).map_err(Error::from))
-        .collect()
+    decode_all::<M>(rows)
 }
 
 /// Execute a raw SQL query and return a single scalar value (first column of first row).

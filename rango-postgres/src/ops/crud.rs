@@ -2,7 +2,7 @@
 
 use crate::error::db_err;
 use crate::executor::RangoExecutor;
-use crate::row::PgRangoRow;
+use crate::row::{decode_all, PgRangoRow};
 use rango_core::{Error, Result};
 use rango_core::{FromRow, Model, ModelValues, SqlValue, quote_ident};
 use sqlx::{Acquire, Executor, Postgres};
@@ -91,9 +91,7 @@ where
         .fetch_all(executor)
         .await
         .map_err(db_err)?;
-    rows.into_iter()
-        .map(|r| M::from_row(&PgRangoRow(r)).map_err(Error::from))
-        .collect()
+    decode_all::<M>(rows)
 }
 
 // ─── Compound ops — require RangoExecutor (pool or transaction, sequential queries) ─

@@ -1,10 +1,10 @@
 use crate::error::db_err;
-use rango_core::{Error, Result};
+use rango_core::Result;
 use rango_core::{FromRow, Model, ModelValues, quote_ident};
 use sqlx::PgPool;
 
 use crate::ops::bind_sql_values;
-use crate::row::PgRangoRow;
+use crate::row::decode_all;
 
 /// Many-to-many operations.
 /// `From` = the model that declares the M2M field
@@ -101,9 +101,7 @@ where
         let q = bind_sql_values(sqlx::query(&sql), vec![from.pk_value()]);
         let rows = q.fetch_all(pool).await.map_err(db_err)?;
 
-        rows.into_iter()
-            .map(|r| To::from_row(&PgRangoRow(r)).map_err(Error::from))
-            .collect()
+        decode_all::<To>(rows)
     }
 
     /// Get all `From` models related to a given `to` instance (reverse).
@@ -130,9 +128,7 @@ where
         let q = bind_sql_values(sqlx::query(&sql), vec![to.pk_value()]);
         let rows = q.fetch_all(pool).await.map_err(db_err)?;
 
-        rows.into_iter()
-            .map(|r| From::from_row(&PgRangoRow(r)).map_err(Error::from))
-            .collect()
+        decode_all::<From>(rows)
     }
 
     /// Set exact relations — replaces all existing with the given list.

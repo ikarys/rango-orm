@@ -6,6 +6,8 @@ use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criteri
 use sqlx::PgPool;
 use uuid::Uuid;
 
+type BenchRow = (Uuid, String, String, bool, Option<i32>, chrono::DateTime<chrono::Utc>);
+
 // ── Setup ─────────────────────────────────────────────────────────────────────
 
 async fn setup() -> PgPool {
@@ -156,13 +158,15 @@ fn bench_select(c: &mut Criterion) {
     c.bench_function("sqlx_raw/select_all_1000", |b| {
         b.iter(|| {
             rt.block_on(async {
-                sqlx::query(r#"SELECT * FROM "sqlx_bench_user" LIMIT 1000"#)
+                // Decoded by column index into owned values — the hand-written best case.
+                sqlx::query_as::<_, BenchRow>(r#"SELECT "id","email","name","active","score","created_at" FROM "sqlx_bench_user" LIMIT 1000"#)
                     .fetch_all(&pool)
                     .await
                     .unwrap()
             })
         })
     });
+
 
     c.bench_function("sqlx_raw/count", |b| {
         b.iter(|| {

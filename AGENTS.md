@@ -299,7 +299,7 @@ Known-CVE checklist (reviewed 2026-11-01) — keep new APIs out of these classes
 | P0 | Index every FK column, index M2M pivots, real `REFERENCES … ON DELETE` | ✅ derive marks every FK `index`; CLI emits `CREATE INDEX` on create/add column and on pivots |
 | P0 | `rango-core` must not depend on sqlx (currently pulls postgres + mysql + sqlite drivers) | Core stays pure; compile time and binary size drop for every app |
 | P1 | Pool tuning: `test_before_acquire(false)` (sqlx pings on every acquire by default), `max_lifetime`, configurable from `rango.toml` | ✅ `max_lifetime` (1800 s), `test_before_acquire` (false) in `DatabaseConfig`; not yet in `rango.toml` |
-| P1 | Row decoding by column index instead of by name, without `dyn` dispatch | Benchmarks show 2× overhead on `select_all_1000` |
+| P2 | Row decoding by column index instead of by name | Measured: ~3% on `select_all_1000` (name lookup is cheap); needs a `RangoRow` API change. Pre-sized result `Vec` ✅ (−4.5%) |
 | P1 | Postgres `bulk_create` via `UNNEST` (one statement, no 65 535-param chunking) | +21% at 1000 rows in benchmarks |
 | P1 | Keyset pagination helper (`.after(col, value)`) | `OFFSET` is O(n) on large tables |
 | P1 | Transaction retry on serialization failure / deadlock (`40001`, `40P01`) in `atomic()`, opt-in, bounded | ✅ `atomic_retry(&pool, max_attempts, f)` (Postgres), exponential backoff without jitter |

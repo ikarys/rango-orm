@@ -1,4 +1,4 @@
-use rango_core::row::{RangoRow, RowError};
+use rango_core::row::{FromRow, RangoRow, RowError};
 use sqlx::postgres::PgRow;
 use sqlx::{Row, ValueRef};
 
@@ -59,3 +59,13 @@ macro_rules! impl_rangorow {
 
 impl_rangorow!(PgRangoRow);
 impl_rangorow!(PgRangoRow2<'_>);
+
+/// Decode every row into `M`, allocating the result once.
+/// (Collecting an iterator of `Result` loses the size hint and regrows the Vec.)
+pub(crate) fn decode_all<M: FromRow>(rows: Vec<PgRow>) -> rango_core::Result<Vec<M>> {
+    let mut out = Vec::with_capacity(rows.len());
+    for r in rows {
+        out.push(M::from_row(&PgRangoRow(r))?);
+    }
+    Ok(out)
+}
