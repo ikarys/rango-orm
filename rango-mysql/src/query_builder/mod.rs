@@ -116,7 +116,7 @@ fn build_condition(c: &Condition, binds: &mut Vec<SqlValue>) -> String {
                 // Case-sensitive like Postgres, whatever the column collation
                 Op::Like => {
                     binds.push(c.value.clone().unwrap());
-                    return format!("{} LIKE ? COLLATE utf8mb4_bin", col);
+                    return format!("{} COLLATE utf8mb4_bin LIKE ?", col);
                 }
                 Op::ILike => {
                     binds.push(c.value.clone().unwrap());
