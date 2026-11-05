@@ -16,7 +16,7 @@ pub struct RangoConfig {
 #[allow(dead_code)]
 #[derive(Deserialize)]
 pub struct DatabaseConfig {
-    /// Database backend: "sqlite" or "postgres" (default: "postgres").
+    /// Database backend: "sqlite", "postgres" or "mysql" (alias "mariadb"); default "postgres".
     #[serde(default = "default_backend")]
     pub backend: String,
 
@@ -57,6 +57,7 @@ impl DatabaseConfig {
     pub fn backend_kind(&self) -> rango_core::BackendKind {
         match self.backend.as_str() {
             "sqlite" => rango_core::BackendKind::Sqlite,
+            "mysql" | "mariadb" => rango_core::BackendKind::Mysql,
             _ => rango_core::BackendKind::Postgres,
         }
     }

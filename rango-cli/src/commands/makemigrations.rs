@@ -8,6 +8,33 @@ use rango_core::{BackendKind, TableSchema};
 use std::fs;
 use std::io::{IsTerminal, Write};
 
+/// MySQL rejects table/column names over 64 bytes. Constraint and index names are
+/// shortened by the SQL generator, but table names are also derived at runtime
+/// (M2M pivots), so they must fit as-is.
+fn check_mysql_identifiers(schemas: &[TableSchema]) -> Result<()> {
+    const MAX: usize = 64;
+    for s in schemas {
+        if s.table_name.len() > MAX {
+            bail!(
+                "table name `{}` is {} bytes, MySQL allows {}: use a shorter prefix (-p) or model name",
+                s.table_name,
+                s.table_name.len(),
+                MAX
+            );
+        }
+        if let Some(c) = s.columns.iter().find(|c| c.name.len() > MAX) {
+            bail!(
+                "column `{}.{}` is {} bytes, MySQL allows {}",
+                s.table_name,
+                c.name,
+                c.name.len(),
+                MAX
+            );
+        }
+    }
+    Ok(())
+}
+
 pub fn run(
     src_dir: &str,
     output_dir: &str,
@@ -23,6 +50,7 @@ pub fn run(
     let backend = cfg.database.backend_kind();
     let backend_label = match backend {
         BackendKind::Sqlite => "sqlite",
+        BackendKind::Mysql => "mysql",
         _ => "postgres",
     };
     println!(
@@ -77,6 +105,10 @@ pub fn run(
 
     // Merge pivot tables into schemas for diff
     schemas.extend(pivot_schemas);
+
+    if backend == BackendKind::Mysql {
+        check_mysql_identifiers(&schemas)?;
+    }
 
     // Load previous snapshot
     let old_snapshot = Snapshot::load(output_dir)?;
@@ -268,7 +300,7 @@ fn detect_project_name() -> Result<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{check_not_null_additions, migration_label};
+    use super::{check_mysql_identifiers, check_not_null_additions, migration_label};
     use crate::migration::diff::SchemaDiff;
     use rango_core::{ColumnDef, ColumnType, TableSchema};
 
@@ -350,5 +382,16 @@ mod tests {
             column: col,
         }];
         assert!(check_not_null_additions(&diffs).is_ok());
+    }
+
+    #[test]
+    fn mysql_rejects_table_names_over_64_bytes() {
+        let ok = simple_table(&"t".repeat(64));
+        assert!(check_mysql_identifiers(&[ok]).is_ok());
+        let pivot = simple_table(
+            "library_management_system_publication_library_management_system_contributor",
+        );
+        let err = check_mysql_identifiers(&[pivot]).unwrap_err().to_string();
+        assert!(err.contains("shorter prefix"), "{err}");
     }
 }

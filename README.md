@@ -11,8 +11,8 @@ A Django-inspired async ORM for Rust: define a struct, Rango generates the schem
 - Models first: the struct is the schema.
 - Migrations generated, never written: `rango makemigrations` diffs typed schema snapshots against the models.
 - Typed queries: columns are generated per field; a wrong column or wrong value type is a compile error, and string names are still accepted.
-- Real SQL semantics: `ON DELETE CASCADE` in the DB, every FK indexed, `RETURNING *`.
-- 100% async on sqlx, with PostgreSQL and SQLite using the same API.
+- Real SQL semantics: `ON DELETE CASCADE` in the DB, every FK indexed, `RETURNING *` where the database has it.
+- 100% async on sqlx, with PostgreSQL, SQLite and MySQL / MariaDB using the same API.
 - Secure by default: bound parameters everywhere, identifiers always quoted, passwords hashed with Argon2id, TLS required for remote Postgres.
 
 ## Quick look
@@ -74,6 +74,8 @@ Rango is in beta: pin a tag, the API may still change between betas.
 rango = { git = "https://github.com/ikarys/rango-orm", tag = "v0.1.0-beta.1" } # PostgreSQL, default
 # SQLite variant:
 # rango = { git = "https://github.com/ikarys/rango-orm", tag = "v0.1.0-beta.1", default-features = false, features = ["sqlite"] }
+# MySQL / MariaDB variant (after the next beta):
+# rango = { git = "https://github.com/ikarys/rango-orm", branch = "develop", default-features = false, features = ["mysql"] }
 tokio = { version = "1", features = ["full"] }
 ```
 
@@ -100,7 +102,7 @@ In production, pass the URL via `DATABASE_URL`; never put credentials in `rango.
 | `export` / `import` CLI | ✅ |
 | PostgreSQL backend | ✅ |
 | SQLite backend | ✅ (ALTER via table rebuild 🚧) |
-| MySQL / MariaDB | 📋 planned |
+| MySQL 8.0+ / MariaDB 10.6+ backend | ✅ (no `RETURNING`, non-transactional DDL) |
 | Keyset pagination, optimistic locking | 📋 planned |
 
 ## Rango vs other Rust ORMs
@@ -144,11 +146,12 @@ The user guide is an mdBook in `docs/` (`mdbook serve docs`).
 
 | Crate | Role |
 |---|---|
-| `rango` | facade crate, re-exports everything, features `postgres` default / `sqlite` |
+| `rango` | facade crate, re-exports everything, features `postgres` default / `sqlite` / `mysql` |
 | `rango-core` | DB-free traits, schema types, field types |
 | `rango-derive` | `#[derive(Model)]` |
 | `rango-postgres` | PostgreSQL backend (sqlx) |
 | `rango-sqlite` | SQLite backend (sqlx) |
+| `rango-mysql` | MySQL / MariaDB backend (sqlx) |
 | `rango-cli` | `rango` binary |
 | `rango-tests` | integration tests |
 | `benchmarks/` | Criterion: Rango vs sqlx, SeaORM, Diesel |
@@ -157,7 +160,7 @@ The user guide is an mdBook in `docs/` (`mdbook serve docs`).
 
 ```bash
 just dev          # starts Postgres in Docker
-just test-all     # unit + SQLite + Postgres integration tests
+just test-all     # unit + SQLite + Postgres + MySQL/MariaDB integration tests
 just check        # fmt + clippy
 just bench-compare
 just audit

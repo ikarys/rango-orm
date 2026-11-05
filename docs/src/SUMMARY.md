@@ -40,6 +40,7 @@
 
 - [PostgreSQL](./backends/postgres.md)
 - [SQLite](./backends/sqlite.md)
+- [MySQL / MariaDB](./backends/mysql.md)
 - [Backend-specific Features](./backends/extensions.md)
 
 # CLI Reference

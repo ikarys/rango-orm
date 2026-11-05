@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- MySQL 8.0+ / MariaDB 10.6+ backend (`rango-mysql`, feature `mysql`): CRUD, bulk create, transactions, query builder, raw SQL. UUIDs are stored as `BINARY(16)`.
+- CLI: `backend = "mysql"` (or `"mariadb"`). `makemigrations` emits backtick-quoted DDL with named unique/index/FK constraints and `MODIFY COLUMN` for type and nullability changes; `migrate` uses an advisory lock; `export`/`import` round-trip UUIDs and JSON, and import runs in one transaction with FK checks off.
+- Fix: `makemigrations` ignored `#[model(constraints = ...)]` and `ordering`, and failed on `ManyToMany` fields (the scanner printed types with a repetition instead of an interpolation).
+
 ## 0.1.0-beta.1 (2026-11-05)
 
 First beta. The API may still change between betas: pin the tag.

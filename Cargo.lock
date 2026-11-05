@@ -1296,6 +1296,7 @@ dependencies = [
  "clap",
  "quote",
  "rango-core",
+ "rango-mysql",
  "rango-postgres",
  "rango-sqlite",
  "serde",

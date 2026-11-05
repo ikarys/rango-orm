@@ -176,14 +176,10 @@ mod tests {
             other => panic!("expected RenameColumn, got {:?}", other),
         }
         match &renamed[1] {
-            SchemaDiff::AlterColumnType {
-                table,
-                column,
-                new_type,
-            } => {
+            SchemaDiff::AlterColumnType { table, column } => {
                 assert_eq!(table, "t");
-                assert_eq!(column, "price");
-                assert_eq!(new_type, &ColumnType::Int);
+                assert_eq!(column.name, "price");
+                assert_eq!(column.col_type, ColumnType::Int);
             }
             other => panic!("expected AlterColumnType, got {:?}", other),
         }

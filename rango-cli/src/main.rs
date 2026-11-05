@@ -19,7 +19,7 @@ struct Cli {
 enum Command {
     /// Initialize a new Rango project (creates rango.toml and migrations/)
     Init {
-        /// Database backend: sqlite (default) or postgres
+        /// Database backend: sqlite (default), postgres or mysql (alias mariadb)
         #[arg(long, default_value = "sqlite")]
         backend: String,
     },
