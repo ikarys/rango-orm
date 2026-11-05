@@ -7,6 +7,8 @@
 //! rango = "0.1"                                                        # postgres (default)
 //! # or
 //! rango = { version = "0.1", default-features = false, features = ["sqlite"] }
+//! # or MySQL / MariaDB:
+//! rango = { version = "0.1", default-features = false, features = ["mysql"] }
 //! ```
 //!
 //! Then:
@@ -113,6 +115,25 @@ pub async fn connect_sqlite(url: &str) -> Result<SqlitePool> {
     rango_sqlite::connect(url).await
 }
 
+// ─── MySQL / MariaDB backend (feature `mysql`) ───────────────────────────────
+
+#[cfg(feature = "mysql")]
+pub use rango_mysql::MySqlPool;
+
+/// MySQL 8.0+ / MariaDB 10.6+ ops — use these when working with a MySqlPool.
+#[cfg(feature = "mysql")]
+pub mod mysql {
+    pub use rango_mysql::{
+        MySqlTransaction, QueryBuilder, RangoFilterExt, TxFuture, all, atomic, bulk_create, delete,
+        get, get_or_create, insert, raw, raw_execute, raw_scalar, update,
+    };
+}
+
+#[cfg(feature = "mysql")]
+pub async fn connect_mysql(url: &str) -> Result<MySqlPool> {
+    rango_mysql::connect(url).await
+}
+
 // ─── Prelude ──────────────────────────────────────────────────────────────────
 
 pub mod prelude {
@@ -131,4 +152,9 @@ pub mod prelude {
     pub use crate::sqlite::*;
     #[cfg(feature = "sqlite")]
     pub use rango_sqlite::{SqlitePool, SqliteQueryExt};
+
+    #[cfg(feature = "mysql")]
+    pub use crate::mysql::*;
+    #[cfg(feature = "mysql")]
+    pub use rango_mysql::MySqlPool;
 }

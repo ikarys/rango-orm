@@ -17,9 +17,18 @@ db:
     @until docker compose exec postgres pg_isready -U postgres > /dev/null 2>&1; do sleep 1; done
     @echo "Postgres ready at {{database_url}}"
 
-# Stop local Postgres
+# Stop local databases
 db-stop:
-    docker compose down
+    docker compose --profile mysql down
+
+# Start local MySQL 8.4 (port 3307) and MariaDB 11.4 (port 3308), in-memory storage
+db-mysql:
+    docker compose --profile mysql up -d --wait mysql mariadb
+
+# MySQL + MariaDB integration tests (requires Docker)
+test-mysql: db-mysql
+    MYSQL_URL=mysql://root:rango@127.0.0.1:3307/rango_test cargo test --test integration_mysql --features rango-tests/integration-mysql -- --test-threads=1
+    MYSQL_URL=mysql://root:rango@127.0.0.1:3308/rango_test cargo test --test integration_mysql --features rango-tests/integration-mysql -- --test-threads=1
 
 # Run fmt + clippy checks (same as pre-push hook)
 check:
@@ -57,7 +66,7 @@ test-postgres:
     docker compose down -v
 
 # Run all tests: unit + sqlite + postgres
-test-all: test test-sqlite test-postgres
+test-all: test test-sqlite test-postgres test-mysql
 
 # Generate coverage report with HTML output
 coverage:

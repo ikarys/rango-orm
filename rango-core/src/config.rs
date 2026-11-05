@@ -123,6 +123,16 @@ pub enum BackendKind {
     Unknown,
 }
 
+impl BackendKind {
+    /// Quote an identifier for this backend: backticks on MySQL, `"` elsewhere.
+    pub fn quote_ident(self, ident: &str) -> String {
+        match self {
+            BackendKind::Mysql => crate::query::quote_ident_mysql(ident),
+            _ => crate::query::quote_ident(ident),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

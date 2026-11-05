@@ -109,6 +109,54 @@ jobs:
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/rango_test
 
+  integration-mysql:
+    name: Integration tests (${{ matrix.db.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        db:
+          - { name: "MySQL 8.0", image: "mysql:8.0", health: "mysqladmin ping -h 127.0.0.1 -prango" }
+          - { name: "MySQL 8.4", image: "mysql:8.4", health: "mysqladmin ping -h 127.0.0.1 -prango" }
+          - { name: "MariaDB 10.6", image: "mariadb:10.6", health: "healthcheck.sh --connect --innodb_initialized" }
+          - { name: "MariaDB 11.4", image: "mariadb:11.4", health: "healthcheck.sh --connect --innodb_initialized" }
+
+    services:
+      db:
+        image: ${{ matrix.db.image }}
+        env:
+          MYSQL_ROOT_PASSWORD: rango
+          MYSQL_DATABASE: rango_test
+          MARIADB_ROOT_PASSWORD: rango
+          MARIADB_DATABASE: rango_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "${{ matrix.db.health }}"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/
+          key: ${{ runner.os }}-cargo-integration-mysql-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: cargo test (integration, mysql)
+        run: cargo test --test integration_mysql --features rango-tests/integration-mysql -- --test-threads=1
+        env:
+          MYSQL_URL: mysql://root:rango@127.0.0.1:3306/rango_test
+
   coverage:
     name: Coverage
     runs-on: ubuntu-latest

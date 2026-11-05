@@ -12,14 +12,17 @@ rango-derive = { path = "../rango-derive" }
 [dev-dependencies]
 rango-postgres = { path = "../rango-postgres" }
 rango-sqlite   = { path = "../rango-sqlite" }
+rango-mysql    = { path = "../rango-mysql" }
 rango-core     = { path = "../rango-core" }
 rango-derive   = { path = "../rango-derive" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 uuid = { version = "1", features = ["v4"] }
 anyhow = "1"
 serde_json = "1"
-sqlx = { version = "0.8", features = ["postgres", "sqlite", "runtime-tokio"] }
+chrono = "0.4"
+sqlx = { version = "0.8", features = ["postgres", "sqlite", "mysql", "runtime-tokio"] }
 
 [features]
 integration = []
 integration-sqlite = []
+integration-mysql = []

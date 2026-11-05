@@ -15,5 +15,37 @@ services:
       timeout: 5s
       retries: 5
 
+  mysql:
+    image: mysql:8.4
+    profiles: [mysql]
+    environment:
+      MYSQL_ROOT_PASSWORD: rango
+      MYSQL_DATABASE: rango_test
+    ports:
+      - "${RANGO_MYSQL_PORT:-3307}:3306"
+    tmpfs:
+      - /var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-prango"]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+
+  mariadb:
+    image: mariadb:11.4
+    profiles: [mysql]
+    environment:
+      MARIADB_ROOT_PASSWORD: rango
+      MARIADB_DATABASE: rango_test
+    ports:
+      - "${RANGO_MARIADB_PORT:-3308}:3306"
+    tmpfs:
+      - /var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+
 volumes:
   rango_pgdata:

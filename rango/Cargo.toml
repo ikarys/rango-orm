@@ -8,10 +8,12 @@ license = "MIT"
 default = ["postgres"]
 postgres = ["dep:rango-postgres"]
 sqlite = ["dep:rango-sqlite"]
+mysql = ["dep:rango-mysql"]
 
 [dependencies]
 rango-core     = { path = "../rango-core" }
 rango-derive   = { path = "../rango-derive" }
 rango-postgres = { path = "../rango-postgres", optional = true }
 rango-sqlite   = { path = "../rango-sqlite", optional = true }
+rango-mysql    = { path = "../rango-mysql", optional = true }
 sqlx = { version = "0.8", default-features = false }
