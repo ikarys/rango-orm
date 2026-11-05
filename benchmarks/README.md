@@ -1,7 +1,7 @@
 # Rango ORM — Benchmarks
 
 Same workloads on four stacks, one Postgres: **sqlx raw** (no ORM, baseline), **Rango**,
-**SeaORM 2.0**, **Diesel 2.3 + diesel-async 0.9**. Every read decodes into a typed struct,
+**SeaORM 2.0**, **Diesel 2.3 + diesel-async 0.9**. Every read decodes into owned values,
 every pool has 10 connections, updates write the full row.
 
 ## Run
@@ -16,31 +16,34 @@ Mean time per operation, lower is better. "Rango vs best ORM" compares with the 
 
 | Benchmark | sqlx_raw | rango | seaorm | diesel_async | Rango vs best ORM |
 |---|---|---|---|---|---|
-| `bulk_insert/10` | 1.96 ms | 1.98 ms | 1.94 ms | 2.51 ms | +2% |
-| `bulk_insert/100` | 2.25 ms | 2.49 ms | 2.28 ms | 3.14 ms | +9% |
-| `bulk_insert/1000` | 4.79 ms | 5.47 ms | 5.57 ms | 9.96 ms | -2% |
-| `count` | 864.18 µs | 883.67 µs | 852.94 µs | 863.63 µs | +4% |
-| `insert_one` | 1.89 ms | 1.96 ms | 2.00 ms | 2.49 ms | -2% |
-| `select_all_1000` | 1.22 ms | 1.49 ms | 1.50 ms | 1.29 ms | +15% |
-| `select_filter_100` | 922.93 µs | 962.95 µs | 927.89 µs | 919.42 µs | +5% |
-| `select_pk` | 830.01 µs | 856.65 µs | 816.50 µs | 820.34 µs | +5% |
-| `transaction_10_inserts` | 6.44 ms | 6.78 ms | 6.32 ms | 12.07 ms | +7% |
-| `update_one` | 1.94 ms | 2.00 ms | 1.93 ms | 2.47 ms | +4% |
+| `bulk_insert/10` | 2.01 ms | 2.04 ms | 2.01 ms | 2.59 ms | +1% |
+| `bulk_insert/100` | 2.32 ms | 2.35 ms | 2.37 ms | 3.29 ms | -1% |
+| `bulk_insert/1000` | 4.80 ms | 5.83 ms | 5.93 ms | 10.31 ms | -2% |
+| `count` | 876.68 µs | 858.41 µs | 901.73 µs | 885.60 µs | -3% |
+| `insert_one` | 1.91 ms | 2.03 ms | 1.92 ms | 2.53 ms | +6% |
+| `select_all_1000` | 1.43 ms | 1.52 ms | 1.49 ms | 1.41 ms | +8% |
+| `select_filter_100` | 938.54 µs | 944.32 µs | 967.89 µs | 944.08 µs | +0% |
+| `select_pk` | 819.33 µs | 860.81 µs | 835.98 µs | 833.24 µs | +3% |
+| `transaction_10_inserts` | 6.15 ms | 6.56 ms | 6.27 ms | 12.58 ms | +5% |
+| `update_one` | 1.91 ms | 1.96 ms | 2.00 ms | 2.87 ms | -2% |
 
 ### Reading the numbers
 
 - Every query pays ~0.8 ms of round-trip (Docker on WSL2), so single-row operations are within
-  ±5% of each other for all four stacks: that gap is mostly noise.
-- **Rango ≈ SeaORM** on every workload. Both pay ~20% over raw sqlx on `select_all_1000`
-  (row decoding: ~0.28 ms per 1000 rows, see `fetch_orm_1000` vs `fetch_raw_rows_1000`).
-- **Diesel-async** is the fastest at decoding 1000 rows but 25–100% slower on writes
-  (`bulk_insert/1000`, `transaction_10_inserts`).
+  ±5% of each other for all four stacks: that gap is mostly noise (run-to-run variation is ~3–5%).
+- **Rango ≈ SeaORM** on every workload.
+- `select_all_1000`: decoding 1000 rows into owned structs costs ~0.2 ms for every stack
+  (`fetch_raw_rows_1000` vs `fetch_orm_1000`). The sqlx baseline decodes by column index into a
+  tuple — the hand-written best case. Rango is ~6% above it, Diesel is on par.
+- **Diesel-async** is 25–100% slower on writes (`bulk_insert/1000`, `transaction_10_inserts`, `update_one`).
 - Clean build of each crate (32 cores): sqlx / Rango / Diesel 11 s, SeaORM 14 s; incremental < 1 s for all.
 
-### Planned Rango optimizations
+### Rango optimizations
 
-- Row decoding by column index without `dyn` dispatch (closes most of the `select_all_1000` gap).
-- `bulk_create` via `UNNEST` (one statement, no 65 535-parameter chunking).
+- Done: decoded rows are collected into a pre-sized `Vec` (−4.5% on `select_all_1000`).
+- Measured, not worth it yet: decoding by column index instead of by name saves ~3% on
+  1000 rows, at the cost of changing the public `RangoRow` trait.
+- Planned: `bulk_create` via `UNNEST` (one statement, no 65 535-parameter chunking).
 
 ## Machine
 

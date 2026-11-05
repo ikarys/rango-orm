@@ -57,7 +57,7 @@ Rango targets Django-style ORM ergonomics on native async SQLx.
 
 ### Where Rango is weaker today
 
-- Bulk reads are ~20% slower than raw sqlx on 1000-row selects (on par with SeaORM, Diesel is ~15% faster); row decoding by index is planned — see benchmarks.
+- Bulk reads are ~6% slower than hand-written sqlx on 1000-row selects (on par with SeaORM, Diesel is ~7% faster) — see benchmarks.
 - Value types in filters are not type-checked yet (only column names are).
 - Young project with a small ecosystem.
 

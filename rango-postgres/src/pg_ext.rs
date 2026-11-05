@@ -1,5 +1,5 @@
 use crate::error::db_err;
-use rango_core::{Error, Result};
+use rango_core::Result;
 /// Postgres-specific query extensions.
 ///
 /// Import this trait to unlock Postgres-only filter methods on any `QueryBuilder`.
@@ -21,7 +21,7 @@ use sqlx::{PgPool, Row};
 use crate::ops::bind_sql_values;
 use crate::query_builder::QueryBuilder;
 use crate::related::WithRelated;
-use crate::row::PgRangoRow;
+use crate::row::decode_all;
 
 /// Postgres-only extensions for `QueryBuilder`.
 pub trait PgQueryExt<M>
@@ -150,13 +150,7 @@ impl Pg {
             .fetch_all(pool)
             .await
             .map_err(db_err)?;
-        rows.into_iter()
-            .map(|r| {
-                M::from_row(&PgRangoRow(r))
-                    .map(WithRelated::new)
-                    .map_err(Error::from)
-            })
-            .collect()
+        Ok(decode_all::<M>(rows)?.into_iter().map(WithRelated::new).collect())
     }
 
     /// Get a JSONB field value as a string.

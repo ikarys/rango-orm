@@ -1,4 +1,4 @@
-use crate::row::SqliteRangoRow;
+use crate::row::{decode_all, SqliteRangoRow};
 use rango_core::{quote_ident, ColumnRef, FromRow, Model, ModelValues, SqlValue};
 use rango_core::{Error, Result};
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -29,9 +29,7 @@ where
             sql.push_str(&format!(" OFFSET {}", o));
         }
         let rows = bind_and_fetch_all(&self.pool, &sql, binds).await?;
-        rows.into_iter()
-            .map(|r| M::from_row(&SqliteRangoRow(r)).map_err(Error::from))
-            .collect()
+        decode_all::<M>(rows)
     }
 
     pub async fn one(self) -> Result<Option<M>> {

@@ -1,4 +1,4 @@
-use rango_core::{RangoRow, RowError};
+use rango_core::{FromRow, RangoRow, RowError};
 use sqlx::{sqlite::SqliteRow, Row, ValueRef};
 
 pub struct SqliteRangoRow(pub SqliteRow);
@@ -93,4 +93,14 @@ impl RangoRow for SqliteRangoRow {
             Err(_) => false,
         }
     }
+}
+
+/// Decode every row into `M`, allocating the result once.
+/// (Collecting an iterator of `Result` loses the size hint and regrows the Vec.)
+pub(crate) fn decode_all<M: FromRow>(rows: Vec<SqliteRow>) -> rango_core::Result<Vec<M>> {
+    let mut out = Vec::with_capacity(rows.len());
+    for r in rows {
+        out.push(M::from_row(&SqliteRangoRow(r))?);
+    }
+    Ok(out)
 }
