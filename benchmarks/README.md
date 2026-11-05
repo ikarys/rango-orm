@@ -16,16 +16,16 @@ Mean time per operation, lower is better. "Rango vs best ORM" compares with the 
 
 | Benchmark | sqlx_raw | rango | seaorm | diesel_async | Rango vs best ORM |
 |---|---|---|---|---|---|
-| `bulk_insert/10` | 2.01 ms | 2.04 ms | 2.01 ms | 2.59 ms | +1% |
-| `bulk_insert/100` | 2.32 ms | 2.35 ms | 2.37 ms | 3.29 ms | -1% |
-| `bulk_insert/1000` | 4.80 ms | 5.83 ms | 5.93 ms | 10.31 ms | -2% |
-| `count` | 876.68 µs | 858.41 µs | 901.73 µs | 885.60 µs | -3% |
-| `insert_one` | 1.91 ms | 2.03 ms | 1.92 ms | 2.53 ms | +6% |
-| `select_all_1000` | 1.43 ms | 1.52 ms | 1.49 ms | 1.41 ms | +8% |
-| `select_filter_100` | 938.54 µs | 944.32 µs | 967.89 µs | 944.08 µs | +0% |
-| `select_pk` | 819.33 µs | 860.81 µs | 835.98 µs | 833.24 µs | +3% |
-| `transaction_10_inserts` | 6.15 ms | 6.56 ms | 6.27 ms | 12.58 ms | +5% |
-| `update_one` | 1.91 ms | 1.96 ms | 2.00 ms | 2.87 ms | -2% |
+| `bulk_insert/10` | 2.01 ms | 1.93 ms | 2.01 ms | 2.59 ms | -4% |
+| `bulk_insert/100` | 2.32 ms | 2.30 ms | 2.37 ms | 3.29 ms | -3% |
+| `bulk_insert/1000` | 4.80 ms | 5.47 ms | 5.93 ms | 10.31 ms | -8% |
+| `count` | 876.68 µs | 863.60 µs | 901.73 µs | 885.60 µs | -2% |
+| `insert_one` | 2.01 ms | 1.94 ms | 1.92 ms | 2.53 ms | +1% |
+| `select_all_1000` | 1.43 ms | 1.49 ms | 1.49 ms | 1.41 ms | +6% |
+| `select_filter_100` | 938.54 µs | 926.76 µs | 967.89 µs | 944.08 µs | -2% |
+| `select_pk` | 819.33 µs | 826.85 µs | 835.98 µs | 833.24 µs | -1% |
+| `transaction_10_inserts` | 6.15 ms | 6.52 ms | 6.27 ms | 12.58 ms | +4% |
+| `update_one` | 1.91 ms | 1.95 ms | 2.00 ms | 2.87 ms | -3% |
 
 ### Reading the numbers
 
