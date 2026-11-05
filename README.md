@@ -67,16 +67,18 @@ rango migrate                   # applies pending migrations (reads DATABASE_URL
 
 ## Installation
 
+Rango is in beta: pin a tag, the API may still change between betas.
+
 ```toml
 [dependencies]
-rango = { git = "https://github.com/ikarys/rango-orm" } # PostgreSQL, default
+rango = { git = "https://github.com/ikarys/rango-orm", tag = "v0.1.0-beta.1" } # PostgreSQL, default
 # SQLite variant:
-# rango = { git = "https://github.com/ikarys/rango-orm", default-features = false, features = ["sqlite"] }
+# rango = { git = "https://github.com/ikarys/rango-orm", tag = "v0.1.0-beta.1", default-features = false, features = ["sqlite"] }
 tokio = { version = "1", features = ["full"] }
 ```
 
 ```bash
-cargo install --git https://github.com/ikarys/rango-orm rango-cli
+cargo install --git https://github.com/ikarys/rango-orm --tag v0.1.0-beta.1 rango-cli
 ```
 
 In production, pass the URL via `DATABASE_URL`; never put credentials in `rango.toml`.
