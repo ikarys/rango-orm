@@ -1,0 +1,12 @@
+[workspace]
+members = [
+    "rango",
+    "rango-cli",
+    "rango-bench",
+    "rango-core",
+    "rango-derive",
+    "rango-postgres",
+    "rango-sqlite",
+    "rango-tests",
+]
+resolver = "2"

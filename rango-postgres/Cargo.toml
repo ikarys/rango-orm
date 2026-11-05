@@ -1,0 +1,13 @@
+[package]
+name = "rango-postgres"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+rango-core = { path = "../rango-core" }
+sqlx = { version = "0.8", features = ["runtime-tokio", "tls-rustls", "postgres", "uuid", "chrono", "json"] }
+tokio = { version = "1", features = ["full"] }
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4" }
+serde_json = "1"
+log = "0.4"
