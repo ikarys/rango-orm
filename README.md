@@ -163,4 +163,4 @@ just audit
 
 ## License
 
-MIT.
+MIT, see [LICENSE](LICENSE).
