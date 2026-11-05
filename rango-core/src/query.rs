@@ -132,9 +132,23 @@ pub fn quote_ident(ident: &str) -> String {
     format!("\"{}\"", ident.replace('"', "\"\""))
 }
 
+/// Quote a MySQL / MariaDB identifier with backticks, doubling embedded `` ` ``.
+pub fn quote_ident_mysql(ident: &str) -> String {
+    format!("`{}`", ident.replace('`', "``"))
+}
+
 #[cfg(test)]
 mod quote_ident_tests {
-    use super::quote_ident;
+    use super::{quote_ident, quote_ident_mysql};
+
+    #[test]
+    fn test_quote_ident_mysql_escapes_backticks() {
+        assert_eq!(quote_ident_mysql("user"), "`user`");
+        assert_eq!(
+            quote_ident_mysql("a`; DROP TABLE x; --"),
+            "`a``; DROP TABLE x; --`"
+        );
+    }
 
     #[test]
     fn test_quote_ident_escapes_double_quotes() {
