@@ -67,7 +67,8 @@ This is by design — Rango should be portable.
 | `rango-derive` | `#[derive(Model)]` proc-macro — generates `TableSchema` from struct fields |
 | `rango-postgres` | PostgreSQL backend (sqlx): `ops/` (crud, bulk, raw), `query_builder/` (filter, exec, relations), M2M, `PgQueryExt` |
 | `rango-sqlite` | SQLite backend (sqlx), same layout as `rango-postgres` |
-| `rango` | Facade crate: re-exports core + derive + backends, selected by features (`postgres` default, `sqlite`) |
+| `rango-mysql` | MySQL 8.0+ / MariaDB 10.6+ backend (sqlx), common subset, no `RETURNING`, UUID as `BINARY(16)` |
+| `rango` | Facade crate: re-exports core + derive + backends, selected by features (`postgres` default, `sqlite`, `mysql`) |
 | `rango-cli` | `rango` binary: `commands/` (init, makemigrations, migrate, export, import) and `migration/` (scanner, snapshot, diff, renames, sql) |
 | `rango-tests` | Integration tests against real Postgres / SQLite |
 | `rango-bench` | Criterion benchmarks |
@@ -191,8 +192,8 @@ let active_users = User::filter(&pool)
 | Backend | Crate | Status |
 |---|---|---|
 | PostgreSQL | `rango-postgres` | 🚧 en cours |
-| MySQL / MariaDB | `rango-mysql` | 📋 prévu |
-| SQLite | `rango-sqlite` | 📋 prévu |
+| MySQL / MariaDB | `rango-mysql` | ✅ backend + CLI (MySQL 8.0+, MariaDB 10.6+) |
+| SQLite | `rango-sqlite` | ✅ |
 | MSSQL | `rango-mssql` | 🔮 futur — SQLx a droppé le support MSSQL en 0.7, backend custom via `tiberius` |
 
 Note : PostgreSQL, MySQL, SQLite passent par SQLx. MSSQL nécessitera un backend séparé basé sur `tiberius`.

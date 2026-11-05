@@ -96,7 +96,8 @@ impl<'ast> Visit<'ast> for ModelVisitor<'_> {
         if let syn::Fields::Named(fields) = &node.fields {
             for field in &fields.named {
                 // Detect ManyToMany<T> — record relation, skip column
-                let type_str = quote::quote!(#(field.ty)).to_string().replace(" ", "");
+                let ty = &field.ty;
+                let type_str = quote::quote!(#ty).to_string().replace(" ", "");
                 if type_str.starts_with("ManyToMany<") {
                     let to_model = type_str
                         .trim_start_matches("ManyToMany<")
@@ -418,7 +419,8 @@ fn extract_ordering(node: &ItemStruct) -> Vec<OrderBy> {
 /// Parse `asc("col")` or `desc("col")` into an `OrderBy`.
 fn parse_order_expr(expr: &syn::Expr) -> Option<OrderBy> {
     if let syn::Expr::Call(call) = expr {
-        let func_str = quote::quote!(#(call.func)).to_string().replace(" ", "");
+        let func = &call.func;
+        let func_str = quote::quote!(#func).to_string().replace(" ", "");
         let args: Vec<syn::Expr> = call.args.iter().cloned().collect();
         let col = extract_str_from_args(&args, 0)?;
         match func_str.as_str() {
@@ -477,7 +479,8 @@ fn parse_constraint_expr(expr: &syn::Expr) -> Option<Constraint> {
     let (base, methods) = flatten_method_chain(expr);
 
     if let syn::Expr::Call(call) = base {
-        let func_str = quote::quote!(#(call.func)).to_string().replace(" ", "");
+        let func = &call.func;
+        let func_str = quote::quote!(#func).to_string().replace(" ", "");
         let args: Vec<syn::Expr> = call.args.iter().cloned().collect();
 
         if func_str == "CheckConstraint::new" {
@@ -659,7 +662,7 @@ pub(crate) fn generate_pivot_table(rel: &M2MRelation, prefix: &str) -> TableSche
 mod tests {
     use super::map_field_type;
     use super::scan_models;
-    use rango_core::ColumnType;
+    use rango_core::{ColumnType, Constraint};
 
     fn ty(s: &str) -> syn::Type {
         syn::parse_str(s).expect("valid type string")
@@ -791,6 +794,53 @@ pub struct Profile {
 
         let result = scan_models(dir.to_str().unwrap());
         assert!(result.is_err());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_scanner_constraints_ordering_and_m2m() {
+        let dir = write_temp_models(
+            "constraints_m2m",
+            r#"
+use rango_core::Model;
+
+#[derive(Model)]
+#[model(
+    constraints = [
+        CheckConstraint::new("age >= 0").name("chk_age"),
+        UniqueConstraint::on(&["name", "age"]).name("uniq_name_age"),
+    ],
+    ordering = [desc("age")]
+)]
+pub struct Person {
+    id: FieldUuid,
+    name: FieldText,
+    age: FieldInt,
+}
+
+#[derive(Model)]
+pub struct Post {
+    id: FieldUuid,
+    readers: ManyToMany<Person>,
+}
+"#,
+        );
+
+        let (schemas, m2m) = scan_models(dir.to_str().unwrap()).unwrap();
+        let person = schemas.iter().find(|s| s.table_name == "person").unwrap();
+        assert_eq!(person.constraints.len(), 2);
+        assert!(matches!(&person.constraints[0], Constraint::Check(c) if c.sql == "age >= 0"));
+        assert!(
+            matches!(&person.constraints[1], Constraint::Unique(u) if u.fields == ["name", "age"])
+        );
+        assert_eq!(person.ordering.len(), 1);
+        assert_eq!(person.ordering[0].column, "age");
+
+        let post = schemas.iter().find(|s| s.table_name == "post").unwrap();
+        assert!(post.columns.iter().all(|c| c.name != "readers"));
+        assert_eq!(m2m.len(), 1);
+        assert_eq!(m2m[0].to_table, "person");
 
         let _ = std::fs::remove_dir_all(&dir);
     }

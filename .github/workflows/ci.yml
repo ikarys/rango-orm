@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, wip]
+    branches: [main, develop]
   pull_request:
     branches: [main]
 
@@ -154,6 +154,11 @@ jobs:
 
       - name: cargo test (integration, mysql)
         run: cargo test --test integration_mysql --features rango-tests/integration-mysql -- --test-threads=1
+        env:
+          MYSQL_URL: mysql://root:rango@127.0.0.1:3306/rango_test
+
+      - name: cargo test (CLI e2e, mysql)
+        run: cargo test -p rango-cli --test migrations_e2e_mysql --features integration-mysql -- --test-threads=1
         env:
           MYSQL_URL: mysql://root:rango@127.0.0.1:3306/rango_test
 

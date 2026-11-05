@@ -1,6 +1,6 @@
 use crate::migration::snapshot::*;
 use rango_core::{
-    ColumnDef, ColumnType, FkReference, TableSchema,
+    ColumnDef, FkReference, TableSchema,
     constraints::{constraint_definition, constraint_name},
 };
 use std::collections::{HashMap, HashSet};
@@ -20,13 +20,11 @@ pub enum SchemaDiff {
     },
     AlterColumnType {
         table: String,
-        column: String,
-        new_type: ColumnType,
+        column: ColumnDef,
     },
     AlterColumnNullable {
         table: String,
-        column: String,
-        nullable: bool,
+        column: ColumnDef,
     },
     AlterColumnUnique {
         table: String,
@@ -42,6 +40,7 @@ pub enum SchemaDiff {
         table: String,
         column: String,
         references: Option<FkReference>,
+        had_reference: bool,
     },
     AddConstraint {
         table: String,
@@ -167,16 +166,14 @@ pub(crate) fn column_diffs(table: &str, old: &SnapshotColumn, new: &ColumnDef) -
     if new_type_str != old.col_type {
         diffs.push(SchemaDiff::AlterColumnType {
             table: table.to_string(),
-            column: new.name.clone(),
-            new_type: new.col_type.clone(),
+            column: new.clone(),
         });
     }
 
     if new.nullable != old.nullable {
         diffs.push(SchemaDiff::AlterColumnNullable {
             table: table.to_string(),
-            column: new.name.clone(),
-            nullable: new.nullable,
+            column: new.clone(),
         });
     }
 
@@ -201,6 +198,7 @@ pub(crate) fn column_diffs(table: &str, old: &SnapshotColumn, new: &ColumnDef) -
             table: table.to_string(),
             column: new.name.clone(),
             references: new.references.clone(),
+            had_reference: old.references.is_some(),
         });
     }
 

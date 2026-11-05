@@ -6,7 +6,11 @@ pub fn run(backend: &str) -> Result<()> {
     let url = match backend {
         "postgres" => "postgres://user:password@localhost:5432/mydb",
         "sqlite" => "sqlite://db.sqlite3",
-        other => bail!("Unknown backend '{}'. Use 'sqlite' or 'postgres'.", other),
+        "mysql" | "mariadb" => "mysql://user:password@localhost:3306/mydb",
+        other => bail!(
+            "Unknown backend '{}'. Use 'sqlite', 'postgres' or 'mysql'.",
+            other
+        ),
     };
 
     if Path::new("rango.toml").exists() {

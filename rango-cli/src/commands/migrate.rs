@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use rango_core::BackendKind;
 use std::collections::HashSet;
 use std::fs;
@@ -16,12 +16,14 @@ pub async fn run(database_url: &str, migrations_dir: &str, after_connect: &[Stri
         "🔌 Connecting to database ({})...",
         match backend {
             BackendKind::Sqlite => "sqlite",
+            BackendKind::Mysql => "mysql",
             _ => "postgres",
         }
     );
 
     match backend {
         BackendKind::Sqlite => run_sqlite(database_url, migrations_dir).await,
+        BackendKind::Mysql => run_mysql(database_url, migrations_dir).await,
         _ => run_postgres(database_url, migrations_dir, after_connect).await,
     }
 }
@@ -118,6 +120,64 @@ async fn run_sqlite(database_url: &str, migrations_dir: &str) -> Result<()> {
         "INSERT INTO _rango_migrations (name) VALUES (?)",
     )
     .await
+}
+
+// ─── MySQL ────────────────────────────────────────────────────────────────────
+
+/// Run migrations against MySQL/MariaDB.
+///
+/// MySQL DDL auto-commits, so the per-migration transaction only makes the bookkeeping insert atomic.
+async fn run_mysql(database_url: &str, migrations_dir: &str) -> Result<()> {
+    let pool = rango_mysql::connect(database_url)
+        .await
+        .context("Failed to connect to MySQL")?;
+
+    let mut conn = pool
+        .acquire()
+        .await
+        .context("Failed to acquire a MySQL connection")?;
+
+    let lock = sqlx::query_scalar::<_, Option<i64>>("SELECT GET_LOCK('rango_migrate', 3600)")
+        .fetch_one(&mut *conn)
+        .await
+        .context("Failed to acquire the migration lock")?;
+
+    if lock != Some(1) {
+        bail!("Failed to acquire the migration lock");
+    }
+
+    let result = async {
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS _rango_migrations (
+                id         BIGINT AUTO_INCREMENT PRIMARY KEY,
+                name       VARCHAR(255) NOT NULL UNIQUE,
+                applied_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
+        )
+        .execute(&mut *conn)
+        .await
+        .context("Failed to create _rango_migrations")?;
+
+        apply_pending::<sqlx::MySql>(
+            &mut *conn,
+            migrations_dir,
+            "INSERT INTO _rango_migrations (name) VALUES (?)",
+        )
+        .await
+    }
+    .await;
+
+    let unlock = sqlx::query("SELECT RELEASE_LOCK('rango_migrate')")
+        .execute(&mut *conn)
+        .await;
+
+    if let Err(err) = unlock
+        && result.is_ok()
+    {
+        return Err(anyhow::Error::from(err).context("Failed to release the migration lock"));
+    }
+
+    result
 }
 
 // ─── Shared logic ─────────────────────────────────────────────────────────────
