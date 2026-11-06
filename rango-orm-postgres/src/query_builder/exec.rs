@@ -1,7 +1,9 @@
 use crate::ops::DEFAULT_QUERY_LIMIT;
 use crate::related::WithRelated;
-use crate::row::{PgPrefixedRow, PgRangoRow, PgRangoRow2};
-use rango_orm_core::{ColumnRef, FromRow, Model, ModelValues, RangoRow, SqlValue, quote_ident};
+use crate::row::{PgPrefixedRow, PgRangoRow, PgRangoRow2, decode_all};
+use rango_orm_core::{
+    ColumnRef, FromRow, Model, ModelValues, Partial, RangoRow, SqlValue, quote_ident,
+};
 use rango_orm_core::{Error, Result};
 use sqlx::Postgres;
 use std::any::Any;
@@ -389,5 +391,52 @@ where
         ) -> crate::transaction::TxFuture<'c, T>,
     {
         crate::transaction::atomic(&self.pool, f).await
+    }
+}
+
+impl<M> QueryBuilder<M>
+where
+    M: Model + ModelValues + FromRow,
+{
+    /// Select only the columns of the `#[derive(Partial)]` struct `P`.
+    ///
+    /// Same filters, ordering and limits as `.all()`; relations are not supported.
+    pub fn select_as<P: Partial<Model = M>>(self) -> SelectAs<M, P> {
+        SelectAs {
+            qb: self,
+            _phantom: std::marker::PhantomData,
+        }
+    }
+}
+
+/// A query selecting a partial struct, built by `QueryBuilder::select_as`.
+pub struct SelectAs<M, P> {
+    qb: QueryBuilder<M>,
+    _phantom: std::marker::PhantomData<P>,
+}
+
+impl<M, P> SelectAs<M, P>
+where
+    M: Model + ModelValues + FromRow,
+    P: Partial<Model = M>,
+{
+    /// Fetch all matching rows as `P`.
+    pub async fn all(self) -> Result<Vec<P>> {
+        self.qb.ensure_valid()?;
+        if !self.qb.select_related.is_empty() || !self.qb.prefetch_related.is_empty() {
+            return Err(Error::Invalid(
+                "select_related / prefetch_related are not supported with select_as".into(),
+            ));
+        }
+        let cols: Vec<String> = P::columns().iter().map(|c| quote_ident(c)).collect();
+        let (sql, binds) = self.qb.select_sql_cols(&cols.join(", "));
+        let rows = bind_and_fetch_all(&self.qb.pool, &sql, binds).await?;
+        decode_all::<P>(rows)
+    }
+
+    /// Fetch the first matching row as `P`.
+    pub async fn one(self) -> Result<Option<P>> {
+        let rows = self.qb.limit(1).select_as::<P>().all().await?;
+        Ok(rows.into_iter().next())
     }
 }

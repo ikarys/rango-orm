@@ -403,9 +403,9 @@ fn generate_column_def(field: &Field, core: &TokenStream) -> Result<TokenStream>
 }
 
 /// Generate the expression to read a field from a RangoRow.
-fn field_type_to_getter(
+pub(crate) fn field_type_to_getter(
     type_str: &str,
-    col: &str,
+    col: &impl quote::ToTokens,
     nullable: bool,
     core: &TokenStream,
 ) -> TokenStream {
@@ -545,7 +545,7 @@ fn is_many_to_many(ty: &Type) -> bool {
 
 /// Returns (is_nullable, inner_type).
 /// `Option<T>` → (true, T), anything else → (false, original_type)
-fn extract_option(ty: &Type) -> (bool, &Type) {
+pub(crate) fn extract_option(ty: &Type) -> (bool, &Type) {
     if let Type::Path(tp) = ty
         && let Some(seg) = tp.path.segments.last()
         && seg.ident == "Option"

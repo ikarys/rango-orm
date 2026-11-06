@@ -2,8 +2,8 @@ use crate::error::db_err;
 use crate::row::{decode_all, SqlitePrefixedRow, SqliteRangoRow, SqliteRowRef};
 use rango_orm_core::related::{row_key, sql_value_key};
 use rango_orm_core::{
-    quote_ident, ColumnRef, Error, FromRow, Model, ModelValues, RangoRow, Result, SqlValue,
-    WithRelated,
+    quote_ident, ColumnRef, Error, FromRow, Model, ModelValues, Partial, RangoRow, Result,
+    SqlValue, WithRelated,
 };
 use std::any::Any;
 use std::collections::{HashMap, HashSet};
@@ -337,5 +337,52 @@ where
         }
         let row = bind_and_fetch_one(&self.pool, &sql, binds).await?;
         Ok(row.try_get::<Option<T>, _>(0).unwrap_or(None))
+    }
+}
+
+impl<M> QueryBuilder<M>
+where
+    M: Model + ModelValues + FromRow,
+{
+    /// Select only the columns of the `#[derive(Partial)]` struct `P`.
+    ///
+    /// Same filters, ordering and limits as `.all()`; relations are not supported.
+    pub fn select_as<P: Partial<Model = M>>(self) -> SelectAs<M, P> {
+        SelectAs {
+            qb: self,
+            _phantom: std::marker::PhantomData,
+        }
+    }
+}
+
+/// A query selecting a partial struct, built by `QueryBuilder::select_as`.
+pub struct SelectAs<M, P> {
+    qb: QueryBuilder<M>,
+    _phantom: std::marker::PhantomData<P>,
+}
+
+impl<M, P> SelectAs<M, P>
+where
+    M: Model + ModelValues + FromRow,
+    P: Partial<Model = M>,
+{
+    /// Fetch all matching rows as `P`.
+    pub async fn all(self) -> Result<Vec<P>> {
+        self.qb.ensure_valid()?;
+        if !self.qb.select_related.is_empty() || !self.qb.prefetch_related.is_empty() {
+            return Err(Error::Invalid(
+                "select_related / prefetch_related are not supported with select_as".into(),
+            ));
+        }
+        let cols: Vec<String> = P::columns().iter().map(|c| quote_ident(c)).collect();
+        let (sql, binds) = self.qb.select_sql_cols(&cols.join(", "));
+        let rows = bind_and_fetch_all(&self.qb.pool, &sql, binds).await?;
+        decode_all::<P>(rows)
+    }
+
+    /// Fetch the first matching row as `P`.
+    pub async fn one(self) -> Result<Option<P>> {
+        let rows = self.qb.limit(1).select_as::<P>().all().await?;
+        Ok(rows.into_iter().next())
     }
 }
