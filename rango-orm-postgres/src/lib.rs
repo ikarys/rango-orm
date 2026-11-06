@@ -13,6 +13,7 @@ mod row;
 mod transaction;
 
 use rango_orm_core::DatabaseConfig;
+use rango_orm_core::config::is_local_host;
 use sqlx::{
     ConnectOptions, Executor,
     postgres::{PgConnectOptions, PgPoolOptions, PgSslMode},
@@ -94,24 +95,4 @@ pub async fn connect(config: &DatabaseConfig) -> rango_orm_core::Result<PgPool> 
     }
 
     opts.connect_with(connect_opts).await.map_err(error::db_err)
-}
-
-/// Loopback addresses and Unix sockets never leave the machine, so TLS is not forced there.
-fn is_local_host(host: &str) -> bool {
-    host.starts_with('/') || matches!(host, "localhost" | "127.0.0.1" | "::1" | "[::1]")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::is_local_host;
-
-    #[test]
-    fn local_hosts_are_not_forced_to_tls() {
-        for h in ["localhost", "127.0.0.1", "::1", "/var/run/postgresql"] {
-            assert!(is_local_host(h), "{h}");
-        }
-        for h in ["db.example.com", "10.0.0.5", "localhost.evil.com"] {
-            assert!(!is_local_host(h), "{h}");
-        }
-    }
 }

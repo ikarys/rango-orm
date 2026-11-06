@@ -133,9 +133,25 @@ impl BackendKind {
     }
 }
 
+/// Loopback addresses and Unix sockets never leave the machine, so backends do not force TLS there.
+#[doc(hidden)]
+pub fn is_local_host(host: &str) -> bool {
+    host.starts_with('/') || matches!(host, "localhost" | "127.0.0.1" | "::1" | "[::1]")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn local_hosts_are_not_forced_to_tls() {
+        for h in ["localhost", "127.0.0.1", "::1", "/var/run/postgresql"] {
+            assert!(is_local_host(h), "{h}");
+        }
+        for h in ["db.example.com", "10.0.0.5", "localhost.evil.com"] {
+            assert!(!is_local_host(h), "{h}");
+        }
+    }
 
     #[test]
     fn redact_url_replaces_password() {
