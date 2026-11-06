@@ -1375,6 +1375,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "rango-orm",
  "rango-orm-core",
  "rango-orm-derive",
  "rango-orm-mysql",
