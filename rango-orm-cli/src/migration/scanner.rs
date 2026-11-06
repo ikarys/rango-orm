@@ -53,6 +53,7 @@ fn uses_rango(content: &str) -> bool {
     content.contains("rango_orm_derive")
         || content.contains("rango_orm_core")
         || content.contains("use rango")
+        || content.contains("rango::model")
 }
 
 /// A detected M2M relation between two table names.
@@ -84,7 +85,8 @@ impl<'a> ModelVisitor<'a> {
 
 impl<'ast> Visit<'ast> for ModelVisitor<'_> {
     fn visit_item_struct(&mut self, node: &'ast ItemStruct) {
-        if !has_derive_model(node) {
+        let attr_pk = attr_macro_pk(node);
+        if !has_derive_model(node) && attr_pk.is_none() {
             return;
         }
 
@@ -94,6 +96,25 @@ impl<'ast> Visit<'ast> for ModelVisitor<'_> {
         let mut columns = Vec::new();
 
         if let syn::Fields::Named(fields) = &node.fields {
+            // `#[rango::model]` injects an implicit `id` first, as the macro does.
+            if let Some(pk) = &attr_pk
+                && !fields.named.iter().any(|f| {
+                    f.ident.as_ref().is_some_and(|i| i == "id") || parse_field_attrs(f).primary_key
+                })
+            {
+                let ty = match pk.as_str() {
+                    "bigint" => "FieldAutoBigInt",
+                    "int" => "FieldAutoInt",
+                    _ => "FieldUuid",
+                };
+                let id: syn::Field =
+                    syn::parse::Parser::parse_str(syn::Field::parse_named, &format!("id: {ty}"))
+                        .expect("valid field");
+                match build_column_def(&id) {
+                    Ok(col) => columns.push(col),
+                    Err(e) => self.errors.push(format!("{}: {}", node.ident, e)),
+                }
+            }
             for field in &fields.named {
                 // Detect ManyToMany<T> — record relation, skip column
                 let ty = &field.ty;
@@ -138,6 +159,37 @@ impl<'ast> Visit<'ast> for ModelVisitor<'_> {
             comment: None,
         });
     }
+}
+
+/// `#[rango::model]` / `#[model]` attribute macro: returns its `pk` argument
+/// (default "uuid"). A bare `#[model(...)]` next to `derive(Model)` is the derive helper, not the macro.
+fn attr_macro_pk(node: &ItemStruct) -> Option<String> {
+    let derived = has_derive_model(node);
+    node.attrs.iter().find_map(|attr| {
+        let p = attr.path();
+        let is_macro = p.segments.len() == 2
+            && p.segments[0].ident == "rango"
+            && p.segments[1].ident == "model"
+            || (p.is_ident("model") && !derived);
+        if !is_macro {
+            return None;
+        }
+        let mut pk = "uuid".to_string();
+        if let Ok(list) = attr.parse_args_with(
+            syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated,
+        ) {
+            for meta in list {
+                if let syn::Meta::NameValue(nv) = meta
+                    && nv.path.is_ident("pk")
+                    && let syn::Expr::Lit(e) = &nv.value
+                    && let syn::Lit::Str(s) = &e.lit
+                {
+                    pk = s.value();
+                }
+            }
+        }
+        Some(pk)
+    })
 }
 
 /// Check if a struct has `#[derive(Model)]`
@@ -855,6 +907,65 @@ pub struct Post {
         assert!(post.columns.iter().all(|c| c.name != "readers"));
         assert_eq!(m2m.len(), 1);
         assert_eq!(m2m[0].to_table, "person");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_scanner_implicit_pk_attribute_macro() {
+        let dir = write_temp_models(
+            "implicit_pk",
+            r#"
+use rango::prelude::*;
+
+#[rango::model]
+#[model(table = "art")]
+pub struct Article {
+    title: FieldText,
+}
+
+#[rango::model(pk = "bigint")]
+pub struct Event {
+    name: FieldText,
+}
+
+#[model]
+pub struct Plain {
+    name: FieldText,
+}
+
+#[rango::model]
+pub struct Keeps {
+    id: FieldAutoBigInt,
+}
+
+#[rango::model]
+pub struct Custom {
+    #[field(primary_key)]
+    code: FieldText,
+}
+
+#[derive(Model)]
+#[model(table = "helper_only")]
+pub struct Helper {
+    id: FieldUuid,
+}
+"#,
+        );
+
+        let (schemas, _) = scan_models(dir.to_str().unwrap()).unwrap();
+        let col = |t: &str| {
+            let s = schemas.iter().find(|s| s.table_name == t).unwrap();
+            (s.columns.len(), s.columns[0].clone())
+        };
+        let (n, id) = col("art");
+        assert_eq!((n, id.name.as_str(), id.primary_key), (2, "id", true));
+        assert_eq!(id.col_type, ColumnType::Uuid);
+        assert_eq!(col("event").1.col_type, ColumnType::AutoBigInt);
+        assert_eq!(col("plain").1.col_type, ColumnType::Uuid);
+        assert_eq!(col("keeps").0, 1);
+        assert_eq!(col("custom").0, 1);
+        assert_eq!(col("helper_only").0, 1);
 
         let _ = std::fs::remove_dir_all(&dir);
     }
