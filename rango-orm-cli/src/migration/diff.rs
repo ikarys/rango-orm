@@ -1,6 +1,6 @@
 use crate::migration::snapshot::*;
 use rango_orm_core::{
-    ColumnDef, FkReference, TableSchema,
+    ColumnDef, ColumnType, FkReference, TableSchema,
     constraints::{constraint_definition, constraint_name},
 };
 use std::collections::{HashMap, HashSet};
@@ -34,6 +34,8 @@ pub enum SchemaDiff {
     AlterColumnIndex {
         table: String,
         column: String,
+        /// Needed by MySQL, which cannot index TEXT/BLOB without a prefix length.
+        col_type: ColumnType,
         index: bool,
     },
     AlterColumnReference {
@@ -189,6 +191,7 @@ pub(crate) fn column_diffs(table: &str, old: &SnapshotColumn, new: &ColumnDef) -
         diffs.push(SchemaDiff::AlterColumnIndex {
             table: table.to_string(),
             column: new.name.clone(),
+            col_type: new.col_type.clone(),
             index: new.index,
         });
     }
