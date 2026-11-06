@@ -77,6 +77,17 @@ pub fn expand(input: DeriveInput) -> Result<TokenStream> {
     let mut pk_found = false;
     let mut set_pk_body = quote! { let _ = id; };
 
+    // ManyToMany fields are never read by generated code, so `dead_code` would flag them
+    // in every model that declares one; this read silences it.
+    let m2m_reads: Vec<_> = fields
+        .iter()
+        .filter(|f| is_many_to_many(&f.ty))
+        .map(|f| {
+            let fname = f.ident.as_ref().unwrap();
+            quote! { let _ = &self.#fname; }
+        })
+        .collect();
+
     for f in fields.iter() {
         if is_many_to_many(&f.ty) {
             continue;
@@ -216,6 +227,7 @@ pub fn expand(input: DeriveInput) -> Result<TokenStream> {
 
         impl #core2::ModelValues for #struct_name {
             fn field_values(&self) -> Vec<(&'static str, #core2::SqlValue)> {
+                #(#m2m_reads)*
                 vec![#(#field_value_entries),*]
             }
 

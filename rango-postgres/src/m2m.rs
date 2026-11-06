@@ -32,18 +32,32 @@ where
         m2m_pivot(From::table_name(), To::table_name()).2
     }
 
-    /// Add a relation between from and to.
-    /// Uses INSERT OR IGNORE (idempotent).
-    pub async fn add(pool: &PgPool, from: &From, to: &To) -> Result<()> {
+    fn insert_sql() -> String {
         let pivot = Self::pivot_table();
         let from_col = Self::from_col();
         let to_col = Self::to_col();
-        let sql = format!(
+        format!(
             "INSERT INTO {} ({}, {}) VALUES ($1, $2) ON CONFLICT DO NOTHING",
             quote_ident(&pivot),
             quote_ident(&from_col),
             quote_ident(&to_col)
-        );
+        )
+    }
+
+    fn clear_sql() -> String {
+        let pivot = Self::pivot_table();
+        let from_col = Self::from_col();
+        format!(
+            "DELETE FROM {} WHERE {} = $1",
+            quote_ident(&pivot),
+            quote_ident(&from_col)
+        )
+    }
+
+    /// Add a relation between from and to.
+    /// Idempotent: an existing relation is left as is.
+    pub async fn add(pool: &PgPool, from: &From, to: &To) -> Result<()> {
+        let sql = Self::insert_sql();
         let q = bind_sql_values(sqlx::query(&sql), vec![from.pk_value(), to.pk_value()]);
         q.execute(pool).await.map_err(db_err)?;
         Ok(())
@@ -67,13 +81,7 @@ where
 
     /// Clear all relations from a given model instance.
     pub async fn clear(pool: &PgPool, from: &From) -> Result<()> {
-        let pivot = Self::pivot_table();
-        let from_col = Self::from_col();
-        let sql = format!(
-            "DELETE FROM {} WHERE {} = $1",
-            quote_ident(&pivot),
-            quote_ident(&from_col)
-        );
+        let sql = Self::clear_sql();
         let q = bind_sql_values(sqlx::query(&sql), vec![from.pk_value()]);
         q.execute(pool).await.map_err(db_err)?;
         Ok(())
@@ -130,12 +138,18 @@ where
         decode_all::<From>(rows)
     }
 
-    /// Set exact relations — replaces all existing with the given list.
+    /// Set exact relations — replaces all existing with the given list, atomically.
     pub async fn set(pool: &PgPool, from: &From, to_list: &[To]) -> Result<()> {
-        Self::clear(pool, from).await?;
+        let mut tx = pool.begin().await.map_err(db_err)?;
+        let sql = Self::clear_sql();
+        let q = bind_sql_values(sqlx::query(&sql), vec![from.pk_value()]);
+        q.execute(&mut *tx).await.map_err(db_err)?;
+        let sql = Self::insert_sql();
         for to in to_list {
-            Self::add(pool, from, to).await?;
+            let q = bind_sql_values(sqlx::query(&sql), vec![from.pk_value(), to.pk_value()]);
+            q.execute(&mut *tx).await.map_err(db_err)?;
         }
+        tx.commit().await.map_err(db_err)?;
         Ok(())
     }
 

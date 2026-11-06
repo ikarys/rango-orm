@@ -9,6 +9,7 @@ use sqlx::{
     ConnectOptions,
 };
 
+pub use m2m::M2M;
 pub use ops::{
     all, bulk_create, delete, get, get_or_create, insert, raw, raw_execute, raw_scalar, update,
 };
@@ -18,6 +19,7 @@ pub use sqlite_ext::SqliteQueryExt;
 pub use transaction::{atomic, SqliteTransaction, TxFuture};
 
 mod error;
+pub mod m2m;
 mod ops;
 mod query_builder;
 mod row;

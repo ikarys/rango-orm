@@ -105,7 +105,7 @@ pub use rango_sqlite::SqlitePool;
 #[cfg(feature = "sqlite")]
 pub mod sqlite {
     pub use rango_sqlite::{
-        QueryBuilder, RangoFilterExt, SqliteTransaction, TxFuture, all, atomic, bulk_create,
+        M2M, QueryBuilder, RangoFilterExt, SqliteTransaction, TxFuture, all, atomic, bulk_create,
         delete, get, get_or_create, insert, raw, raw_execute, raw_scalar, update,
     };
 }
@@ -124,8 +124,8 @@ pub use rango_mysql::MySqlPool;
 #[cfg(feature = "mysql")]
 pub mod mysql {
     pub use rango_mysql::{
-        MySqlTransaction, QueryBuilder, RangoFilterExt, TxFuture, all, atomic, bulk_create, delete,
-        get, get_or_create, insert, raw, raw_execute, raw_scalar, update,
+        M2M, MySqlTransaction, QueryBuilder, RangoFilterExt, TxFuture, all, atomic, bulk_create,
+        delete, get, get_or_create, insert, raw, raw_execute, raw_scalar, update,
     };
 }
 
