@@ -87,6 +87,27 @@ M2M::<Article, Tag>::clear(&pool, &article).await?;
 let exists = M2M::<Article, Tag>::exists(&pool, &article, &tag).await?;
 ```
 
+### Self-referencing ManyToMany
+
+A model can point a `ManyToMany` at itself:
+
+```rust
+#[derive(Model)]
+pub struct User {
+    pub id: FieldUuid,
+    pub name: FieldText,
+    pub followers: ManyToMany<User>,
+}
+```
+
+The pivot table is `user_user`. Its two columns would clash if both were named `user_id`, so
+they are `from_user_id` and `to_user_id` (only when both sides are the same table).
+
+The relation is directional: `M2M::<User, User>::add(&pool, &a, &b)` stores `a` as `from` and
+`b` as `to`. `all(&a)` returns the users `a` points to (`b`), and `reverse(&b)` returns the
+users that point to `b` (`a`). Adding `(b, a)` as well makes the relation symmetric; Rango
+never does that for you. `prefetch_related(User::FOLLOWERS)` follows the same direction as `all`.
+
 ## prefetch_related
 
 Load reverse foreign key relations in one batched query (no N+1):

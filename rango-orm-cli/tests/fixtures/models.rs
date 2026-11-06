@@ -29,6 +29,9 @@ pub struct RpxAuthor {
     pub karma: Option<FieldInt>,
     #[field(column = "joined_at", auto_now_add)]
     pub created: FieldDateTime,
+    /// Self-referencing M2M: pivot `rpx_authors_rpx_authors` with `from_rpx_authors_id` /
+    /// `to_rpx_authors_id`.
+    pub followers: ManyToMany<RpxAuthor>,
 }
 
 /// Default table name from a multi-word struct name (`rpx_blog_post`), FK to a model

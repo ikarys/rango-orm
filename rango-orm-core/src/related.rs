@@ -144,12 +144,30 @@ where
 /// Hashable key for a primary / foreign key value (UUID, integer or text).
 /// M2M pivot naming shared by `M2M` ops, `prefetch_related` and `rango makemigrations`:
 /// `(pivot_table, from_col, to_col)` = `("{from}_{to}", "{from}_id", "{to}_id")`.
+/// A self-referencing relation (`from == to`) would get two columns with the same name,
+/// so its columns are `from_{x}_id` and `to_{x}_id`.
 pub fn m2m_pivot(from_table: &str, to_table: &str) -> (String, String, String) {
-    (
-        format!("{from_table}_{to_table}"),
-        format!("{from_table}_id"),
-        format!("{to_table}_id"),
-    )
+    let (from_col, to_col) = if from_table == to_table {
+        (format!("from_{from_table}_id"), format!("to_{to_table}_id"))
+    } else {
+        (format!("{from_table}_id"), format!("{to_table}_id"))
+    };
+    (format!("{from_table}_{to_table}"), from_col, to_col)
+}
+
+#[cfg(test)]
+mod pivot_tests {
+    use super::m2m_pivot;
+
+    #[test]
+    fn pivot_columns_are_distinct_for_self_reference() {
+        let s = |t: &str| t.to_string();
+        assert_eq!(m2m_pivot("a", "b"), (s("a_b"), s("a_id"), s("b_id")));
+        assert_eq!(
+            m2m_pivot("u", "u"),
+            (s("u_u"), s("from_u_id"), s("to_u_id"))
+        );
+    }
 }
 
 #[doc(hidden)]
