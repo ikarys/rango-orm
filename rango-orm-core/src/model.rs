@@ -15,3 +15,19 @@ pub trait Model {
 pub trait ModelMixin {
     fn mixin_name() -> &'static str;
 }
+
+/// Defense in depth for column names passed as strings (`.eq("email", ..)`): an unknown
+/// column becomes a typed error before any SQL runs, instead of a database error.
+/// Returns the message for `Error::Invalid` so query builders can defer it to execution.
+#[doc(hidden)]
+pub fn unknown_column<M: Model>(name: &str) -> Option<String> {
+    // ponytail: builds M::schema() per call; cache the column list if it shows up in profiles.
+    if M::schema().columns.iter().any(|c| c.name == name) {
+        None
+    } else {
+        Some(format!(
+            "unknown column `{name}` on table `{}`",
+            M::table_name()
+        ))
+    }
+}

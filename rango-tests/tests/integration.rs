@@ -1175,3 +1175,42 @@ async fn test_auto_pk_is_generated() {
         .unwrap();
     assert_eq!(d.label.0, "d");
 }
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration"), ignore)]
+async fn test_unknown_column_is_rejected() {
+    // Rejected before any SQL runs, so no table setup is needed.
+    let pool = pool().await;
+    let invalid = |r: Result<(), Error>| match r {
+        Err(Error::Invalid(msg)) => assert!(msg.contains("nope"), "{msg}"),
+        other => panic!("expected Error::Invalid, got {other:?}"),
+    };
+    invalid(
+        TestUser::filter(&pool)
+            .eq("nope", 1)
+            .all()
+            .await
+            .map(|_| ()),
+    );
+    invalid(
+        TestUser::filter(&pool)
+            .order_by("-nope")
+            .count()
+            .await
+            .map(|_| ()),
+    );
+    invalid(
+        TestUser::filter(&pool)
+            .group(|q| q.is_null("nope"))
+            .exists()
+            .await
+            .map(|_| ()),
+    );
+    invalid(TestUser::filter(&pool).sum("nope").await.map(|_| ()));
+    invalid(
+        TestUser::filter(&pool)
+            .values(&["email", "nope"])
+            .await
+            .map(|_| ()),
+    );
+}

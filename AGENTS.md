@@ -135,26 +135,32 @@ Design rules:
 
 ## Roadmap
 
-### À implémenter (par ordre de priorité)
+### Done (all three backends)
+
+| Feature | Notes |
+|---|---|
+| **Query builder** ✅ | `eq/ne/gt/gte/lt/lte/like/in_values/is_null`, `or()` / `not()` / `xor()` / `group()`, `order_by`, `limit`/`offset`, default cap of 1000 rows (`unlimited()`), `.explain()`. Typed columns (`User::EMAIL`) checked at compile time; string names checked against `M::schema()` at run time (`Error::Invalid`) |
+| **Relations FK** ✅ | `ForeignKey<User>` → real `REFERENCES … ON DELETE` in SQL, FK columns indexed |
+| **ManyToMany** ✅ | Auto-generated pivot table; `add` / `remove` / `set` / `all` / `reverse` / `clear` / `exists` |
+| **Constraints** ✅ | `#[model(constraints = [CheckConstraint::new("age >= 18").name("chk_age"), UniqueConstraint::on(&["room", "date"]).name("uniq_booking")])]`: `CHECK` and `UNIQUE` inline in `CREATE TABLE`; `UNIQUE … WHERE cond` → partial unique index (Postgres, SQLite; skipped with a comment on MySQL). `managed = false` → ignored by migrations. `ordering = [asc("col"), desc("other")]` → default order |
+| **Subqueries** 🚧 | `where_exists(Article::AUTHOR_ID, \|q\| ..)` (correlated `EXISTS`, `.not()` → `NOT EXISTS`) and `in_subquery(col, sub_col, \|q\| ..)` ✅. Left: Rango picks a subquery over a JOIN or N+1 when it is cheaper |
+| **select_related** ✅ | One `LEFT JOIN` (filtered/paginated M in a subquery, R's columns prefixed `__r{i}_`); `all()` returns `Vec<WithRelated<M>>` |
+| **prefetch_related** ✅ | Reverse FK (`Comment::POST_ID`) and M2M (`Article::TAGS`, one `INNER JOIN` on the pivot); `= ANY($1)` on Postgres, `IN (...)` in batches of 900 elsewhere |
+| **values** ✅ | `.values(&["id", "email"])` → `Vec<HashMap<String, SqlValue>>` |
+| **Aggregations** ✅ | `.count()` `.exists()` `.sum()` `.avg()` `.min()` `.max()` |
+| **Transactions** ✅ | `rango::atomic/transaction(&pool, \|tx\| async { ... }).await?`; `get/all/insert/update/delete` accept any `Executor`; `get_or_create` is atomic (`INSERT … ON CONFLICT DO NOTHING RETURNING *` on Postgres) and accepts pool or transaction; `atomic_retry` on Postgres |
+| **Bulk ops** ✅ | `rango::bulk_create/update/upsert(&pool, &models, ...)`: multi-row `INSERT`, `UPDATE … FROM (VALUES …)`, upsert; auto-chunked under the parameter limit; pool or transaction |
+| **Raw SQL escape hatch** ✅ | `rango::raw` / `raw_scalar` / `raw_execute(&pool, "SELECT ...", params)`, values always bound |
+| **Auto-increment PK** ✅ | `FieldAutoInt` / `FieldAutoBigInt`, id assigned by the database |
+
+### To do (by priority)
 
 | Feature | Description |
 |---|---|
-| **Query builder** | `.filter().eq().or().order_by().limit().offset()` |
-| **Relations FK** | `ForeignKey<User>` → vrai `ON DELETE CASCADE` SQL |
-| **ManyToMany** | Table pivot auto-générée, `.add()` `.remove()` `.all()` |
-| **Contraintes** ✅ | `CheckConstraint`, `UniqueConstraint` (simple et partial), `managed`, `ordering` — voir ci-dessous |
-| **Sous-requêtes** 🚧 | `where_exists(Article::AUTHOR_ID, |q| q.eq(..))` (EXISTS corrélé, `.not()` → NOT EXISTS) et `in_subquery(col, sub_col, |q| ..)` ✅ sur les trois backends. Reste : Rango détecte quand une sous-requête est plus efficace qu'un JOIN ou N+1 |
-| **select_related** ✅ | Un seul `LEFT JOIN` sur les trois backends (M filtré/paginé en sous-requête, colonnes de R préfixées `__r{i}_`) ; `all()` renvoie `Vec<WithRelated<M>>` partout |
-| **prefetch_related** ✅ | FK inverse (`Comment::POST_ID`) et M2M (`Article::TAGS`, un `INNER JOIN` sur la table pivot) sur les trois backends ; `= ANY($1)` en Postgres, `IN (...)` par lots de 900 ailleurs |
-| **only / defer** | `.only(&["id", "email"])` / `.defer(&["password"])` → retourne type partiel ou `HashMap` |
-| **values** | `.values(&["id", "email"])` → `Vec<HashMap<String, SqlValue>>` |
-| **Contraintes** ✅ | `#[model(constraints = [CheckConstraint::new("age >= 18").name("chk_age"), UniqueConstraint::on(&["room", "date"]).name("uniq_booking")])]` — `CHECK (...)` inline dans `CREATE TABLE`; `UNIQUE (cols)` inline; `UNIQUE ... WHERE cond` → `CREATE UNIQUE INDEX ... WHERE ...` (partial index PostgreSQL). `managed = false` → table ignorée par les migrations. `ordering = [asc("col"), desc("other")]` → ordre par défaut injecté dans `schema()`. |
-| **Transactions** ✅ | `rango::atomic/transaction(&pool, \|tx\| async { ... }).await?` — `get/all/insert/update/delete` accept any `Executor`; `get_or_create` is atomic via `INSERT … ON CONFLICT DO NOTHING RETURNING *` and accepts any `Acquire` (pool or transaction, no `atomic()` needed); `update_or_create` accepts `&mut RangoExecutor`; `QueryBuilder::transaction()` available |
-| **Bulk ops** ✅ | `rango::bulk_create/update/upsert(&pool, &models, ...)` — multi-row INSERT, `UPDATE … FROM (VALUES …)`, INSERT ON CONFLICT; auto-chunked at 65 535 params; accept pool or transaction via `Acquire` |
-| **Aggregations** | `.count()` `.sum()` `.avg()` `.min()` `.max()` |
-| **Raw SQL escape hatch** | `rango::raw(&pool, "SELECT ...", params).await?` |
-| **Stored procedures** | `rango::call(&pool, "proc_name", params).await?` — MySQL/PG stored procs. À évaluer : utilité dans un ORM ? |
-| **Auto PK** | Si aucun champ `id` déclaré, Rango en génère un automatiquement. Type configurable dans `rango.toml` (`[models] default_pk = "uuid"` ou `"bigint"`). L'utilisateur peut déclarer le sien avec `#[field(primary_key)]`. |
+| **only / defer** | `.only(&["id", "email"])` / `.defer(&["password"])` → partial type or `HashMap` |
+| **Implicit PK** | No `id` field declared → Rango adds one. Type set in `rango.toml` (`[models] default_pk = "uuid"` or `"bigint"`). Today a model without a primary key is a compile error |
+| **CLI dump / restore / backup** | See the CLI section; `export` / `import` exist today |
+| **Stored procedures** | `rango::call(&pool, "proc_name", params).await?`, MySQL/PG. To evaluate: does it belong in an ORM? |
 
 ## Principes non-négociables
 
@@ -261,7 +267,7 @@ Goal: production-grade by default. Status as of 2026-11-01. P0 = blocks real use
 | P0 | `FieldPassword` stores plaintext, derives `Debug` + `Serialize` | ✅ argon2id hash on write, redacted `Debug`, no serde, `verify(&self, candidate)` |
 | P0 | `DatabaseConfig` derives `Debug` → password in logs | ✅ manual `Debug` with `redact_url`; CLI config has no `Debug` |
 | P0 | TLS for Postgres and MySQL (`sslmode=require/verify-full`, `ssl-mode=REQUIRED/VERIFY_IDENTITY`) | ✅ `tls-rustls`; remote hosts default to `require` / `REQUIRED` when the URL sets no mode (no silent cleartext fallback); use `verify-full` / `VERIFY_IDENTITY` in prod |
-| P1 | Validate filter/order columns against `M::schema()` | Unknown column → typed error instead of a DB error; defense in depth on top of escaping |
+| P1 | Validate filter/order columns against `M::schema()` | ✅ string column names (filters, `order_by`, subqueries, `values`, aggregates, backend extensions) → `Error::Invalid` before any SQL runs; typed columns are already checked at compile time |
 | P1 | Per-connection `statement_timeout` / `lock_timeout` in `DatabaseConfig` | ✅ `statement_timeout_ms` / `lock_timeout_ms`, sent in the startup packet (no extra round-trip; PgBouncer needs `ignore_startup_parameters`) |
 | P1 | Never log bound values by default | ✅ sqlx only logs SQL text, never bound values; no opt-in added |
 | P1 | Typed errors (`rango::Error`: `NotFound`, `UniqueViolation`, `ForeignKeyViolation`, `Timeout`, `Connection`, …) instead of `anyhow` in library crates | ✅ `rango_orm_core::Error`; each backend maps sqlx errors in `error.rs` (`db_err`); no SQL text in errors; `anyhow` only in `rango-orm-cli` |
@@ -298,7 +304,7 @@ Known-CVE checklist (reviewed 2026-11-01) — keep new APIs out of these classes
 | Prio | Item | Notes |
 |---|---|---|
 | P0 | Index every FK column, index M2M pivots, real `REFERENCES … ON DELETE` | ✅ derive marks every FK `index`; CLI emits `CREATE INDEX` on create/add column and on pivots |
-| P0 | `rango-orm-core` must not depend on sqlx (currently pulls postgres + mysql + sqlite drivers) | Core stays pure; compile time and binary size drop for every app |
+| P0 | `rango-orm-core` must not depend on sqlx | ✅ core has no DB dependency; each backend crate brings its own sqlx driver |
 | P1 | Pool tuning: `test_before_acquire(false)` (sqlx pings on every acquire by default), `max_lifetime`, configurable from `rango.toml` | ✅ `max_lifetime` (1800 s), `test_before_acquire` (false) in `DatabaseConfig`; not yet in `rango.toml` |
 | P2 | Row decoding by column index instead of by name | Measured: ~3% on `select_all_1000` (name lookup is cheap); needs a `RangoRow` API change. Pre-sized result `Vec` ✅ (−4.5%) |
 | P1 | Postgres `bulk_create` via `UNNEST` (one statement, no 65 535-param chunking) | +21% at 1000 rows in benchmarks |

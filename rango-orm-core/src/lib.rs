@@ -28,7 +28,7 @@ pub use constraints::{
 pub use error::{Error, Result};
 pub use fields::*;
 pub use hooks::ModelHooks;
-pub use model::{Model, ModelMixin};
+pub use model::{Model, ModelMixin, unknown_column};
 pub use query::{
     Filterable, ModelValues, SqlValue, ToSqlValue, insert_values, quote_ident, quote_ident_mysql,
 };

@@ -72,7 +72,9 @@ where
     M: Model + ModelValues + FromRow,
 {
     fn fts(self, col: impl ColumnRef<M>, query: &str) -> Self {
-        self.raw_where(
+        let mut q = self;
+        q.check_col::<M>(col.column_name());
+        q.raw_where(
             format!(
                 "to_tsvector('english', {}) @@ plainto_tsquery('english', $__)",
                 quote_ident(col.column_name())
@@ -82,7 +84,9 @@ where
     }
 
     fn fts_lang(self, col: impl ColumnRef<M>, query: &str, lang: &str) -> Self {
-        self.raw_where(
+        let mut q = self;
+        q.check_col::<M>(col.column_name());
+        q.raw_where(
             format!(
                 "to_tsvector($__::regconfig, {}) @@ plainto_tsquery($__::regconfig, $__)",
                 quote_ident(col.column_name())
@@ -96,21 +100,27 @@ where
     }
 
     fn json_contains(self, col: impl ColumnRef<M>, value: serde_json::Value) -> Self {
-        self.raw_where(
+        let mut q = self;
+        q.check_col::<M>(col.column_name());
+        q.raw_where(
             format!("{} @> $__::jsonb", quote_ident(col.column_name())),
             vec![SqlValue::Json(value)],
         )
     }
 
     fn json_has_key(self, col: impl ColumnRef<M>, key: &str) -> Self {
-        self.raw_where(
+        let mut q = self;
+        q.check_col::<M>(col.column_name());
+        q.raw_where(
             format!("{} ? $__", quote_ident(col.column_name())),
             vec![SqlValue::Text(key.to_string())],
         )
     }
 
     fn json_field_eq(self, col: impl ColumnRef<M>, key: &str, value: &str) -> Self {
-        self.raw_where(
+        let mut q = self;
+        q.check_col::<M>(col.column_name());
+        q.raw_where(
             format!("{}->>$__ = $__", quote_ident(col.column_name())),
             vec![
                 SqlValue::Text(key.to_string()),
@@ -120,7 +130,9 @@ where
     }
 
     fn array_contains(self, col: impl ColumnRef<M>, values: Vec<String>) -> Self {
-        self.raw_where(
+        let mut q = self;
+        q.check_col::<M>(col.column_name());
+        q.raw_where(
             format!(
                 "{} @> ARRAY(SELECT jsonb_array_elements_text($__::jsonb))",
                 quote_ident(col.column_name())
