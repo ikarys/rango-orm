@@ -1,6 +1,6 @@
 use crate::ops::DEFAULT_QUERY_LIMIT;
 use crate::related::WithRelated;
-use crate::row::{PgRangoRow, PgRangoRow2, decode_all};
+use crate::row::{PgRangoRow, PgRangoRow2};
 use rango_core::{ColumnRef, FromRow, Model, ModelValues, SqlValue, quote_ident};
 use rango_core::{Error, Result};
 use sqlx::Postgres;
@@ -44,11 +44,13 @@ where
             sql.push_str(&format!(" OFFSET {}", o));
         }
 
-        let rows = bind_and_fetch_all(&self.pool, &sql, binds).await?;
-        let mut results: Vec<WithRelated<M>> = decode_all::<M>(rows)?
-            .into_iter()
-            .map(WithRelated::new)
-            .collect();
+        // One connection for the main query and every relation query: one pool round-trip.
+        let mut conn = self.pool.acquire().await.map_err(db_err)?;
+        let rows = bind_and_fetch_all(&mut *conn, &sql, binds).await?;
+        let mut results: Vec<WithRelated<M>> = Vec::with_capacity(rows.len());
+        for row in rows {
+            results.push(WithRelated::new(M::from_row(&PgRangoRow(row))?));
+        }
 
         if results.is_empty() {
             return Ok(results);
@@ -96,7 +98,7 @@ where
                 placeholders.join(", "),
             );
 
-            let related_rows = bind_and_fetch_all(&self.pool, &related_sql, unique_vals).await?;
+            let related_rows = bind_and_fetch_all(&mut *conn, &related_sql, unique_vals).await?;
 
             // Map pk key → PgRow (re-used for each M that shares the same FK).
             let mut row_by_pk: HashMap<String, sqlx::postgres::PgRow> = HashMap::new();
@@ -148,7 +150,7 @@ where
                 placeholders.join(", "),
             );
 
-            let prefetch_rows = bind_and_fetch_all(&self.pool, &prefetch_sql, unique_pks).await?;
+            let prefetch_rows = bind_and_fetch_all(&mut *conn, &prefetch_sql, unique_pks).await?;
 
             // Group boxed R items by the FK value they carry.
             let mut grouped: HashMap<String, Vec<Box<dyn Any + Send + Sync>>> = HashMap::new();
