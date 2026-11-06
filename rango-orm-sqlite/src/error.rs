@@ -19,6 +19,10 @@ pub(crate) fn db_err(e: sqlx::Error) -> Error {
             match code.as_deref() {
                 // SQLITE_BUSY / SQLITE_LOCKED (+ extended codes): busy_timeout expired
                 Some("5" | "6" | "261" | "262" | "517") => Error::Timeout,
+                // ON DELETE RESTRICT reports SQLITE_CONSTRAINT_TRIGGER (1811), not ..._FOREIGNKEY.
+                Some("1811") if db.message().starts_with("FOREIGN KEY") => {
+                    Error::ForeignKeyViolation { constraint }
+                }
                 _ => Error::Database {
                     code,
                     message: db.message().to_owned(),
