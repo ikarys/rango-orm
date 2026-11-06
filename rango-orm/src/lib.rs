@@ -78,6 +78,7 @@ pub extern crate rango_orm_core;
 // Re-export derive macros
 pub use rango_orm_derive::Model;
 pub use rango_orm_derive::ModelMixin;
+pub use rango_orm_derive::model;
 
 // ─── Postgres backend (feature `postgres`, enabled by default) ───────────────
 
