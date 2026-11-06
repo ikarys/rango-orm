@@ -11,12 +11,11 @@ rango makemigrations
 Output:
 ```
 🔍 Scanning models in src... (backend: postgres)
-📦 Table prefix: myapp
 Found 3 model(s):
-  - myapp_user (5 columns)
-  - myapp_post (6 columns)
-  - myapp_tag (2 columns)
-✅ Migration generated: migrations/0001_myapp_post_myapp_tag_myapp_user.sql
+  - user (5 columns)
+  - post (6 columns)
+  - tag (2 columns)
+✅ Migration generated: migrations/0001_post_tag_user.sql
 📸 Snapshot updated.
 ```
 
@@ -34,9 +33,6 @@ rango makemigrations src/models
 
 # Custom output directory
 rango makemigrations --output db/migrations
-
-# Override table prefix
-rango makemigrations --prefix myprefix
 ```
 
 ## How it works
@@ -68,7 +64,7 @@ SQLite does not support `ALTER COLUMN TYPE` or `SET/DROP NOT NULL`.
 Rango emits a comment in the migration file explaining what to do manually:
 
 ```sql
--- SQLite does not support ALTER COLUMN TYPE on "myapp_user"."score" → recreate the table manually.
+-- SQLite does not support ALTER COLUMN TYPE on "user"."score" → recreate the table manually.
 ```
 
 ## CI guard

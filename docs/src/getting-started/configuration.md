@@ -11,7 +11,6 @@ backend = "sqlite"   # "sqlite" or "postgres"
 
 [models]
 src = "src"          # directory to scan for #[derive(Model)]
-prefix = "myapp"     # optional: override table prefix (default: Cargo package name)
 
 [migrations]
 dir = "migrations"   # directory for generated SQL files
@@ -40,24 +39,11 @@ DATABASE_URL=sqlite://db.sqlite3 rango migrate
 | `sqlite` | `sqlite://path/to/db.sqlite3` | In-memory: `sqlite::memory:` |
 | `postgres` | `postgres://user:pass@host:5432/db` | Also accepts `postgresql://` |
 
-## Table prefix
+## Table names
 
-Tables are prefixed with your Cargo package name by default.
+Tables are never prefixed. The table name is the `#[model(table = "...")]` value, or the snake_case of the struct name. `rango makemigrations` and the runtime use the same names.
 
-```toml
-# Cargo.toml
-[package]
-name = "my-app"
-```
-
-This generates tables like `my_app_user`, `my_app_post` (hyphens → underscores).
-
-Override with:
-```toml
-# rango.toml
-[models]
-prefix = "custom"
-```
+`[models] prefix` was removed: `makemigrations` fails if it is still set. Use `#[model(table = "...")]` instead.
 
 ## Connection pool (Postgres)
 

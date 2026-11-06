@@ -34,10 +34,6 @@ enum Command {
         #[arg(short, long, default_value = "migrations")]
         output: String,
 
-        /// Table prefix (default: auto-detected from Cargo.toml)
-        #[arg(short, long)]
-        prefix: Option<String>,
-
         /// Print the SQL that would be generated without writing any files
         #[arg(long)]
         dry_run: bool,
@@ -162,14 +158,18 @@ fn main() -> Result<()> {
         Command::Makemigrations {
             path,
             output,
-            prefix,
             dry_run,
             check,
             yes,
         } => {
             let cfg = config::RangoConfig::load()?;
-            let prefix = prefix.or(cfg.models.prefix).map(|s| s.as_str().to_string());
-            makemigrations::run(&path, &output, prefix.as_deref(), dry_run, check, yes)?;
+            if cfg.models.prefix.is_some() {
+                anyhow::bail!(
+                    "`[models] prefix` in rango.toml is no longer supported: table prefixes were removed \
+                     because the runtime never applied them. Remove it and use `#[model(table = \"...\")]` instead"
+                );
+            }
+            makemigrations::run(&path, &output, dry_run, check, yes)?;
         }
         Command::Export {
             table,

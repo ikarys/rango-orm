@@ -1001,29 +1001,29 @@ mod tests {
             from_table: "posts".to_string(),
             to_table: "tags".to_string(),
         };
-        let schema = generate_pivot_table(&rel, "app");
+        let schema = generate_pivot_table(&rel);
         let sql = generate_sql_from_diff(
             &[SchemaDiff::CreateTable(schema)],
             rango_orm_core::BackendKind::Postgres,
         );
 
         assert!(
-            sql.contains("PRIMARY KEY (\"app_posts_id\", \"app_tags_id\")"),
+            sql.contains("PRIMARY KEY (\"posts_id\", \"tags_id\")"),
             "got: {}",
             sql
         );
         assert!(
-            sql.contains("REFERENCES \"app_posts\" (\"id\") ON DELETE CASCADE"),
+            sql.contains("REFERENCES \"posts\" (\"id\") ON DELETE CASCADE"),
             "got: {}",
             sql
         );
         assert!(
-            sql.contains("REFERENCES \"app_tags\" (\"id\") ON DELETE CASCADE"),
+            sql.contains("REFERENCES \"tags\" (\"id\") ON DELETE CASCADE"),
             "got: {}",
             sql
         );
         assert!(
-            sql.contains("CREATE INDEX IF NOT EXISTS \"app_posts_app_tags_app_tags_id_idx\" ON \"app_posts_app_tags\" (\"app_tags_id\");"),
+            sql.contains("CREATE INDEX IF NOT EXISTS \"posts_tags_tags_id_idx\" ON \"posts_tags\" (\"tags_id\");"),
             "got: {}",
             sql
         );

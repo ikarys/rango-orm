@@ -11,9 +11,9 @@ DATABASE_URL=postgres://user:pass@localhost/mydb rango migrate
 Output:
 ```
 🔌 Connecting to database (postgres)...
-  ⏭  0001_myapp_user.sql (already applied)
-  ▶  Applying 0002_myapp_post.sql...
-  ✅ 0002_myapp_post.sql
+  ⏭  0001_user.sql (already applied)
+  ▶  Applying 0002_post.sql...
+  ✅ 0002_post.sql
 ✅ Applied 1 migration(s).
 ```
 
@@ -52,9 +52,9 @@ CREATE TABLE _rango_migrations (
 Migrations are applied in alphabetical order (which matches their numbered prefix):
 
 ```
-0001_myapp_user.sql       ← applied first
-0002_myapp_post.sql       ← applied second
-0003_myapp_tag_post.sql   ← applied third
+0001_user.sql       ← applied first
+0002_post.sql       ← applied second
+0003_tag_post.sql   ← applied third
 ```
 
 ## Idempotency

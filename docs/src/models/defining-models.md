@@ -17,9 +17,9 @@ pub struct Article {
 
 ## Table name
 
-By default, the table name is the snake_case of the struct name, prefixed with your package name.
+By default, the table name is the snake_case of the struct name. Tables are never prefixed.
 
-`Article` → `myapp_article`
+`Article` → `article`
 
 Override with `#[model(table = "...")]`:
 

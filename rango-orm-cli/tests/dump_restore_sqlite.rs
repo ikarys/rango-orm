@@ -20,12 +20,14 @@ impl Project {
             r#"use rango::prelude::*;
 
 #[derive(Model)]
+#[model(table = "t_author")]
 pub struct Author {
     pub id: FieldUuid,
     pub name: FieldText,
 }
 
 #[derive(Model)]
+#[model(table = "t_book")]
 pub struct Book {
     pub id: FieldUuid,
     pub title: FieldText,
@@ -35,7 +37,7 @@ pub struct Book {
         )
         .unwrap();
         let p = Self { dir };
-        assert_ok(&p.cli("a.db", &["makemigrations", "src", "-p", "t", "--yes"]));
+        assert_ok(&p.cli("a.db", &["makemigrations", "src", "--yes"]));
         assert_ok(&p.cli("a.db", &["migrate"]));
         let mut c = p.conn("a.db").await;
         for sql in [
