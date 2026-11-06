@@ -28,9 +28,9 @@ db-mysql:
 # MySQL + MariaDB integration tests (requires Docker)
 test-mysql: db-mysql
     MYSQL_URL=mysql://root:rango@127.0.0.1:3307/rango_test cargo test --test integration_mysql --features rango-tests/integration-mysql -- --test-threads=1
-    MYSQL_URL=mysql://root:rango@127.0.0.1:3307/rango_test cargo test -p rango-orm-cli --test migrations_e2e_mysql --features integration-mysql -- --test-threads=1
+    MYSQL_URL=mysql://root:rango@127.0.0.1:3307/rango_test cargo test -p rango-orm-cli --test migrations_e2e_mysql --test real_project_mysql --features integration-mysql -- --test-threads=1
     MYSQL_URL=mysql://root:rango@127.0.0.1:3308/rango_test cargo test --test integration_mysql --features rango-tests/integration-mysql -- --test-threads=1
-    MYSQL_URL=mysql://root:rango@127.0.0.1:3308/rango_test cargo test -p rango-orm-cli --test migrations_e2e_mysql --features integration-mysql -- --test-threads=1
+    MYSQL_URL=mysql://root:rango@127.0.0.1:3308/rango_test cargo test -p rango-orm-cli --test migrations_e2e_mysql --test real_project_mysql --features integration-mysql -- --test-threads=1
 
 # Run fmt + clippy checks (same as pre-push hook)
 check:

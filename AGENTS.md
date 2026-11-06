@@ -315,6 +315,12 @@ Known-CVE checklist (reviewed 2026-11-01) — keep new APIs out of these classes
 | P2 | Optimistic locking (`#[field(version)]` → `UPDATE … WHERE version = $n`) | Safe concurrent updates without row locks |
 | P2 | Read-replica routing (writes → primary, reads → replica) | |
 
+## Known limitations
+
+- `dump` / `restore` does not round-trip binary columns (`bytea` / BLOB are exported as `null`), so a restore of a table with a NOT NULL binary column fails. The real-project e2e leaves those tables out of the dump comparison.
+- `FieldDecimal` is f64-backed: values are exact only within f64 precision.
+- `restore` on Postgres fills nullable FK columns that point forward (cycles, self references) after the inserts; a cycle made only of NOT NULL FKs cannot be restored.
+
 ## Style
 
 - No unsafe
