@@ -11,6 +11,7 @@ git-repository-url = "https://github.com/ikarys/rango-orm"
 # git-repository-icon = "fa-github"  # requires FontAwesome
 edit-url-template = "https://github.com/ikarys/rango-orm/edit/main/docs/src/{path}"
 no-section-label = false
+additional-css = ["custom.css"]
 
 [output.html.search]
 enable = true
