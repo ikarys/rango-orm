@@ -840,3 +840,98 @@ async fn test_unknown_column_is_rejected() {
             .map(|_| ()),
     );
 }
+
+// ── Implicit primary key: #[rango::model] ─────────────────────────────────────
+
+#[rango::model]
+#[derive(Debug, Clone)]
+struct ImplicitUuid {
+    title: FieldVarchar<1, 100>,
+}
+
+#[rango::model(pk = "bigint")]
+#[derive(Debug, Clone)]
+struct ImplicitBig {
+    name: FieldText,
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-sqlite"), ignore)]
+async fn test_sqlite_implicit_pk_uuid() {
+    let pool = pool().await;
+    sqlx::query(r#"CREATE TABLE "implicit_uuid" ("id" TEXT PRIMARY KEY, "title" TEXT NOT NULL)"#)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let id = FieldUuid(Uuid::new_v4());
+    let row = ImplicitUuid {
+        id: id.clone(),
+        title: FieldVarchar("hello".to_string()),
+    };
+    insert(&pool, row).await.unwrap();
+    let got = get::<_, ImplicitUuid>(&pool, &id.to_sql_value())
+        .await
+        .unwrap()
+        .expect("row not found");
+    assert_eq!(got.title.0, "hello");
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-sqlite"), ignore)]
+async fn test_sqlite_implicit_pk_bigint() {
+    let pool = pool().await;
+    sqlx::query(
+        r#"CREATE TABLE "implicit_big" ("id" INTEGER PRIMARY KEY AUTOINCREMENT, "name" TEXT NOT NULL)"#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let row = ImplicitBig {
+        id: FieldAutoBigInt(None),
+        name: FieldText("x".to_string()),
+    };
+    let saved = insert(&pool, row).await.unwrap();
+    assert_eq!(saved.id.0, Some(1));
+}
+
+// `#[model(...)]` is a derive helper: it must keep working next to the `model` macro.
+mod clash_prelude {
+    use rango::prelude::*;
+
+    #[derive(Model)]
+    #[model(table = "a", ordering = [asc("name")])]
+    pub struct A {
+        id: FieldUuid,
+        name: FieldText,
+    }
+}
+
+mod clash_glob {
+    use rango::*;
+
+    #[derive(Model)]
+    #[model(table = "b", ordering = [asc("name")])]
+    pub struct B {
+        id: FieldUuid,
+        name: FieldText,
+    }
+}
+
+mod clash_attr_and_helper {
+    use rango::prelude::*;
+
+    #[rango::model]
+    #[model(table = "c", ordering = [asc("name")])]
+    pub struct C {
+        name: FieldText,
+    }
+
+    #[test]
+    fn schema_has_implicit_id() {
+        let s = C::schema();
+        assert_eq!(s.table_name, "c");
+        assert_eq!(s.columns[0].name, "id");
+        assert!(s.columns[0].primary_key);
+        assert_eq!(s.ordering.len(), 1);
+    }
+}

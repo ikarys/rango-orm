@@ -124,7 +124,7 @@ pub fn expand(input: DeriveInput) -> Result<TokenStream> {
     if !pk_found {
         return Err(syn::Error::new_spanned(
             struct_name,
-            "Rango: no primary key found. Declare a field named `id` or annotate one with `#[field(primary_key)]`",
+            "Rango: no primary key found. Declare a field named `id` or annotate one with `#[field(primary_key)]`, or use `#[rango::model]` to add an implicit `id`",
         ));
     }
 

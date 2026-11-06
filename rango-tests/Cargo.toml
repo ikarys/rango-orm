@@ -8,6 +8,7 @@ publish = false
 [dependencies]
 rango-orm-core = { path = "../rango-orm-core" }
 rango-orm-derive = { path = "../rango-orm-derive" }
+rango-orm = { path = "../rango-orm", default-features = false, features = ["sqlite"] }
 
 [dev-dependencies]
 rango-orm-postgres = { path = "../rango-orm-postgres" }
