@@ -41,3 +41,7 @@ integration-mysql = []
 
 [dev-dependencies]
 sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "mysql", "sqlite"] }
+# Contract and real-project tests compile the same models the CLI scans.
+rango-orm = { path = "../rango-orm", features = ["postgres", "sqlite", "mysql"] }
+uuid = { version = "1", features = ["v4"] }
+chrono = "0.4"

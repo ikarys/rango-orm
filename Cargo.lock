@@ -1329,9 +1329,11 @@ name = "rango-orm-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "clap",
  "flate2",
  "quote",
+ "rango-orm",
  "rango-orm-core",
  "rango-orm-mysql",
  "rango-orm-postgres",
@@ -1342,6 +1344,7 @@ dependencies = [
  "syn 2.0.119",
  "tokio",
  "toml",
+ "uuid",
  "walkdir",
 ]
 
