@@ -234,6 +234,12 @@ async fn import_postgres(
     // first. One transaction, so a failed import leaves nothing behind.
     let mut tx = pool.begin().await.context("Failed to start transaction")?;
     run_setup::<sqlx::Postgres>(&mut tx, setup_sql).await?;
+    // Constraints created `DEFERRABLE` (the FKs that close a cycle) are checked at commit,
+    // so a NOT NULL cycle loads whatever the row order. The others stay immediate.
+    sqlx::query("SET CONSTRAINTS ALL DEFERRED")
+        .execute(&mut *tx)
+        .await
+        .context("Failed to defer constraints")?;
     let edges = fk_edges_postgres(&mut tx).await?;
 
     // Group rows by table

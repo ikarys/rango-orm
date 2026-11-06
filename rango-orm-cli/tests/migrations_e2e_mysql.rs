@@ -803,3 +803,70 @@ pub struct Generation {
     drop_tables(&pool, &tables).await;
     project.remove();
 }
+
+/// Every FK of the cycle is NOT NULL: `restore` loads it with the FK checks off.
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-mysql"), ignore)]
+async fn not_null_foreign_key_cycle_restores() {
+    let pool = MySqlPool::connect(&database_url())
+        .await
+        .expect("connect to mysql");
+    let project = Project::new("ring");
+    let tables = ["e2e_my_ring_a", "e2e_my_ring_b", "_rango_migrations"];
+    drop_tables(&pool, &tables).await;
+
+    project.write_models(
+        r#"
+#[derive(Model)]
+#[model(table = "e2e_my_ring_a")]
+pub struct RingA {
+    pub id: FieldUuid,
+    pub b: ForeignKey<RingB>,
+}
+
+#[derive(Model)]
+#[model(table = "e2e_my_ring_b")]
+pub struct RingB {
+    pub id: FieldUuid,
+    pub a: ForeignKey<RingA>,
+}
+"#,
+    );
+    assert_success(&project.makemigrations(), "makemigrations");
+    assert_success(&project.migrate(), "migrate");
+
+    sqlx::raw_sql(
+        "SET FOREIGN_KEY_CHECKS = 0; \
+         INSERT INTO e2e_my_ring_a (id, b) VALUES (UNHEX(REPEAT('0a', 16)), UNHEX(REPEAT('0b', 16))); \
+         INSERT INTO e2e_my_ring_b (id, a) VALUES (UNHEX(REPEAT('0b', 16)), UNHEX(REPEAT('0a', 16))); \
+         SET FOREIGN_KEY_CHECKS = 1;",
+    )
+    .execute(&pool)
+    .await
+    .expect("insert the cycle");
+
+    assert_success(
+        &project.run_cli(&[
+            "dump",
+            "-o",
+            "ring.json",
+            "-t",
+            "e2e_my_ring_a",
+            "-t",
+            "e2e_my_ring_b",
+        ]),
+        "dump",
+    );
+    drop_tables(&pool, &tables).await;
+    assert_success(&project.run_cli(&["restore", "ring.json"]), "restore");
+    for t in &tables[..2] {
+        let n: i64 = sqlx::query_scalar(&format!("SELECT count(*) FROM {t}"))
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(n, 1, "{t}");
+    }
+
+    drop_tables(&pool, &tables).await;
+    project.remove();
+}
