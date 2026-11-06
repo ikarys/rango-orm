@@ -4,7 +4,7 @@ One command set, with the same behaviour on PostgreSQL, SQLite, and MySQL/MariaD
 ## Format
 Dumps use "Rango JSON", a backend-independent JSON object with:
 - `format: "rango-dump"`
-- `version: 1`
+- `version: 2` (version 1 files are still read)
 - `rango_version`
 - `backend`
 - `created_at`
@@ -41,6 +41,8 @@ File contents are treated as untrusted:
 - Decompressed size is capped at 8 GiB against gzip bombs.
 
 Restore creates missing tables from the schema, then inserts rows, in one transaction. On any error, such as a constraint violation or a row conflicting with existing data, nothing is restored. On MySQL/MariaDB, DDL auto-commits, so tables created before a failure stay empty.
+
+Foreign keys are checked at the end of the transaction, so rows can come in any order, including self-references and FK cycles. On Postgres, a cycle where every FK is `NOT NULL` needs the cycle's constraints to be `DEFERRABLE`; `rango makemigrations` creates them that way, but databases migrated before 0.1.1 keep non-deferrable constraints.
 
 ## backup
 ```bash

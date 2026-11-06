@@ -23,7 +23,7 @@ tokio = { version = "1", features = ["full"] }
 ## Install the CLI
 
 ```bash
-cargo install rango-orm-cli --version 0.1.0
+cargo install rango-orm-cli --version 0.1.1
 ```
 
 This installs the `rango` binary.
