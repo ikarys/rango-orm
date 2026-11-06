@@ -13,7 +13,10 @@ pub mod row;
 pub mod schema;
 
 pub use backend::RangoBackend;
-pub use column::{Column, ColumnRef, FilterColumn, FilterValue, ForeignKeyRef, OrderRef, Ordering};
+pub use column::{
+    Column, ColumnRef, FilterColumn, FilterValue, ForeignKeyRef, ManyToManyField, OrderRef,
+    Ordering, PrefetchKind, PrefetchRef,
+};
 pub use config::{BackendKind, DatabaseConfig};
 pub use constraints::{
     CheckConstraint, Constraint, IndexDef, OrderBy, OrderDir, UniqueConstraint, asc,

@@ -115,6 +115,57 @@ impl<M, T> ForeignKeyRef<M, T> for Column<M, ForeignKey<T>> {}
 
 impl<M, T> ForeignKeyRef<M, T> for &str {}
 
+/// A `ManyToMany<R>` field on `M`: `#[derive(Model)]` generates `Article::TAGS` for a
+/// `tags: ManyToMany<Tag>` field. Not a column, so it only works with `prefetch_related`.
+pub struct ManyToManyField<M, R>(PhantomData<fn() -> (M, R)>);
+
+impl<M, R> ManyToManyField<M, R> {
+    /// Used by `#[derive(Model)]`; you rarely call it directly.
+    pub const fn new() -> Self {
+        Self(PhantomData)
+    }
+}
+
+impl<M, R> Default for ManyToManyField<M, R> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// How `prefetch_related` finds the `R` rows of each `M`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrefetchKind<'a> {
+    /// A column on R's table pointing back to M's primary key.
+    ReverseFk(&'a str),
+    /// Through the M2M pivot table (see [`crate::related::m2m_pivot`]).
+    ManyToMany,
+}
+
+/// Accepted by `prefetch_related`: a reverse foreign key (`Comment::POST_ID`, a
+/// `post_id: ForeignKey<Post>` field on `Comment`), a M2M field (`Article::TAGS`), or `&str`
+/// naming the reverse FK column (then name the model with `::<R>`).
+pub trait PrefetchRef<M, R> {
+    fn prefetch_kind(&self) -> PrefetchKind<'_>;
+}
+
+impl<M, R> PrefetchRef<M, R> for Column<R, ForeignKey<M>> {
+    fn prefetch_kind(&self) -> PrefetchKind<'_> {
+        PrefetchKind::ReverseFk(self.name)
+    }
+}
+
+impl<M, R> PrefetchRef<M, R> for &str {
+    fn prefetch_kind(&self) -> PrefetchKind<'_> {
+        PrefetchKind::ReverseFk(self)
+    }
+}
+
+impl<M, R> PrefetchRef<M, R> for ManyToManyField<M, R> {
+    fn prefetch_kind(&self) -> PrefetchKind<'_> {
+        PrefetchKind::ManyToMany
+    }
+}
+
 /// Accepted by `order_by`: `Column<M, T>` (ascending), `Ordering<M>` (from `.asc()` / `.desc()`),
 /// or `&str` where a leading `-` means descending (Django style).
 pub trait OrderRef<M> {

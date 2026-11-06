@@ -1,5 +1,6 @@
 use crate::error::db_err;
 use rango_core::Result;
+use rango_core::related::m2m_pivot;
 use rango_core::{FromRow, Model, ModelValues, quote_ident};
 use sqlx::PgPool;
 
@@ -19,18 +20,16 @@ where
     From: Model + ModelValues,
     To: Model + ModelValues + FromRow,
 {
-    /// Pivot table name: "{from_table}_{to_table}"
-    /// e.g. "geekizz_article_geekizz_tag" or custom via prefix
     fn pivot_table() -> String {
-        format!("{}_{}", From::table_name(), To::table_name())
+        m2m_pivot(From::table_name(), To::table_name()).0
     }
 
     fn from_col() -> String {
-        format!("{}_id", From::table_name())
+        m2m_pivot(From::table_name(), To::table_name()).1
     }
 
     fn to_col() -> String {
-        format!("{}_id", To::table_name())
+        m2m_pivot(From::table_name(), To::table_name()).2
     }
 
     /// Add a relation between from and to.

@@ -151,6 +151,22 @@ pub fn expand(input: DeriveInput) -> Result<TokenStream> {
             pub const #const_name: #core::Column<Self, #field_ty> = #core::Column::new(#col_name);
         });
     }
+    // `Article::TAGS` for `tags: ManyToMany<Tag>`, used by `prefetch_related`.
+    for f in fields.iter().filter(|f| is_many_to_many(&f.ty)) {
+        let fname = f.ident.as_ref().unwrap();
+        let const_name = syn::Ident::new(
+            &fname.to_string().trim_start_matches("r#").to_uppercase(),
+            fname.span(),
+        );
+        let Some(to_ty) = first_generic(&f.ty) else {
+            return Err(syn::Error::new_spanned(&f.ty, "expected ManyToMany<Model>"));
+        };
+        let doc = format!("Typed reference to the `{fname}` many-to-many relation.");
+        column_consts.push(quote! {
+            #[doc = #doc]
+            pub const #const_name: #core::ManyToManyField<Self, #to_ty> = #core::ManyToManyField::new();
+        });
+    }
 
     let comment_expr = match &model_attr.comment {
         Some(c) => quote! { Some(#c.to_string()) },
@@ -495,6 +511,18 @@ fn parse_two_generics_i64(s: &str, prefix: &str) -> (i64, i64) {
     } else {
         (i64::MIN, i64::MAX)
     }
+}
+
+/// The first generic argument of a path type: `T` in `ManyToMany<T>`.
+fn first_generic(ty: &Type) -> Option<&Type> {
+    let Type::Path(p) = ty else { return None };
+    let syn::PathArguments::AngleBracketed(args) = &p.path.segments.last()?.arguments else {
+        return None;
+    };
+    args.args.iter().find_map(|a| match a {
+        syn::GenericArgument::Type(t) => Some(t),
+        _ => None,
+    })
 }
 
 /// Returns true if the type is ManyToMany<T>.

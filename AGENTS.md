@@ -145,7 +145,7 @@ Design rules:
 | **Contraintes** ✅ | `CheckConstraint`, `UniqueConstraint` (simple et partial), `managed`, `ordering` — voir ci-dessous |
 | **Sous-requêtes** 🚧 | `where_exists(Article::AUTHOR_ID, |q| q.eq(..))` (EXISTS corrélé, `.not()` → NOT EXISTS) et `in_subquery(col, sub_col, |q| ..)` ✅ sur les trois backends. Reste : Rango détecte quand une sous-requête est plus efficace qu'un JOIN ou N+1 |
 | **select_related** ✅ | Un seul `LEFT JOIN` sur les trois backends (M filtré/paginé en sous-requête, colonnes de R préfixées `__r{i}_`) ; `all()` renvoie `Vec<WithRelated<M>>` partout |
-| **prefetch_related** 🚧 | FK inverse ✅ sur les trois backends (`= ANY($1)` en Postgres, `IN (...)` par lots de 900 ailleurs). Reste : M2M via la table pivot |
+| **prefetch_related** ✅ | FK inverse (`Comment::POST_ID`) et M2M (`Article::TAGS`, un `INNER JOIN` sur la table pivot) sur les trois backends ; `= ANY($1)` en Postgres, `IN (...)` par lots de 900 ailleurs |
 | **only / defer** | `.only(&["id", "email"])` / `.defer(&["password"])` → retourne type partiel ou `HashMap` |
 | **values** | `.values(&["id", "email"])` → `Vec<HashMap<String, SqlValue>>` |
 | **Contraintes** ✅ | `#[model(constraints = [CheckConstraint::new("age >= 18").name("chk_age"), UniqueConstraint::on(&["room", "date"]).name("uniq_booking")])]` — `CHECK (...)` inline dans `CREATE TABLE`; `UNIQUE (cols)` inline; `UNIQUE ... WHERE cond` → `CREATE UNIQUE INDEX ... WHERE ...` (partial index PostgreSQL). `managed = false` → table ignorée par les migrations. `ordering = [asc("col"), desc("other")]` → ordre par défaut injecté dans `schema()`. |

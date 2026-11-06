@@ -23,6 +23,22 @@ struct TestUser {
     score: Option<FieldInt>,
 }
 
+#[derive(Model, Debug, Clone)]
+#[model(table = "test_blog")]
+struct TestBlog {
+    id: FieldUuid,
+    title: FieldVarchar<1, 100>,
+    #[allow(dead_code)] // M2M fields are never read: relations load via prefetch_related
+    tags: ManyToMany<TestTag>,
+}
+
+#[derive(Model, Debug, Clone)]
+#[model(table = "test_tag")]
+struct TestTag {
+    id: FieldUuid,
+    name: FieldVarchar<1, 100>,
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 async fn pool() -> MySqlPool {
@@ -56,6 +72,128 @@ async fn setup(pool: &MySqlPool) {
     .execute(pool)
     .await
     .expect("setup failed");
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-mysql"), ignore)]
+async fn test_mysql_prefetch_related_many_to_many() {
+    let pool = pool().await;
+
+    sqlx::query(r#"DROP TABLE IF EXISTS `test_blog_test_tag`"#)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(r#"DROP TABLE IF EXISTS `test_blog`"#)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(r#"DROP TABLE IF EXISTS `test_tag`"#)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    sqlx::query(
+        r#"CREATE TABLE `test_blog` (
+            `id`    BINARY(16) PRIMARY KEY,
+            `title` VARCHAR(100) NOT NULL
+        ) ENGINE=InnoDB"#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        r#"CREATE TABLE `test_tag` (
+            `id`   BINARY(16) PRIMARY KEY,
+            `name` VARCHAR(100) NOT NULL
+        ) ENGINE=InnoDB"#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        r#"CREATE TABLE `test_blog_test_tag` (
+            `test_blog_id` BINARY(16) NOT NULL,
+            `test_tag_id`  BINARY(16) NOT NULL,
+            PRIMARY KEY (`test_blog_id`, `test_tag_id`)
+        ) ENGINE=InnoDB"#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let b1 = TestBlog {
+        id: FieldUuid(Uuid::new_v4()),
+        title: FieldVarchar("rust".to_string()),
+        tags: ManyToMany::empty(),
+    };
+    let b2 = TestBlog {
+        id: FieldUuid(Uuid::new_v4()),
+        title: FieldVarchar("empty".to_string()),
+        tags: ManyToMany::empty(),
+    };
+    let t1 = TestTag {
+        id: FieldUuid(Uuid::new_v4()),
+        name: FieldVarchar("orm".to_string()),
+    };
+    let t2 = TestTag {
+        id: FieldUuid(Uuid::new_v4()),
+        name: FieldVarchar("async".to_string()),
+    };
+
+    insert(&pool, b1.clone()).await.unwrap();
+    insert(&pool, b2.clone()).await.unwrap();
+    insert(&pool, t1.clone()).await.unwrap();
+    insert(&pool, t2.clone()).await.unwrap();
+
+    raw_execute(
+        &pool,
+        r#"INSERT INTO `test_blog_test_tag` (`test_blog_id`, `test_tag_id`) VALUES (?, ?)"#,
+        vec![SqlValue::Uuid(b1.id.0), SqlValue::Uuid(t1.id.0)],
+    )
+    .await
+    .unwrap();
+    raw_execute(
+        &pool,
+        r#"INSERT INTO `test_blog_test_tag` (`test_blog_id`, `test_tag_id`) VALUES (?, ?)"#,
+        vec![SqlValue::Uuid(b1.id.0), SqlValue::Uuid(t2.id.0)],
+    )
+    .await
+    .unwrap();
+
+    let blogs = TestBlog::filter(&pool)
+        .prefetch_related(TestBlog::TAGS)
+        .all()
+        .await
+        .unwrap();
+
+    assert_eq!(blogs.len(), 2);
+
+    let b1_blog = blogs.iter().find(|b| b.id.0 == b1.id.0).unwrap();
+    let b2_blog = blogs.iter().find(|b| b.id.0 == b2.id.0).unwrap();
+
+    let mut tag_names: Vec<String> = b1_blog
+        .prefetched::<TestTag>()
+        .iter()
+        .map(|t| t.name.0.clone())
+        .collect();
+    tag_names.sort();
+    assert_eq!(tag_names, vec!["async".to_string(), "orm".to_string()]);
+    assert_eq!(b2_blog.prefetched::<TestTag>().len(), 0);
+
+    sqlx::query(r#"DROP TABLE IF EXISTS `test_blog_test_tag`"#)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(r#"DROP TABLE IF EXISTS `test_blog`"#)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(r#"DROP TABLE IF EXISTS `test_tag`"#)
+        .execute(&pool)
+        .await
+        .unwrap();
 }
 
 fn user(email: &str) -> TestUser {

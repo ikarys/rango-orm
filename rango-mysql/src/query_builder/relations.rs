@@ -1,5 +1,8 @@
-use rango_core::related::{collect_vec_erased, erased_from_row};
-use rango_core::{ForeignKeyRef, FromRow, Model, ModelValues};
+use rango_core::related::{collect_vec_erased, erased_from_row, m2m_pivot};
+use rango_core::{
+    quote_ident_mysql as quote_ident, ForeignKeyRef, FromRow, Model, ModelValues, PrefetchKind,
+    PrefetchRef,
+};
 use std::any::TypeId;
 
 use super::*;
@@ -41,9 +44,10 @@ where
         self
     }
 
-    /// Prefetch all `R` rows whose FK column points back to M's PK.
+    /// Prefetch all `R` rows related to M, either by a reverse FK or a M2M pivot.
     ///
-    /// The FK is a column on **R's** table: `r.related_fk_col = m.pk`.
+    /// For a reverse FK, the FK is a column on **R's** table: `r.related_fk_col = m.pk`.
+    /// For a M2M field, the pivot table links M and R.
     /// After `.all()`, access the collection via `wr.prefetched::<R>()`.
     ///
     /// ```rust,ignore
@@ -55,15 +59,46 @@ where
     ///     println!("{} has {} comments", post.title, post.prefetched::<Comment>().len());
     /// }
     /// ```
-    pub fn prefetch_related<R>(mut self, related_fk_col: impl ForeignKeyRef<R, M>) -> Self
+    ///
+    /// ```rust,ignore
+    /// let articles = Article::filter(&pool)
+    ///     .prefetch_related(Article::TAGS) // `tags: ManyToMany<Tag>` on Article
+    ///     .all().await?;
+    /// for a in &articles { println!("{} tags", a.prefetched::<Tag>().len()); }
+    /// ```
+    pub fn prefetch_related<R>(mut self, target: impl PrefetchRef<M, R>) -> Self
     where
         R: Model + ModelValues + FromRow + Send + Sync + 'static,
     {
-        let related_fk_col = related_fk_col.column_name();
+        let (select, key_col) = match target.prefetch_kind() {
+            PrefetchKind::ReverseFk(col) => (
+                format!(
+                    "SELECT * FROM {} WHERE {}",
+                    quote_ident(R::table_name()),
+                    quote_ident(col),
+                ),
+                col.to_string(),
+            ),
+            PrefetchKind::ManyToMany => {
+                let (pivot, from_col, to_col) = m2m_pivot(M::table_name(), R::table_name());
+                let (p, t) = (quote_ident("__p"), quote_ident("__t"));
+                let select = format!(
+                    "SELECT {p}.{from} AS {key}, {t}.* FROM {to} AS {t} \
+                     INNER JOIN {pivot} AS {p} ON {t}.{pk} = {p}.{to_col} WHERE {p}.{from}",
+                    from = quote_ident(&from_col),
+                    key = quote_ident("__m2m_key"),
+                    to = quote_ident(R::table_name()),
+                    pivot = quote_ident(&pivot),
+                    pk = quote_ident(R::pk_column()),
+                    to_col = quote_ident(&to_col),
+                );
+                (select, "__m2m_key".to_string())
+            }
+        };
         self.prefetch_related.push(PrefetchSpec {
-            related_fk_col: related_fk_col.to_string(),
+            select,
+            key_col,
             vec_type_id: TypeId::of::<Vec<R>>(),
-            table_name: R::table_name(),
             from_row: erased_from_row::<R>,
             collect_vec: collect_vec_erased::<R>,
         });

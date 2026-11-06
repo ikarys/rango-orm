@@ -483,7 +483,8 @@ impl<M> ToSqlValue for Option<ForeignKey<M>> {
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ManyToMany<M>(
-    /// Cached related IDs — populated by prefetch_related, empty otherwise.
+    /// Always empty when loaded from the database: use `.prefetch_related(Model::FIELD)`
+    /// and `.prefetched::<M>()` to load the related rows.
     pub Vec<uuid::Uuid>,
     std::marker::PhantomData<M>,
 );

@@ -67,6 +67,28 @@ SELECT * FROM "myapp_comment" WHERE "post_id" = ANY($1)  -- $1: array of post id
 
 SQLite and MySQL have no array parameters: they send `WHERE "post_id" IN (?, ?, ...)` in batches of 900 keys. Every backend runs the main query and the prefetch queries on one connection, and `all()` returns `Vec<WithRelated<M>>` everywhere (it derefs to `M`, so `post.title` works as before).
 
+### Many-to-many
+
+Pass the `ManyToMany` field constant (`#[derive(Model)]` generates `Article::TAGS` for a `tags: ManyToMany<Tag>` field). One query joins the pivot table:
+
+```rust
+let articles = Article::filter(&pool)
+    .prefetch_related(Article::TAGS)
+    .all()
+    .await?;
+
+for article in &articles {
+    let tags = article.prefetched::<Tag>(); // &[Tag], zero SQL
+}
+```
+
+```sql
+SELECT "__p"."myapp_article_id" AS "__m2m_key", "__t".*
+FROM "myapp_tag" AS "__t"
+INNER JOIN "myapp_article_myapp_tag" AS "__p" ON "__t"."id" = "__p"."myapp_tag_id"
+WHERE "__p"."myapp_article_id" = ANY($1)
+```
+
 ## Combining both
 
 ```rust
