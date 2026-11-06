@@ -1248,3 +1248,50 @@ async fn test_unknown_column_is_rejected() {
             .map(|_| ()),
     );
 }
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration"), ignore)]
+async fn test_keyset_pagination_after_and_before() {
+    let pool = pool().await;
+    setup(&pool).await;
+
+    let users: Vec<TestUser> = (0..25)
+        .map(|i| user(&format!("page{i}@test.com")))
+        .collect();
+    bulk_create(&pool, &users).await.unwrap();
+    let mut ids: Vec<Uuid> = users.iter().map(|u| u.id.0).collect();
+    ids.sort();
+
+    // Forward: pages of 10 with `after(last id)`.
+    let mut seen = Vec::new();
+    let mut last: Option<Uuid> = None;
+    loop {
+        let mut q = TestUser::filter(&pool).limit(10);
+        if let Some(id) = last {
+            q = q.after(TestUser::ID, id);
+        }
+        let page = q.order_by(TestUser::ID).all().await.unwrap();
+        let Some(row) = page.last() else { break };
+        last = Some(row.id.0);
+        seen.extend(page.iter().map(|r| r.id.0));
+    }
+    assert_eq!(seen, ids);
+
+    // Backward: mirror with `before`, newest first.
+    let mut seen = Vec::new();
+    let mut first: Option<Uuid> = None;
+    loop {
+        let mut q = TestUser::filter(&pool).limit(10);
+        if let Some(id) = first {
+            q = q.before(TestUser::ID, id);
+        }
+        let page = q.order_by(TestUser::ID.desc()).all().await.unwrap();
+        let Some(row) = page.last() else { break };
+        first = Some(row.id.0);
+        seen.extend(page.iter().map(|r| r.id.0));
+    }
+    ids.reverse();
+    assert_eq!(seen, ids);
+
+    teardown(&pool).await;
+}
