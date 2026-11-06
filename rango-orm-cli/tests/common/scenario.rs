@@ -339,7 +339,7 @@ macro_rules! scenario {
                     big: FieldBigInt(1 << 40),
                     float: FieldFloat(1.5),
                     double: FieldDouble(2.25),
-                    dec: FieldDecimal(12.5),
+                    dec: FieldDecimal("12345678.90".parse().unwrap()),
                     text: FieldText("t".into()),
                     short: FieldVarchar("s".into()),
                     email: FieldEmail("s@rpx.test".into()),
@@ -360,6 +360,7 @@ macro_rules! scenario {
                 assert_eq!(got.small, sink.small);
                 assert_eq!(got.big, sink.big);
                 assert_eq!(got.dec, sink.dec);
+                assert_eq!(got.dec.0.to_string(), "12345678.90");
                 assert_eq!(got.bytes, sink.bytes);
                 assert_eq!(got.day, sink.day);
                 assert_eq!(got.at, sink.at);

@@ -14,6 +14,7 @@ macro_rules! bind {
             SqlValue::NullBigInt => $q.bind(Option::<i64>::None),
             SqlValue::NullFloat => $q.bind(Option::<f64>::None),
             SqlValue::NullDouble => $q.bind(Option::<f64>::None),
+            SqlValue::NullDecimal => $q.bind(Option::<String>::None),
             SqlValue::NullText => $q.bind(Option::<String>::None),
             SqlValue::NullBytes => $q.bind(Option::<Vec<u8>>::None),
             SqlValue::NullUuid => $q.bind(Option::<String>::None),
@@ -28,6 +29,8 @@ macro_rules! bind {
             SqlValue::BigInt(v) => $q.bind(v),
             SqlValue::Float(v) => $q.bind(v as f64),
             SqlValue::Double(v) => $q.bind(v),
+            // No decimal type in SQLite: the NUMERIC column affinity parses the text.
+            SqlValue::Decimal(v) => $q.bind(v.to_string()),
             SqlValue::Text(v) => $q.bind(v),
             SqlValue::Bytes(v) => $q.bind(v),
             SqlValue::Uuid(v) => $q.bind(v.to_string()),

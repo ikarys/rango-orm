@@ -132,6 +132,7 @@ fn sql_type_cast(val: &SqlValue) -> &'static str {
         | SqlValue::NullBigInt
         | SqlValue::NullFloat
         | SqlValue::NullDouble
+        | SqlValue::NullDecimal
         | SqlValue::NullText
         | SqlValue::NullBytes
         | SqlValue::NullUuid
@@ -145,6 +146,7 @@ fn sql_type_cast(val: &SqlValue) -> &'static str {
         SqlValue::BigInt(_) => "::int8",
         SqlValue::Float(_) => "::float4",
         SqlValue::Double(_) => "::float8",
+        SqlValue::Decimal(_) => "::numeric",
         SqlValue::Text(_) => "::text",
         SqlValue::Bytes(_) => "::bytea",
         SqlValue::Uuid(_) => "::uuid",
@@ -199,6 +201,7 @@ unnest_cols! {
     BigInt, NullBigInt, i64, "int8[]";
     Float, NullFloat, f32, "float4[]";
     Double, NullDouble, f64, "float8[]";
+    Decimal, NullDecimal, rango_orm_core::Decimal, "numeric[]";
     Text, NullText, String, "text[]";
     Bytes, NullBytes, Vec<u8>, "bytea[]";
     Uuid, NullUuid, uuid::Uuid, "uuid[]";

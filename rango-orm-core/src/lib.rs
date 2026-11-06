@@ -34,6 +34,7 @@ pub use query::{
 };
 pub use related::WithRelated;
 pub use row::{FromRow, Partial, RangoRow, RowError};
+pub use rust_decimal::Decimal;
 pub use schema::{
     ColumnDef, ColumnType, DefaultValue, FkReference, ReferentialAction, TableSchema,
 };

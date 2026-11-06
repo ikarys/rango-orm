@@ -253,7 +253,12 @@ where
                                     .unwrap_or(SqlValue::NullDouble)
                             })
                             .unwrap_or(SqlValue::NullDouble),
-                        "FLOAT8" | "NUMERIC" => row
+                        "NUMERIC" => row
+                            .try_get::<Option<rango_orm_core::Decimal>, _>(col)
+                            .ok()
+                            .map(|v| v.map(SqlValue::Decimal).unwrap_or(SqlValue::NullDecimal))
+                            .unwrap_or(SqlValue::NullDecimal),
+                        "FLOAT8" => row
                             .try_get::<Option<f64>, _>(col)
                             .ok()
                             .map(|v| v.map(SqlValue::Double).unwrap_or(SqlValue::NullDouble))

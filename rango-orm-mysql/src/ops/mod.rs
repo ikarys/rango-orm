@@ -14,6 +14,7 @@ macro_rules! bind {
             SqlValue::NullBigInt => $q.bind(Option::<i64>::None),
             SqlValue::NullFloat => $q.bind(Option::<f32>::None),
             SqlValue::NullDouble => $q.bind(Option::<f64>::None),
+            SqlValue::NullDecimal => $q.bind(Option::<rango_orm_core::Decimal>::None),
             SqlValue::NullText => $q.bind(Option::<String>::None),
             SqlValue::NullBytes => $q.bind(Option::<Vec<u8>>::None),
             SqlValue::NullUuid => $q.bind(Option::<Vec<u8>>::None),
@@ -28,6 +29,7 @@ macro_rules! bind {
             SqlValue::BigInt(v) => $q.bind(v),
             SqlValue::Float(v) => $q.bind(v),
             SqlValue::Double(v) => $q.bind(v),
+            SqlValue::Decimal(v) => $q.bind(v),
             SqlValue::Text(v) => $q.bind(v),
             SqlValue::Bytes(v) => $q.bind(v),
             // UUIDs live in BINARY(16), big-endian bytes (same order as UUID_TO_BIN(x, 0))

@@ -29,7 +29,7 @@ All field types live in `rango::prelude::*`.
 
 | Rust type | SQL (Postgres) | SQL (SQLite) | Notes |
 |---|---|---|---|
-| `FieldDecimal<P, S>` | `NUMERIC(P, S)` | `REAL` | P = precision, S = scale |
+| `FieldDecimal<P, S>` | `NUMERIC(P, S)` | `NUMERIC` | P = precision, S = scale. Wraps `rango::Decimal` (exact). SQLite is exact up to 15 digits through the numeric column, beyond that the digits are kept as text |
 | `FieldRange<MIN, MAX>` | `BIGINT` | `INTEGER` | Compile-time range check |
 
 ## Date/time types

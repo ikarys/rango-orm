@@ -117,8 +117,31 @@ async fn export_postgres(database_url: &str, requested: &[String]) -> Result<Vec
     for t in tables {
         // to_jsonb renders every column type (uuid, timestamps, numeric, ...) as JSON,
         // and the import side casts it back with jsonb_populate_record.
-        let sql = format!("SELECT to_jsonb(t)::text FROM {} t", quote_ident(&t));
-        let texts: Vec<String> = sqlx::query_scalar(&sql)
+        // NUMERIC columns are overwritten with their text, so the JSON keeps every digit
+        // (a JSON number would go through f64 when read back).
+        let mut sql = format!("SELECT to_jsonb(t)::text FROM {} t", quote_ident(&t));
+        let numeric: Vec<String> =
+            super::import::columns_of_type_postgres(&mut conn, &t, "numeric")
+                .await?
+                .into_iter()
+                .collect();
+        if !numeric.is_empty() {
+            let pairs = numeric
+                .iter()
+                .enumerate()
+                .map(|(i, c)| format!("${}::text, t.{}::text", i + 1, quote_ident(c)))
+                .collect::<Vec<_>>()
+                .join(", ");
+            sql = format!(
+                "SELECT (to_jsonb(t) || jsonb_build_object({pairs}))::text FROM {} t",
+                quote_ident(&t)
+            );
+        }
+        let mut query = sqlx::query_scalar::<_, String>(&sql);
+        for c in &numeric {
+            query = query.bind(c);
+        }
+        let texts: Vec<String> = query
             .fetch_all(&pool)
             .await
             .with_context(|| format!("Failed to export table {}", t))?;
@@ -379,7 +402,8 @@ fn mysql_column_to_json(
             .unwrap_or(serde_json::Value::Null);
     }
 
-    if matches!(type_name.as_str(), "FLOAT" | "DOUBLE" | "DECIMAL") {
+    // DECIMAL stays text: a JSON number would lose digits and trailing zeros.
+    if matches!(type_name.as_str(), "FLOAT" | "DOUBLE") {
         return parse_f64_bytes(&bytes)
             .and_then(serde_json::Number::from_f64)
             .map(serde_json::Value::Number)

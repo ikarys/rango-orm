@@ -58,6 +58,6 @@ Restore a backup:
 rango restore backups/rango-backup-20261106-142500.json.gz
 ```
 
-Decimal values go through JSON numbers, so trailing zeros are not kept (`0.50` comes back as `0.5`); the value is the same.
+Decimal values are written as JSON strings (`"0.50"`), so no digit is lost. Binary columns are base64 strings (dumps of version 1 used `\\x` hex and are still read).
 
 Dumps contain all your data. Keep them out of git and treat them as secrets.

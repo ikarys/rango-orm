@@ -713,7 +713,7 @@ fn sql_type(col_type: &ColumnType, backend: BackendKind) -> String {
             ColumnType::AutoInt | ColumnType::AutoBigInt => "INTEGER".into(),
             ColumnType::Float => "REAL".into(),
             ColumnType::Double => "REAL".into(),
-            ColumnType::Decimal { .. } => "REAL".into(),
+            ColumnType::Decimal { .. } => "NUMERIC".into(),
             ColumnType::Text => "TEXT".into(),
             ColumnType::Bytea => "BLOB".into(),
             ColumnType::Uuid => "TEXT".into(), // stored as UUID string

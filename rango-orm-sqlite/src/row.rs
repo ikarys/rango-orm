@@ -43,6 +43,19 @@ impl RangoRow for SqliteRowRef<'_> {
             .try_get(col)
             .map_err(|e| RowError(format!("{}: {}", col, e)))
     }
+    fn get_decimal(&self, col: &str) -> Result<rango_orm_core::Decimal, RowError> {
+        // NUMERIC affinity keeps a value as INTEGER or REAL when that is lossless and as
+        // TEXT otherwise (more than 15 digits), so the text is the exact one.
+        let err = |e: &dyn std::fmt::Display| RowError(format!("{}: {}", col, e));
+        if let Ok(s) = self.0.try_get::<String, _>(col) {
+            return s.parse().map_err(|e| err(&e));
+        }
+        if let Ok(n) = self.0.try_get::<i64, _>(col) {
+            return Ok(n.into());
+        }
+        let f: f64 = self.0.try_get(col).map_err(|e| err(&e))?;
+        rango_orm_core::Decimal::try_from(f).map_err(|e| err(&e))
+    }
     fn get_string(&self, col: &str) -> Result<String, RowError> {
         self.0
             .try_get(col)
@@ -119,6 +132,9 @@ impl RangoRow for SqliteRangoRow {
     fn get_f64(&self, col: &str) -> Result<f64, RowError> {
         SqliteRowRef(&self.0).get_f64(col)
     }
+    fn get_decimal(&self, col: &str) -> Result<rango_orm_core::Decimal, RowError> {
+        SqliteRowRef(&self.0).get_decimal(col)
+    }
     fn get_string(&self, col: &str) -> Result<String, RowError> {
         SqliteRowRef(&self.0).get_string(col)
     }
@@ -180,6 +196,9 @@ impl RangoRow for SqlitePrefixedRow<'_> {
     }
     fn get_f64(&self, col: &str) -> Result<f64, RowError> {
         SqliteRowRef(self.row).get_f64(&self.col(col))
+    }
+    fn get_decimal(&self, col: &str) -> Result<rango_orm_core::Decimal, RowError> {
+        SqliteRowRef(self.row).get_decimal(&self.col(col))
     }
     fn get_string(&self, col: &str) -> Result<String, RowError> {
         SqliteRowRef(self.row).get_string(&self.col(col))
