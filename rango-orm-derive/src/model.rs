@@ -105,7 +105,9 @@ pub fn expand(input: DeriveInput) -> Result<TokenStream> {
                 #core::ToSqlValue::to_sql_value(&self.#fname)
             };
             let ty = &f.ty;
-            match quote!(#ty).to_string().replace(' ', "").as_str() {
+            let ty_str = quote!(#ty).to_string().replace(' ', "");
+            // Path-qualified types too (`#[rango::model]` injects `rango_core::FieldAutoBigInt`).
+            match ty_str.rsplit("::").next().unwrap_or("") {
                 "FieldAutoInt" => {
                     set_pk_body =
                         quote! { self.#fname = #core::FieldAutoInt(i32::try_from(id).ok()); };
@@ -396,9 +398,8 @@ fn generate_column_def(field: &Field, core: &TokenStream) -> Result<TokenStream>
     // Same rules and defaults as `rango makemigrations`, so the compiled schema and the
     // migrated one cannot drift (see rango-orm-cli/tests/contract.rs).
     let references = if is_foreign_key {
-        let target = first_generic(inner_ty).ok_or_else(|| {
-            syn::Error::new_spanned(&field.ty, "expected ForeignKey<Model>")
-        })?;
+        let target = first_generic(inner_ty)
+            .ok_or_else(|| syn::Error::new_spanned(&field.ty, "expected ForeignKey<Model>"))?;
         let action = match attr.on_delete.as_deref() {
             None | Some("cascade") => quote! { Cascade },
             Some("set_null") => {
