@@ -188,7 +188,7 @@ async fn test_select_and_prefetch_related() {
     );
 
     let users = TestUser::filter(&pool)
-        .prefetch_related::<TestPost>("author_id")
+        .prefetch_related(TestPost::AUTHOR_ID)
         .all()
         .await
         .unwrap();
@@ -202,6 +202,47 @@ async fn test_select_and_prefetch_related() {
     };
     assert_eq!(posts_of(&alice), 2);
     assert_eq!(posts_of(&bob), 0);
+
+    // select_related is one LEFT JOIN; ORDER BY / LIMIT apply to posts.
+    let q = TestPost::filter(&pool)
+        .select_related(TestPost::AUTHOR_ID)
+        .order_by("-title")
+        .limit(1);
+    assert!(q.explain().contains("LEFT JOIN"), "{}", q.explain());
+    let posts = q.all().await.unwrap();
+    assert_eq!(posts.len(), 1);
+    assert_eq!(posts[0].title.0, "second");
+    assert_eq!(posts[0].related::<TestUser>().email, alice.email);
+
+    // EXISTS / NOT EXISTS on the reverse FK.
+    let with_posts = TestUser::filter(&pool)
+        .where_exists(TestPost::AUTHOR_ID, |q| q.eq(TestPost::TITLE, "first"))
+        .all()
+        .await
+        .unwrap();
+    assert_eq!(with_posts.len(), 1);
+    assert_eq!(with_posts[0].email, alice.email);
+    let without_posts = TestUser::filter(&pool)
+        .not()
+        .where_exists(TestPost::AUTHOR_ID, |q| q)
+        .all()
+        .await
+        .unwrap();
+    assert_eq!(without_posts.len(), 1);
+    assert_eq!(without_posts[0].email, bob.email);
+
+    // IN (subquery), combined with OR and a bound value before and after it.
+    let posts = TestPost::filter(&pool)
+        .eq("title", "nope".to_string())
+        .or()
+        .in_subquery(TestPost::AUTHOR_ID, TestUser::ID, |q| {
+            q.eq(TestUser::EMAIL, alice.email.0.clone())
+        })
+        .eq("published", true)
+        .all()
+        .await
+        .unwrap();
+    assert_eq!(posts.len(), 2);
 
     teardown(&pool).await;
 }

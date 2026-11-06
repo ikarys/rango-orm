@@ -4,7 +4,7 @@ A Django-inspired async ORM for Rust: define a struct, Rango generates the schem
 
 [![CI](https://github.com/ikarys/rango-orm/actions/workflows/ci.yml/badge.svg)](https://github.com/ikarys/rango-orm/actions/workflows/ci.yml) [![codecov](https://codecov.io/gh/ikarys/rango-orm/graph/badge.svg)](https://codecov.io/gh/ikarys/rango-orm)
 
-> Work in progress: API is not stable, and Rango is not on crates.io yet.
+> Beta (`v0.1.0-beta.1`): the API may still change between betas. Not on crates.io yet.
 
 ## Why Rango
 

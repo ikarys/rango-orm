@@ -1,7 +1,7 @@
 use crate::ops::DEFAULT_QUERY_LIMIT;
 use crate::related::WithRelated;
-use crate::row::{PgRangoRow, PgRangoRow2};
-use rango_core::{ColumnRef, FromRow, Model, ModelValues, SqlValue, quote_ident};
+use crate::row::{PgPrefixedRow, PgRangoRow, PgRangoRow2};
+use rango_core::{ColumnRef, FromRow, Model, ModelValues, RangoRow, SqlValue, quote_ident};
 use rango_core::{Error, Result};
 use sqlx::Postgres;
 use std::any::Any;
@@ -22,102 +22,37 @@ where
     /// Returns `Vec<WithRelated<M>>` — each item derefs to `M`, and related
     /// objects are accessible via `.related::<R>()` / `.prefetched::<R>()`.
     pub async fn all(self) -> Result<Vec<WithRelated<M>>> {
-        let table = M::table_name();
-        let (where_clause, binds) = self.build_where();
+        let (sql, binds) = self.select_sql();
 
-        let mut sql = format!("SELECT * FROM {}", quote_ident(table));
-        if !where_clause.is_empty() {
-            sql.push(' ');
-            sql.push_str(&where_clause);
-        }
-        if !self.order_by.is_empty() {
-            sql.push_str(&format!(" ORDER BY {}", self.order_by.join(", ")));
-        }
-        // Apply the default row cap when neither .limit() nor .unlimited() was called.
-        if !self.explicit_limit {
-            sql.push_str(&format!(" LIMIT {}", DEFAULT_QUERY_LIMIT));
-        } else if let Some(l) = self.limit {
-            sql.push_str(&format!(" LIMIT {}", l));
-        }
-        // explicit_limit=true, limit=None → .unlimited() was called; no LIMIT clause added
-        if let Some(o) = self.offset {
-            sql.push_str(&format!(" OFFSET {}", o));
-        }
-
-        // One connection for the main query and every relation query: one pool round-trip.
+        // One connection for the main query and every prefetch query: one pool round-trip.
         let mut conn = self.pool.acquire().await.map_err(db_err)?;
         let rows = bind_and_fetch_all(&mut *conn, &sql, binds).await?;
         let mut results: Vec<WithRelated<M>> = Vec::with_capacity(rows.len());
-        for row in rows {
-            results.push(WithRelated::new(M::from_row(&PgRangoRow(row))?));
+        if self.select_related.is_empty() {
+            for row in rows {
+                results.push(WithRelated::new(M::from_row(&PgRangoRow(row))?));
+            }
+        } else {
+            // ── select_related: R's columns came back in the same row (LEFT JOIN) ──
+            for row in &rows {
+                let mut wr = WithRelated::new(M::from_row(&PgRangoRow2::new(row))?);
+                for (i, spec) in self.select_related.iter().enumerate() {
+                    let r_row = PgPrefixedRow::new(row, format!("__r{i}_"));
+                    // NULL primary key: no matching R (NULL or dangling FK).
+                    if r_row.is_null(spec.pk_col) {
+                        continue;
+                    }
+                    let boxed = (spec.from_row)(&r_row).map_err(|e| {
+                        Error::Decode(format!("select_related({}): {}", spec.fk_col, e))
+                    })?;
+                    wr.insert_raw(spec.type_id, boxed);
+                }
+                results.push(wr);
+            }
         }
 
         if results.is_empty() {
             return Ok(results);
-        }
-
-        // ── select_related: FK on M, bulk-fetch R by PK ───────────────────────
-        for spec in &self.select_related {
-            // Pair each result index with its FK value.
-            let indexed_fks: Vec<(usize, SqlValue)> = results
-                .iter()
-                .enumerate()
-                .filter_map(|(i, wr)| {
-                    wr.inner
-                        .field_values()
-                        .into_iter()
-                        .find(|(c, _)| *c == spec.fk_col.as_str())
-                        .map(|(_, v)| (i, v))
-                })
-                .collect();
-
-            if indexed_fks.is_empty() {
-                continue;
-            }
-
-            // Deduplicate FK values while preserving order.
-            let mut seen: HashSet<String> = HashSet::new();
-            let mut unique_vals: Vec<SqlValue> = Vec::new();
-            for (_, v) in &indexed_fks {
-                if let Some(k) = sql_value_key(v)
-                    && seen.insert(k)
-                {
-                    unique_vals.push(v.clone());
-                }
-            }
-            if unique_vals.is_empty() {
-                continue;
-            }
-
-            let placeholders: Vec<String> =
-                (1..=unique_vals.len()).map(|i| format!("${}", i)).collect();
-            let related_sql = format!(
-                "SELECT * FROM {} WHERE {} IN ({})",
-                quote_ident(spec.table_name),
-                quote_ident(spec.pk_col),
-                placeholders.join(", "),
-            );
-
-            let related_rows = bind_and_fetch_all(&mut *conn, &related_sql, unique_vals).await?;
-
-            // Map pk key → PgRow (re-used for each M that shares the same FK).
-            let mut row_by_pk: HashMap<String, sqlx::postgres::PgRow> = HashMap::new();
-            for row in related_rows {
-                if let Some(k) = extract_key_from_row(&row, spec.pk_col) {
-                    row_by_pk.insert(k, row);
-                }
-            }
-
-            for (i, fk_val) in &indexed_fks {
-                if let Some(fk_key) = sql_value_key(fk_val)
-                    && let Some(row) = row_by_pk.get(&fk_key)
-                {
-                    let boxed = (spec.from_row)(&PgRangoRow2::new(row)).map_err(|e| {
-                        Error::Decode(format!("select_related({}): {}", spec.fk_col, e))
-                    })?;
-                    results[*i].insert_raw(spec.type_id, boxed);
-                }
-            }
         }
 
         // ── prefetch_related: FK on R, bulk-fetch and group by M PK ──────────
@@ -141,16 +76,15 @@ where
                 continue;
             }
 
-            let placeholders: Vec<String> =
-                (1..=unique_pks.len()).map(|i| format!("${}", i)).collect();
+            // `= ANY($1)`: one array parameter, so the statement text (and its cached
+            // plan) is the same whatever the number of keys, and there is no
+            // 65 535-parameter cap.
             let prefetch_sql = format!(
-                "SELECT * FROM {} WHERE {} IN ({})",
+                "SELECT * FROM {} WHERE {} = ANY($1)",
                 quote_ident(spec.table_name),
                 quote_ident(&spec.related_fk_col),
-                placeholders.join(", "),
             );
-
-            let prefetch_rows = bind_and_fetch_all(&mut *conn, &prefetch_sql, unique_pks).await?;
+            let prefetch_rows = fetch_by_keys(&mut *conn, &prefetch_sql, unique_pks).await?;
 
             // Group boxed R items by the FK value they carry.
             let mut grouped: HashMap<String, Vec<Box<dyn Any + Send + Sync>>> = HashMap::new();

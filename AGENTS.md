@@ -143,8 +143,8 @@ Design rules:
 | **Relations FK** | `ForeignKey<User>` → vrai `ON DELETE CASCADE` SQL |
 | **ManyToMany** | Table pivot auto-générée, `.add()` `.remove()` `.all()` |
 | **Contraintes** ✅ | `CheckConstraint`, `UniqueConstraint` (simple et partial), `managed`, `ordering` — voir ci-dessous |
-| **Sous-requêtes** | Rango détecte quand une sous-requête est plus efficace qu'un JOIN ou N+1 |
-| **select_related** | Charge les FK en un seul JOIN au lieu de N requêtes |
+| **Sous-requêtes** 🚧 | `where_exists(Article::AUTHOR_ID, |q| q.eq(..))` (EXISTS corrélé, `.not()` → NOT EXISTS) et `in_subquery(col, sub_col, |q| ..)` ✅ sur les trois backends. Reste : Rango détecte quand une sous-requête est plus efficace qu'un JOIN ou N+1 |
+| **select_related** ✅ | Postgres : un seul `LEFT JOIN` (M filtré/paginé en sous-requête, colonnes de R préfixées `__r{i}_`). SQLite / MySQL : pas encore |
 | **prefetch_related** | Charge les M2M en une requête séparée optimisée |
 | **only / defer** | `.only(&["id", "email"])` / `.defer(&["password"])` → retourne type partiel ou `HashMap` |
 | **values** | `.values(&["id", "email"])` → `Vec<HashMap<String, SqlValue>>` |
@@ -174,7 +174,7 @@ Rango doit être **intelligent** sur le SQL généré :
 ```rust
 // Rango génère automatiquement une sous-requête efficace
 let active_users = User::filter(&pool)
-    .exists(Article::filter().eq("published", true))  // sous-requête
+    .where_exists(Article::AUTHOR_ID, |q| q.eq(Article::PUBLISHED, true))  // sous-requête
     .all()
     .await?;
 // → SELECT * FROM "user" WHERE EXISTS (SELECT 1 FROM "article" WHERE published = true AND user_id = "user".id)

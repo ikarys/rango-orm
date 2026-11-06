@@ -135,6 +135,49 @@ async fn test_sqlite_filter_eq() {
 
 #[tokio::test]
 #[cfg_attr(not(feature = "integration-sqlite"), ignore)]
+async fn test_sqlite_subqueries() {
+    let pool = pool().await;
+    setup(&pool).await;
+
+    insert(&pool, user("a@sqlite.com")).await.unwrap();
+    let mut inactive = user("b@sqlite.com");
+    inactive.active = FieldBool(false);
+    insert(&pool, inactive).await.unwrap();
+
+    // Self-referencing EXISTS: exercises the inner-table alias and bind order.
+    let active = TestUser::filter(&pool)
+        .eq("email", "b@sqlite.com".to_string())
+        .or()
+        .where_exists::<TestUser>("id", |q| q.eq("active", 1i32))
+        .order_by("email")
+        .all()
+        .await
+        .unwrap();
+    assert_eq!(
+        active
+            .iter()
+            .map(|u| u.email.0.as_str())
+            .collect::<Vec<_>>(),
+        ["a@sqlite.com", "b@sqlite.com"]
+    );
+
+    let inactive = TestUser::filter(&pool)
+        .not()
+        .in_subquery(TestUser::ID, TestUser::ID, |q| q.eq("active", 1i32))
+        .all()
+        .await
+        .unwrap();
+    assert_eq!(
+        inactive
+            .iter()
+            .map(|u| u.email.0.as_str())
+            .collect::<Vec<_>>(),
+        ["b@sqlite.com"]
+    );
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-sqlite"), ignore)]
 async fn test_sqlite_count_and_exists() {
     let pool = pool().await;
     setup(&pool).await;

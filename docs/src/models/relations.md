@@ -29,7 +29,7 @@ Load the related model in a single JOIN:
 
 ```rust
 let results = Post::filter(&pool)
-    .select_related::<User>("author_id")
+    .select_related(Post::AUTHOR_ID)
     .all()
     .await?;
 
@@ -87,11 +87,11 @@ let exists = M2M::<Article, Tag>::exists(&pool, &article, &tag).await?;
 
 ## prefetch_related
 
-Load reverse FK or M2M relations in a single batched query (no N+1):
+Load reverse foreign key relations in one batched query (no N+1):
 
 ```rust
 let posts = Post::filter(&pool)
-    .prefetch_related::<Comment>("post_id")
+    .prefetch_related(Comment::POST_ID)
     .all()
     .await?;
 

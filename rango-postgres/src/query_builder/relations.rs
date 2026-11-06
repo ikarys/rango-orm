@@ -1,5 +1,5 @@
 use rango_core::Result;
-use rango_core::{FromRow, Model, ModelValues, RowError, SqlValue};
+use rango_core::{ForeignKeyRef, FromRow, Model, ModelValues, RowError, SqlValue};
 use std::any::{Any, TypeId};
 // ─── Bind helpers ─────────────────────────────────────────────────────────────
 
@@ -19,17 +19,18 @@ where
     ///
     /// ```rust,ignore
     /// let posts: Vec<WithRelated<Post>> = Post::filter(&pool)
-    ///     .select_related::<Author>("author_id")
+    ///     .select_related(Post::AUTHOR_ID) // `author_id: ForeignKey<Author>`, so R = Author
     ///     .all().await?;
     ///
     /// for post in &posts {
     ///     println!("{} by {}", post.title, post.related::<Author>().name);
     /// }
     /// ```
-    pub fn select_related<R>(mut self, fk_col: &str) -> Self
+    pub fn select_related<R>(mut self, fk_col: impl ForeignKeyRef<M, R>) -> Self
     where
         R: Model + ModelValues + FromRow + Send + Sync + 'static,
     {
+        let fk_col = fk_col.column_name();
         self.select_related_specs.push((
             fk_col.to_string(),
             R::table_name().to_string(),
@@ -40,6 +41,7 @@ where
             type_id: TypeId::of::<R>(),
             table_name: R::table_name(),
             pk_col: R::pk_column(),
+            columns: R::schema().columns.into_iter().map(|c| c.name).collect(),
             from_row: erased_from_row::<R>,
         });
         self
@@ -52,17 +54,18 @@ where
     ///
     /// ```rust,ignore
     /// let posts: Vec<WithRelated<Post>> = Post::filter(&pool)
-    ///     .prefetch_related::<Comment>("post_id")
+    ///     .prefetch_related(Comment::POST_ID) // `post_id: ForeignKey<Post>` on Comment
     ///     .all().await?;
     ///
     /// for post in &posts {
     ///     println!("{} has {} comments", post.title, post.prefetched::<Comment>().len());
     /// }
     /// ```
-    pub fn prefetch_related<R>(mut self, related_fk_col: &str) -> Self
+    pub fn prefetch_related<R>(mut self, related_fk_col: impl ForeignKeyRef<R, M>) -> Self
     where
         R: Model + ModelValues + FromRow + Send + Sync + 'static,
     {
+        let related_fk_col = related_fk_col.column_name();
         self.prefetch_specs.push((
             R::table_name().to_string(),
             R::pk_column().to_string(),

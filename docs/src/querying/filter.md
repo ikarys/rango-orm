@@ -92,6 +92,42 @@ User::filter(&pool)
 // → WHERE "active" = $1 AND ("role" = $2 OR "role" = $3)
 ```
 
+## Subqueries
+
+Filter on another table without loading it. The closure gets an empty `filter()` on the other model and adds conditions to it; only those conditions are used (ordering, limit and relations are ignored). The foreign key column tells Rango which model the subquery runs on. Values stay bound parameters.
+
+`where_exists` keeps rows that have at least one related row through a foreign key pointing at them:
+
+```rust
+// Users with at least one published article
+let authors = User::filter(&pool)
+    .where_exists(Article::AUTHOR_ID, |q| q.eq(Article::PUBLISHED, true))
+    .all()
+    .await?;
+// WHERE EXISTS (SELECT 1 FROM "article"
+//               WHERE "article"."author_id" = "user"."id" AND ("published" = $1))
+
+// Users without any article
+let idle = User::filter(&pool)
+    .not()
+    .where_exists(Article::AUTHOR_ID, |q| q)
+    .all()
+    .await?;
+```
+
+`in_subquery` compares a column with the values another query returns:
+
+```rust
+// Posts written by active users
+let posts = Post::filter(&pool)
+    .in_subquery(Post::AUTHOR_ID, User::ID, |q| q.eq(User::ACTIVE, true))
+    .all()
+    .await?;
+// WHERE "author_id" IN (SELECT "id" FROM "user" WHERE "active" = $1)
+```
+
+Both compose with `.or()`, `.not()` and `.group()` like any other filter. For "has none", use `.not().where_exists(...)` rather than `.not().in_subquery(...)`: `NOT IN` matches nothing as soon as the subquery returns a `NULL`.
+
 ## Ordering, limit, offset
 
 ```rust

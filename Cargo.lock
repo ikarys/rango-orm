@@ -1339,6 +1339,7 @@ dependencies = [
  "rango-core",
  "serde_json",
  "sqlx",
+ "tokio",
  "uuid",
 ]
 
@@ -1364,6 +1365,7 @@ dependencies = [
  "rango-core",
  "serde_json",
  "sqlx",
+ "tokio",
  "uuid",
 ]
 

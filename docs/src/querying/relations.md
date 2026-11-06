@@ -17,11 +17,11 @@ Rango solves this with `select_related` and `prefetch_related`.
 
 ## select_related (FK → JOIN)
 
-For direct foreign keys — executes a single JOIN:
+For direct foreign keys: one query, with a `LEFT JOIN` per related model:
 
 ```rust
 let posts = Post::filter(&pool)
-    .select_related::<User>("author_id")
+    .select_related(Post::AUTHOR_ID)
     .all()
     .await?;
 
@@ -33,18 +33,20 @@ for post in &posts {
 
 SQL generated:
 ```sql
-SELECT t1.*, t2."id" AS "t2_id", t2."name" AS "t2_name", ...
-FROM "myapp_post" t1
-INNER JOIN "myapp_user" t2 ON t1."author_id" = t2."id"
+SELECT "__m".*, "__r0"."id" AS "__r0_id", "__r0"."name" AS "__r0_name", ...
+FROM (SELECT * FROM "myapp_post" WHERE ... ORDER BY ... LIMIT 1000) AS "__m"
+LEFT JOIN "myapp_user" AS "__r0" ON "__r0"."id" = "__m"."author_id"
 ```
 
-## prefetch_related (reverse FK → batch IN)
+Filters, ordering and `LIMIT` apply to the posts before the join. A post whose FK is `NULL` comes back without a related object: `.related::<User>()` panics on it, so only use `select_related` on nullable FKs when you know they are set.
 
-For reverse FK or M2M — executes a second batched query:
+## prefetch_related (reverse FK → one batched query)
+
+For reverse foreign keys (`Comment.post_id → Post`), one second batched query:
 
 ```rust
 let posts = Post::filter(&pool)
-    .prefetch_related::<Comment>("post_id")
+    .prefetch_related(Comment::POST_ID)
     .all()
     .await?;
 
@@ -60,23 +62,21 @@ SQL generated:
 SELECT * FROM "myapp_post"
 
 -- Query 2
-SELECT * FROM "myapp_comment" WHERE "post_id" IN ($1, $2, $3, ...)
+SELECT * FROM "myapp_comment" WHERE "post_id" = ANY($1)  -- $1: array of post ids
 ```
 
 ## Combining both
 
 ```rust
 let posts = Post::filter(&pool)
-    .select_related::<User>("author_id")      // FK → JOIN
-    .prefetch_related::<Comment>("post_id")   // reverse → batch IN
-    .prefetch_related::<Tag>("post_id")       // M2M → batch IN
+    .select_related(Post::AUTHOR_ID)      // FK → JOIN
+    .prefetch_related(Comment::POST_ID)   // reverse → batch IN
     .all()
     .await?;
 
 for post in &posts {
     let author   = post.related::<User>();
     let comments = post.prefetched::<Comment>();
-    let tags     = post.prefetched::<Tag>();
 }
 ```
 
@@ -87,10 +87,12 @@ Calling `.related::<R>()` or `.prefetched::<R>()` without the corresponding
 
 ```
 thread panicked: select_related<User> was not loaded;
-add .select_related::<User>("col") to the QueryBuilder chain
+add .select_related(..) for User to the QueryBuilder chain
 ```
 
 ## Large result sets
+
+Both queries run on the same pooled connection. The keys are bound as one array parameter, so the statement is the same for 1 or 50 000 posts and is prepared once.
 
 `prefetch_related` should only be used with paginated results.
 Loading 10 000 posts and prefetching all their comments will use significant memory.
