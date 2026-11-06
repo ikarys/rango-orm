@@ -609,6 +609,10 @@ fn column_definition(table: &str, col: &ColumnDef, backend: BackendKind) -> Stri
 
         if let Some(default) = &col.default {
             match default {
+                // SQLite has no `now()`; its keyword form is accepted as a column default.
+                DefaultValue::CurrentTimestamp if backend == BackendKind::Sqlite => {
+                    def.push_str(" DEFAULT CURRENT_TIMESTAMP")
+                }
                 DefaultValue::CurrentTimestamp => def.push_str(" DEFAULT now()"),
                 DefaultValue::Literal(v) => def.push_str(&format!(" DEFAULT {}", v)),
                 DefaultValue::GeneratedUuid => def.push_str(" DEFAULT gen_random_uuid()"),
