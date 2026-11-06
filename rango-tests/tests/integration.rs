@@ -1214,3 +1214,85 @@ async fn test_unknown_column_is_rejected() {
             .map(|_| ()),
     );
 }
+
+// ── Partial selects ───────────────────────────────────────────────────────────
+
+#[derive(Model, Debug, Clone)]
+#[model(table = "rango_test_partial_person")]
+struct TestPartialPerson {
+    id: FieldUuid,
+    #[field(column = "full_name")]
+    name: FieldVarchar<1, 100>,
+    age: FieldInt,
+    nick: Option<FieldText>,
+}
+
+#[derive(rango_orm_derive::Partial, Debug, PartialEq)]
+#[partial(model = TestPartialPerson)]
+struct PersonLite {
+    name: FieldVarchar<1, 100>,
+    nick: Option<FieldText>,
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration"), ignore)]
+async fn test_pg_select_as_partial() {
+    let pool = pool().await;
+    sqlx::query(r#"DROP TABLE IF EXISTS "rango_test_partial_person""#)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(r#"CREATE TABLE "rango_test_partial_person" ("id" UUID PRIMARY KEY, "full_name" VARCHAR(100) NOT NULL, "age" INTEGER NOT NULL, "nick" TEXT)"#).execute(&pool).await.unwrap();
+
+    for (name, age, nick) in [
+        ("Cleo", 40, None),
+        ("Ann", 30, Some("annie")),
+        ("Bob", 30, None),
+    ] {
+        let person = TestPartialPerson {
+            id: FieldUuid(Uuid::new_v4()),
+            name: FieldVarchar(name.to_string()),
+            age: FieldInt(age),
+            nick: nick.map(|n| FieldText(n.to_string())),
+        };
+        insert(&pool, person).await.unwrap();
+    }
+
+    // Filter + order; the renamed `full_name` column and the NULL nick both decode.
+    let rows: Vec<PersonLite> = TestPartialPerson::filter(&pool)
+        .eq(TestPartialPerson::AGE, 30)
+        .order_by(TestPartialPerson::NAME.asc())
+        .select_as::<PersonLite>()
+        .all()
+        .await
+        .unwrap();
+    assert_eq!(
+        rows,
+        vec![
+            PersonLite {
+                name: FieldVarchar("Ann".to_string()),
+                nick: Some(FieldText("annie".to_string())),
+            },
+            PersonLite {
+                name: FieldVarchar("Bob".to_string()),
+                nick: None,
+            },
+        ]
+    );
+
+    let one = TestPartialPerson::filter(&pool)
+        .order_by(TestPartialPerson::AGE.desc())
+        .select_as::<PersonLite>()
+        .one()
+        .await
+        .unwrap();
+    assert_eq!(one.unwrap().name, FieldVarchar("Cleo".to_string()));
+
+    let none = TestPartialPerson::filter(&pool)
+        .eq(TestPartialPerson::AGE, 99)
+        .select_as::<PersonLite>()
+        .one()
+        .await
+        .unwrap();
+    assert!(none.is_none());
+}

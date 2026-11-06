@@ -33,7 +33,7 @@ pub use query::{
     Filterable, ModelValues, SqlValue, ToSqlValue, insert_values, quote_ident, quote_ident_mysql,
 };
 pub use related::WithRelated;
-pub use row::{FromRow, RangoRow, RowError};
+pub use row::{FromRow, Partial, RangoRow, RowError};
 pub use schema::{
     ColumnDef, ColumnType, DefaultValue, FkReference, ReferentialAction, TableSchema,
 };
