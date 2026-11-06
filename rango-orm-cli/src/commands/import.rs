@@ -1,6 +1,6 @@
 use anyhow::{Context, Result, bail};
 use rango_orm_core::{BackendKind, quote_ident, quote_ident_mysql};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 
 pub async fn run(
@@ -197,8 +197,83 @@ async fn import_postgres(
     let order = order_by_dependencies(groups.keys().cloned().collect(), &edges);
     let mut total = 0;
 
-    for table in &order {
-        total += insert_rows_postgres(&mut tx, table, &groups[table], on_conflict).await?;
+    // Nullable FK columns that point at a table not inserted yet (cycles, self references)
+    // are inserted as NULL and filled in once every row is there.
+    let nullable_fks = nullable_fk_columns_postgres(&mut tx).await?;
+    let position: HashMap<&str, usize> = order
+        .iter()
+        .enumerate()
+        .map(|(i, t)| (t.as_str(), i))
+        .collect();
+    let mut fixups: Vec<(
+        String,
+        Vec<String>,
+        serde_json::Map<String, serde_json::Value>,
+    )> = Vec::new();
+    for (i, table) in order.iter().enumerate() {
+        let deferred: Vec<String> = nullable_fks
+            .iter()
+            .filter(|(t, _, parent)| {
+                t == table && position.get(parent.as_str()).is_some_and(|&p| p >= i)
+            })
+            .map(|(_, col, _)| col.clone())
+            .collect();
+        let mut rows_here: Vec<serde_json::Map<String, serde_json::Value>> =
+            groups[table].iter().map(|r| (*r).clone()).collect();
+        if !deferred.is_empty() && on_conflict == OnConflict::Fail {
+            let pk = primary_key_postgres(&mut tx, table).await?;
+            for row in &mut rows_here {
+                let mut fix = serde_json::Map::new();
+                for c in &deferred {
+                    if row.get(c).is_some_and(|v| !v.is_null()) {
+                        fix.insert(
+                            c.clone(),
+                            row.insert(c.clone(), serde_json::Value::Null).unwrap(),
+                        );
+                    }
+                }
+                if !fix.is_empty() && !pk.is_empty() {
+                    for k in &pk {
+                        fix.insert(k.clone(), row.get(k).cloned().unwrap_or_default());
+                    }
+                    fixups.push((table.clone(), pk.clone(), fix));
+                }
+            }
+        }
+        let refs: Vec<&serde_json::Map<String, serde_json::Value>> = rows_here.iter().collect();
+        total += insert_rows_postgres(&mut tx, table, &refs, on_conflict).await?;
+    }
+    for (table, pk, fix) in &fixups {
+        let rec = format!(
+            "jsonb_populate_record(NULL::{}, $1::jsonb)",
+            quote_ident(table)
+        );
+        let set = fix
+            .keys()
+            .filter(|k| !pk.contains(k))
+            .map(|c| format!("{q} = (r).{q}", q = quote_ident(c)))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let cond = pk
+            .iter()
+            .map(|k| {
+                format!(
+                    "{t}.{q} = (r).{q}",
+                    t = quote_ident(table),
+                    q = quote_ident(k)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(" AND ");
+        let sql = format!(
+            "UPDATE {t} SET {set} FROM (SELECT {rec} AS r) x WHERE {cond}",
+            t = quote_ident(table)
+        );
+        sqlx::query(&sql)
+            .bind(serde_json::Value::Object(fix.clone()).to_string())
+            .execute(&mut *tx)
+            .await
+            .with_context(|| format!("Failed to set deferred foreign keys of {}", table))?;
     }
     resync_identities_postgres(&mut tx, &order).await?;
 
@@ -721,8 +796,8 @@ pub(crate) fn order_by_dependencies(
         available.sort();
     }
 
-    // ponytail: cycles between tables are inserted in alphabetical order and may
-    // still fail; deferrable FKs would be the upgrade.
+    // Cycles between tables are inserted in alphabetical order; on Postgres the nullable FK
+    // columns that point forward are filled in afterwards (see `import_postgres`).
     let ordered_set: HashSet<String> = ordered.iter().cloned().collect();
     let mut remaining: Vec<String> = tables
         .iter()
@@ -733,6 +808,36 @@ pub(crate) fn order_by_dependencies(
     ordered.extend(remaining);
 
     ordered
+}
+
+/// Single-column nullable foreign keys of the current schema, as `(table, column, parent)`.
+async fn nullable_fk_columns_postgres(
+    conn: &mut sqlx::PgConnection,
+) -> Result<Vec<(String, String, String)>> {
+    let sql = "SELECT c.relname::text, a.attname::text, p.relname::text
+FROM pg_constraint k
+JOIN pg_class c ON c.oid = k.conrelid
+JOIN pg_class p ON p.oid = k.confrelid
+JOIN pg_namespace n ON n.oid = c.relnamespace
+JOIN pg_attribute a ON a.attrelid = k.conrelid AND a.attnum = k.conkey[1]
+WHERE k.contype = 'f' AND array_length(k.conkey, 1) = 1 AND NOT a.attnotnull
+  AND n.nspname = current_schema()";
+    sqlx::query_as(sql)
+        .fetch_all(&mut *conn)
+        .await
+        .context("Failed to read nullable foreign keys")
+}
+
+async fn primary_key_postgres(conn: &mut sqlx::PgConnection, table: &str) -> Result<Vec<String>> {
+    sqlx::query_scalar(
+        "SELECT a.attname::text FROM pg_index i \
+         JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey) \
+         WHERE i.indrelid = $1::regclass AND i.indisprimary",
+    )
+    .bind(quote_ident(table))
+    .fetch_all(&mut *conn)
+    .await
+    .with_context(|| format!("Failed to read the primary key of {}", table))
 }
 
 /// Foreign keys between tables of the current schema, as `(child, parent)` pairs.
