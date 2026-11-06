@@ -38,14 +38,22 @@ pub(crate) fn generate_sql_from_diff(diffs: &[SchemaDiff], backend: BackendKind)
                         && !created.contains(fk.table.as_str())
                 });
                 if forward && let Some(fk) = col.references.take() {
+                    // Postgres only: lets `restore` load a NOT NULL cycle with
+                    // `SET CONSTRAINTS ALL DEFERRED`. Still checked per statement otherwise.
+                    let deferrable = if backend == BackendKind::Postgres {
+                        " DEFERRABLE INITIALLY IMMEDIATE"
+                    } else {
+                        ""
+                    };
                     deferred.push_str(&format!(
-                        "ALTER TABLE {} ADD CONSTRAINT {} FOREIGN KEY ({}) REFERENCES {} ({}) ON DELETE {};\n",
+                        "ALTER TABLE {} ADD CONSTRAINT {} FOREIGN KEY ({}) REFERENCES {} ({}) ON DELETE {}{};\n",
                         backend.quote_ident(&schema.table_name),
                         object_name(backend, &format!("{}_{}_fkey", schema.table_name, col.name)),
                         backend.quote_ident(&col.name),
                         backend.quote_ident(&fk.table),
                         backend.quote_ident(&fk.column),
-                        referential_action_sql(&fk.on_delete)
+                        referential_action_sql(&fk.on_delete),
+                        deferrable
                     ));
                 }
             }
@@ -1146,11 +1154,17 @@ mod tests {
             assert_eq!(sql[..alter].matches("REFERENCES").count(), 1, "got: {sql}");
             assert!(
                 sql[alter..].contains(&format!(
-                    "ADD CONSTRAINT {} FOREIGN KEY ({}) REFERENCES {} ({}) ON DELETE CASCADE;",
+                    "ADD CONSTRAINT {} FOREIGN KEY ({}) REFERENCES {} ({}) ON DELETE CASCADE{};",
                     q("projects_generations_id_fkey"),
                     q("generations_id"),
                     q("generations"),
-                    q("id")
+                    q("id"),
+                    // MySQL has no deferrable constraints; restore turns the checks off.
+                    if backend == BackendKind::Postgres {
+                        " DEFERRABLE INITIALLY IMMEDIATE"
+                    } else {
+                        ""
+                    }
                 )),
                 "got: {sql}"
             );

@@ -782,3 +782,85 @@ pub struct Generation {
     drop_named(&pool, &["e2e_cycle_projects", "e2e_cycle_generations"]).await;
     project.remove();
 }
+
+/// Every FK of the cycle is NOT NULL: the rows can only be loaded with the FKs deferred, both
+/// by hand and by `restore`.
+#[tokio::test]
+#[cfg_attr(not(feature = "integration"), ignore)]
+async fn not_null_foreign_key_cycle_restores() {
+    let pool = PgPool::connect(&database_url())
+        .await
+        .expect("connect to postgres");
+    let project = Project::new("ring");
+    let tables = ["e2e_ring_a", "e2e_ring_b"];
+    drop_named(&pool, &tables).await;
+
+    project.write_models(
+        r#"
+#[derive(Model)]
+#[model(table = "e2e_ring_a")]
+pub struct RingA {
+    pub id: FieldUuid,
+    pub b: ForeignKey<RingB>,
+}
+
+#[derive(Model)]
+#[model(table = "e2e_ring_b")]
+pub struct RingB {
+    pub id: FieldUuid,
+    pub a: ForeignKey<RingA>,
+}
+"#,
+    );
+    assert_success(&project.makemigrations(), "makemigrations");
+    assert!(
+        project
+            .latest_migration_sql()
+            .contains("DEFERRABLE INITIALLY IMMEDIATE")
+    );
+    assert_success(&project.migrate(), "migrate");
+
+    // Outside a transaction that defers them, the constraints are checked per statement.
+    let (a, b) = (
+        "00000000-0000-0000-0000-00000000000a",
+        "00000000-0000-0000-0000-00000000000b",
+    );
+    assert!(
+        sqlx::query(&format!(
+            "INSERT INTO e2e_ring_a (id, b) VALUES ('{a}', '{b}')"
+        ))
+        .execute(&pool)
+        .await
+        .is_err()
+    );
+    let mut tx = pool.begin().await.unwrap();
+    for sql in [
+        "SET CONSTRAINTS ALL DEFERRED".to_string(),
+        format!("INSERT INTO e2e_ring_a (id, b) VALUES ('{a}', '{b}')"),
+        format!("INSERT INTO e2e_ring_b (id, a) VALUES ('{b}', '{a}')"),
+    ] {
+        sqlx::query(&sql).execute(&mut *tx).await.expect(&sql);
+    }
+    tx.commit().await.expect("commit the cycle");
+
+    assert_success(
+        &project.run_cli(&[
+            "dump",
+            "-o",
+            "ring.json",
+            "-t",
+            "e2e_ring_a",
+            "-t",
+            "e2e_ring_b",
+        ]),
+        "dump",
+    );
+    drop_named(&pool, &tables).await;
+    assert_success(&project.run_cli(&["restore", "ring.json"]), "restore");
+    for t in tables {
+        assert_eq!(dump_count(&pool, t).await, Some(1), "{t}");
+    }
+
+    drop_named(&pool, &tables).await;
+    project.remove();
+}
