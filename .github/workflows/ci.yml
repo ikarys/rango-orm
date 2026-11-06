@@ -1,10 +1,9 @@
 name: CI
 
+# Manual only, to save GitHub Actions minutes: run it from the Actions tab
+# (or `gh workflow run CI --ref <branch>`) before merging or releasing.
 on:
-  push:
-    branches: [main, develop]
-  pull_request:
-    branches: [main]
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
