@@ -14,7 +14,7 @@ where
     if models.is_empty() {
         return Ok(0);
     }
-    let n_cols = 1 + models[0].field_values().len();
+    let n_cols = rango_core::insert_values(&models[0]).len();
     let chunk_size = (999 / n_cols).max(1); // SQLite limit: 999 bound params
     let mut total = 0usize;
     for chunk in models.chunks(chunk_size) {
@@ -26,19 +26,18 @@ where
     Ok(total)
 }
 
+/// Columns come from the first model: give every model a PK, or none (auto-increment).
 fn build_bulk_create_sql<M: Model + ModelValues>(models: &[M]) -> (String, Vec<SqlValue>) {
-    let pk_col = M::pk_column();
-    let sample = models[0].field_values();
-    let mut cols = vec![quote_ident(pk_col)];
-    cols.extend(sample.iter().map(|(c, _)| quote_ident(c)));
+    let cols: Vec<String> = rango_core::insert_values(&models[0])
+        .into_iter()
+        .map(|(c, _)| quote_ident(c))
+        .collect();
     let mut all_values: Vec<SqlValue> = Vec::new();
     let mut row_placeholders: Vec<String> = Vec::new();
     for model in models {
-        let fields = model.field_values();
-        let pk_val = model.pk_value();
-        let ph: Vec<String> = (0..=fields.len()).map(|_| "?".to_string()).collect();
-        all_values.push(pk_val);
-        all_values.extend(fields.into_iter().map(|(_, v)| v));
+        let values = rango_core::insert_values(model);
+        let ph: Vec<&str> = vec!["?"; values.len()];
+        all_values.extend(values.into_iter().map(|(_, v)| v));
         row_placeholders.push(format!("({})", ph.join(", ")));
     }
     let sql = format!(

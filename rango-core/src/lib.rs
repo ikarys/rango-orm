@@ -22,7 +22,9 @@ pub use error::{Error, Result};
 pub use fields::*;
 pub use hooks::ModelHooks;
 pub use model::{Model, ModelMixin};
-pub use query::{Filterable, ModelValues, SqlValue, ToSqlValue, quote_ident, quote_ident_mysql};
+pub use query::{
+    Filterable, ModelValues, SqlValue, ToSqlValue, insert_values, quote_ident, quote_ident_mysql,
+};
 pub use row::{FromRow, RangoRow, RowError};
 pub use schema::{
     ColumnDef, ColumnType, DefaultValue, FkReference, ReferentialAction, TableSchema,

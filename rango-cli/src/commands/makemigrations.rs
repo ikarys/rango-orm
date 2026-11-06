@@ -4,13 +4,36 @@ use crate::migration::scanner::{generate_pivot_table, scan_models};
 use crate::migration::snapshot::Snapshot;
 use crate::migration::sql::generate_sql_from_diff;
 use anyhow::{Context, Result, bail};
-use rango_core::{BackendKind, TableSchema};
+use rango_core::{BackendKind, ColumnType, TableSchema};
 use std::fs;
 use std::io::{IsTerminal, Write};
 
 /// MySQL rejects table/column names over 64 bytes. Constraint and index names are
 /// shortened by the SQL generator, but table names are also derived at runtime
 /// (M2M pivots), so they must fit as-is.
+/// Pivot columns are UUIDs, so both sides of a ManyToMany need a UUID primary key.
+fn check_pivot_targets(schemas: &[TableSchema], pivots: &[TableSchema]) -> Result<()> {
+    for pivot in pivots {
+        for fk in pivot.columns.iter().filter_map(|c| c.references.as_ref()) {
+            let pk_type = schemas
+                .iter()
+                .find(|s| s.table_name == fk.table)
+                .and_then(|s| s.columns.iter().find(|c| c.primary_key))
+                .map(|c| &c.col_type);
+            if let Some(t) = pk_type.filter(|t| **t != ColumnType::Uuid) {
+                bail!(
+                    "ManyToMany pivot \"{}\" references \"{}\", whose primary key is {:?}; \
+                     ManyToMany needs UUID primary keys on both models",
+                    pivot.table_name,
+                    fk.table,
+                    t
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
 fn check_mysql_identifiers(schemas: &[TableSchema]) -> Result<()> {
     const MAX: usize = 64;
     for s in schemas {
@@ -102,6 +125,8 @@ pub fn run(
             println!("  - {} (pivot)", s.table_name);
         }
     }
+
+    check_pivot_targets(&schemas, &pivot_schemas)?;
 
     // Merge pivot tables into schemas for diff
     schemas.extend(pivot_schemas);

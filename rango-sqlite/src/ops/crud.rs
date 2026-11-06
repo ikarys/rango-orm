@@ -104,20 +104,15 @@ where
 
 // ─── SQL builders ─────────────────────────────────────────────────────────────
 fn build_insert_sql<M: Model + ModelValues>(model: &M) -> (String, Vec<SqlValue>) {
-    let fields = model.field_values();
-    let pk_col = M::pk_column();
-    let pk_val = model.pk_value();
-    let mut cols = vec![quote_ident(pk_col)];
-    cols.extend(fields.iter().map(|(c, _)| quote_ident(c)));
-    let placeholders: Vec<String> = (0..cols.len()).map(|_| "?".to_string()).collect();
+    let (cols, values): (Vec<_>, Vec<_>) = rango_core::insert_values(model).into_iter().unzip();
+    let cols: Vec<String> = cols.into_iter().map(quote_ident).collect();
+    let placeholders: Vec<&str> = vec!["?"; cols.len()];
     let sql = format!(
         "INSERT INTO {} ({}) VALUES ({}) RETURNING *",
         quote_ident(M::table_name()),
         cols.join(", "),
         placeholders.join(", ")
     );
-    let mut values = vec![pk_val];
-    values.extend(fields.into_iter().map(|(_, v)| v));
     (sql, values)
 }
 
@@ -142,19 +137,11 @@ fn build_update_sql<M: Model + ModelValues>(model: &M) -> (String, Vec<SqlValue>
 
 fn build_get_or_create_sql<M: Model + ModelValues>(
     model: &M,
-    conflict_cols: &[&str],
+    _conflict_cols: &[&str],
 ) -> (String, Vec<SqlValue>) {
-    let fields = model.field_values();
-    let pk_col = M::pk_column();
-    let pk_val = model.pk_value();
-    let mut cols = vec![quote_ident(pk_col)];
-    cols.extend(fields.iter().map(|(c, _)| quote_ident(c)));
-    let placeholders: Vec<String> = (0..cols.len()).map(|_| "?".to_string()).collect();
-    let conflict_clause = conflict_cols
-        .iter()
-        .map(|c| quote_ident(c))
-        .collect::<Vec<_>>()
-        .join(", ");
+    let (cols, values): (Vec<_>, Vec<_>) = rango_core::insert_values(model).into_iter().unzip();
+    let cols: Vec<String> = cols.into_iter().map(quote_ident).collect();
+    let placeholders: Vec<&str> = vec!["?"; cols.len()];
     let sql = format!(
         "INSERT OR IGNORE INTO {} ({}) VALUES ({}) RETURNING *",
         quote_ident(M::table_name()),
@@ -162,9 +149,6 @@ fn build_get_or_create_sql<M: Model + ModelValues>(
         placeholders.join(", ")
     );
     // Note: SQLite INSERT OR IGNORE doesn't return rows on conflict, so we fall back to SELECT
-    let _ = conflict_clause; // used implicitly via OR IGNORE
-    let mut values = vec![pk_val];
-    values.extend(fields.into_iter().map(|(_, v)| v));
     (sql, values)
 }
 

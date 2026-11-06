@@ -116,6 +116,8 @@ pub(crate) fn serialize_col_type(t: &ColumnType) -> String {
         ColumnType::SmallInt => "smallint".into(),
         ColumnType::Int => "int".into(),
         ColumnType::BigInt => "bigint".into(),
+        ColumnType::AutoInt => "autoint".into(),
+        ColumnType::AutoBigInt => "autobigint".into(),
         ColumnType::Float => "float".into(),
         ColumnType::Double => "double".into(),
         ColumnType::Text => "text".into(),

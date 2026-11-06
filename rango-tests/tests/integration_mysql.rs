@@ -619,3 +619,51 @@ async fn test_mysql_fk_cascade_and_violation() {
     assert_eq!(left, 0, "ON DELETE CASCADE");
     exec(&pool, "DROP TABLE `test_post`").await;
 }
+
+// ── Auto-increment PK ─────────────────────────────────────────────────────────
+
+#[derive(Model, Debug, Clone)]
+#[model(table = "test_counter")]
+struct TestCounter {
+    id: FieldAutoBigInt,
+    #[field(unique)]
+    label: FieldVarchar<1, 50>,
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-mysql"), ignore)]
+async fn test_mysql_auto_pk_is_generated() {
+    let pool = pool().await;
+    sqlx::query("DROP TABLE IF EXISTS `test_counter`")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "CREATE TABLE `test_counter` (`id` BIGINT AUTO_INCREMENT PRIMARY KEY, \
+         `label` VARCHAR(50) NOT NULL UNIQUE) ENGINE=InnoDB",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let new = |l: &str| TestCounter {
+        id: FieldAutoBigInt::default(),
+        label: FieldVarchar(l.into()),
+    };
+
+    let a = insert(&pool, new("a")).await.unwrap();
+    let b = insert(&pool, new("b")).await.unwrap();
+    assert_eq!((a.id.0, b.id.0), (Some(1), Some(2)));
+
+    let (c, created) = get_or_create(&pool, vec![("label", "c".into())], new("c"))
+        .await
+        .unwrap();
+    assert!(created);
+    assert_eq!(c.id.0, Some(3));
+
+    assert_eq!(bulk_create(&pool, &[new("d"), new("e")]).await.unwrap(), 2);
+    let e = get::<_, TestCounter>(&pool, &5i64.into())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(e.label.0, "e");
+}
