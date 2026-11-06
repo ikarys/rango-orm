@@ -21,7 +21,36 @@ pub struct Post {
 }
 ```
 
-The column is stored as `UUID` (Postgres) or `TEXT` (SQLite).
+The column is stored as `UUID` (Postgres) or `TEXT` (SQLite). Every FK column is indexed.
+
+### On delete
+
+The database enforces the FK with a real `REFERENCES … ON DELETE …` clause, so deleting a parent costs one statement, with no per-row queries in Rust. Pick the action with `#[field(on_delete = "...")]`:
+
+| Value | SQL | Deleting the parent… |
+|---|---|---|
+| `"cascade"` (default) | `ON DELETE CASCADE` | deletes the children |
+| `"set_null"` | `ON DELETE SET NULL` | sets the children's FK to `NULL`; the field must be `Option<ForeignKey<M>>` (compile error otherwise) |
+| `"set_default"` | `ON DELETE SET DEFAULT` | sets the children's FK to the column default |
+| `"restrict"` | `ON DELETE RESTRICT` | fails with `Error::ForeignKeyViolation` while children exist |
+| `"no_action"` | `ON DELETE NO ACTION` | like `restrict`, checked at the end of the statement |
+
+```rust
+#[derive(Model)]
+pub struct Comment {
+    pub id: FieldUuid,
+    #[field(on_delete = "set_null")]
+    pub author_id: Option<ForeignKey<User>>,
+    #[field(on_delete = "restrict")]
+    pub post_id: ForeignKey<Post>,
+}
+```
+
+Changing `on_delete` produces a migration. `ON UPDATE` is always `NO ACTION`.
+
+### Self-references and cycles
+
+A model can reference itself (`parent_id: Option<ForeignKey<Category>>`), and two models can reference each other. `rango makemigrations` creates the tables first and adds the FKs that point forward with `ALTER TABLE … ADD CONSTRAINT` afterwards (inline on SQLite). Make at least one FK of a cycle nullable, otherwise no row can be inserted first.
 
 ### Querying with select_related
 

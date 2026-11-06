@@ -69,4 +69,4 @@ PostgreSQL, SQLite and MySQL / MariaDB backends are functional.
 
 ## License
 
-MIT
+MIT OR Apache-2.0, at your option.
