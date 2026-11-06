@@ -2,20 +2,20 @@
 
 ## Add to your project
 
-Rango is in beta and not on crates.io yet: depend on a git tag, the API may still change between betas.
+Rango is in beta: pin the version, the API may still change between betas. The package is `rango-orm`; the crate you import is still `rango`.
 
 ```toml
 # Cargo.toml
 
 [dependencies]
 # PostgreSQL backend (default)
-rango = { git = "https://github.com/ikarys/rango-orm", tag = "v0.1.0-beta.2" }
+rango-orm = "0.1.0-beta.3"
 
 # SQLite backend
-rango = { git = "https://github.com/ikarys/rango-orm", tag = "v0.1.0-beta.2", default-features = false, features = ["sqlite"] }
+rango-orm = { version = "0.1.0-beta.3", default-features = false, features = ["sqlite"] }
 
 # MySQL 8.0+ / MariaDB 10.6+ backend
-rango = { git = "https://github.com/ikarys/rango-orm", tag = "v0.1.0-beta.2", default-features = false, features = ["mysql"] }
+rango-orm = { version = "0.1.0-beta.3", default-features = false, features = ["mysql"] }
 
 tokio = { version = "1", features = ["full"] }
 ```
@@ -23,7 +23,7 @@ tokio = { version = "1", features = ["full"] }
 ## Install the CLI
 
 ```bash
-cargo install --git https://github.com/ikarys/rango-orm --tag v0.1.0-beta.2 rango-cli
+cargo install rango-orm-cli --version 0.1.0-beta.3
 ```
 
 This installs the `rango` binary.

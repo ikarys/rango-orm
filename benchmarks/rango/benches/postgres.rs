@@ -3,9 +3,9 @@
 ///
 /// Run: DATABASE_URL=postgres://... cargo bench -p bench-rango
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, Throughput};
-use rango_core::*;
-use rango_derive::Model;
-use rango_postgres::*;
+use rango_orm_core::*;
+use rango_orm_derive::Model;
+use rango_orm_postgres::*;
 use uuid::Uuid;
 
 // ── Model ─────────────────────────────────────────────────────────────────────

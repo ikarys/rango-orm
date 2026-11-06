@@ -6,15 +6,15 @@ license = "MIT"
 publish = false
 
 [dependencies]
-rango-core = { path = "../rango-core" }
-rango-derive = { path = "../rango-derive" }
+rango-orm-core = { path = "../rango-orm-core" }
+rango-orm-derive = { path = "../rango-orm-derive" }
 
 [dev-dependencies]
-rango-postgres = { path = "../rango-postgres" }
-rango-sqlite   = { path = "../rango-sqlite" }
-rango-mysql    = { path = "../rango-mysql" }
-rango-core     = { path = "../rango-core" }
-rango-derive   = { path = "../rango-derive" }
+rango-orm-postgres = { path = "../rango-orm-postgres" }
+rango-orm-sqlite   = { path = "../rango-orm-sqlite" }
+rango-orm-mysql    = { path = "../rango-orm-mysql" }
+rango-orm-core     = { path = "../rango-orm-core" }
+rango-orm-derive   = { path = "../rango-orm-derive" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 uuid = { version = "1", features = ["v4"] }
 anyhow = "1"

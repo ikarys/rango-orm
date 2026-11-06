@@ -1262,43 +1262,43 @@ dependencies = [
 ]
 
 [[package]]
-name = "rango"
-version = "0.1.0-beta.2"
-dependencies = [
- "rango-core",
- "rango-derive",
- "rango-mysql",
- "rango-postgres",
- "rango-sqlite",
- "sqlx",
-]
-
-[[package]]
 name = "rango-bench"
 version = "0.1.0"
 dependencies = [
  "chrono",
  "criterion",
- "rango-core",
- "rango-derive",
- "rango-postgres",
- "rango-sqlite",
+ "rango-orm-core",
+ "rango-orm-derive",
+ "rango-orm-postgres",
+ "rango-orm-sqlite",
  "sqlx",
  "tokio",
  "uuid",
 ]
 
 [[package]]
-name = "rango-cli"
-version = "0.1.0-beta.2"
+name = "rango-orm"
+version = "0.1.0-beta.3"
+dependencies = [
+ "rango-orm-core",
+ "rango-orm-derive",
+ "rango-orm-mysql",
+ "rango-orm-postgres",
+ "rango-orm-sqlite",
+ "sqlx",
+]
+
+[[package]]
+name = "rango-orm-cli"
+version = "0.1.0-beta.3"
 dependencies = [
  "anyhow",
  "clap",
  "quote",
- "rango-core",
- "rango-mysql",
- "rango-postgres",
- "rango-sqlite",
+ "rango-orm-core",
+ "rango-orm-mysql",
+ "rango-orm-postgres",
+ "rango-orm-sqlite",
  "serde",
  "serde_json",
  "sqlx",
@@ -1309,8 +1309,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "rango-core"
-version = "0.1.0-beta.2"
+name = "rango-orm-core"
+version = "0.1.0-beta.3"
 dependencies = [
  "argon2",
  "chrono",
@@ -1320,23 +1320,23 @@ dependencies = [
 ]
 
 [[package]]
-name = "rango-derive"
-version = "0.1.0-beta.2"
+name = "rango-orm-derive"
+version = "0.1.0-beta.3"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
  "quote",
- "rango-core",
+ "rango-orm-core",
  "syn 2.0.119",
 ]
 
 [[package]]
-name = "rango-mysql"
-version = "0.1.0-beta.2"
+name = "rango-orm-mysql"
+version = "0.1.0-beta.3"
 dependencies = [
  "chrono",
  "log",
- "rango-core",
+ "rango-orm-core",
  "serde_json",
  "sqlx",
  "tokio",
@@ -1344,12 +1344,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "rango-postgres"
-version = "0.1.0-beta.2"
+name = "rango-orm-postgres"
+version = "0.1.0-beta.3"
 dependencies = [
  "chrono",
  "log",
- "rango-core",
+ "rango-orm-core",
  "serde_json",
  "sqlx",
  "tokio",
@@ -1357,12 +1357,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "rango-sqlite"
-version = "0.1.0-beta.2"
+name = "rango-orm-sqlite"
+version = "0.1.0-beta.3"
 dependencies = [
  "chrono",
  "log",
- "rango-core",
+ "rango-orm-core",
  "serde_json",
  "sqlx",
  "tokio",
@@ -1375,11 +1375,11 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
- "rango-core",
- "rango-derive",
- "rango-mysql",
- "rango-postgres",
- "rango-sqlite",
+ "rango-orm-core",
+ "rango-orm-derive",
+ "rango-orm-mysql",
+ "rango-orm-postgres",
+ "rango-orm-sqlite",
  "serde_json",
  "sqlx",
  "tokio",

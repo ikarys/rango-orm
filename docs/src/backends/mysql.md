@@ -1,13 +1,13 @@
 # MySQL / MariaDB
 
-One backend, `rango-mysql`, covers MySQL 8.0+ and MariaDB 10.6+. It sticks to the subset both servers share, so the same models, queries and migration files work on either.
+One backend, `rango-orm-mysql`, covers MySQL 8.0+ and MariaDB 10.6+. It sticks to the subset both servers share, so the same models, queries and migration files work on either.
 
 ## Setup
 
 ```toml
 # Cargo.toml
 [dependencies]
-rango = { git = "https://github.com/ikarys/rango-orm", default-features = false, features = ["mysql"] }
+rango-orm = { version = "0.1.0-beta.3", default-features = false, features = ["mysql"] }
 ```
 
 ```toml

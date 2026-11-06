@@ -56,20 +56,20 @@ This is the **#1 differentiator** vs other Rust ORMs:
 | Multi-table JOINs are implicit and hard to control | Explicit `.join()` with full control over join type and condition |
 
 ### 5. Backend agnostic
-Core traits are DB-agnostic. Backends (`rango-postgres`, future `rango-sqlite`, etc.) are separate crates.
+Core traits are DB-agnostic. Backends (`rango-orm-postgres`, future `rango-orm-sqlite`, etc.) are separate crates.
 This is by design — Rango should be portable.
 
 ## Crate layout
 
 | Crate | Role |
 |---|---|
-| `rango-core` | DB-free: traits (`Model`, `FromRow`, `ModelValues`), schema types (`TableSchema`, `ColumnDef`, constraints), field types, `quote_ident` |
-| `rango-derive` | `#[derive(Model)]` proc-macro — generates `TableSchema` from struct fields |
-| `rango-postgres` | PostgreSQL backend (sqlx): `ops/` (crud, bulk, raw), `query_builder/` (filter, exec, relations), M2M, `PgQueryExt` |
-| `rango-sqlite` | SQLite backend (sqlx), same layout as `rango-postgres` |
-| `rango-mysql` | MySQL 8.0+ / MariaDB 10.6+ backend (sqlx), common subset, no `RETURNING`, UUID as `BINARY(16)` |
-| `rango` | Facade crate: re-exports core + derive + backends, selected by features (`postgres` default, `sqlite`, `mysql`) |
-| `rango-cli` | `rango` binary: `commands/` (init, makemigrations, migrate, export, import) and `migration/` (scanner, snapshot, diff, renames, sql) |
+| `rango-orm-core` | DB-free: traits (`Model`, `FromRow`, `ModelValues`), schema types (`TableSchema`, `ColumnDef`, constraints), field types, `quote_ident` |
+| `rango-orm-derive` | `#[derive(Model)]` proc-macro — generates `TableSchema` from struct fields |
+| `rango-orm-postgres` | PostgreSQL backend (sqlx): `ops/` (crud, bulk, raw), `query_builder/` (filter, exec, relations), M2M, `PgQueryExt` |
+| `rango-orm-sqlite` | SQLite backend (sqlx), same layout as `rango-orm-postgres` |
+| `rango-orm-mysql` | MySQL 8.0+ / MariaDB 10.6+ backend (sqlx), common subset, no `RETURNING`, UUID as `BINARY(16)` |
+| `rango-orm` | Facade crate (lib name `rango`): re-exports core + derive + backends, selected by features (`postgres` default, `sqlite`, `mysql`) |
+| `rango-orm-cli` | `rango` binary: `commands/` (init, makemigrations, migrate, export, import) and `migration/` (scanner, snapshot, diff, renames, sql) |
 | `rango-tests` | Integration tests against real Postgres / SQLite |
 | `rango-bench` | Criterion benchmarks |
 
@@ -191,9 +191,9 @@ let active_users = User::filter(&pool)
 
 | Backend | Crate | Status |
 |---|---|---|
-| PostgreSQL | `rango-postgres` | 🚧 en cours |
-| MySQL / MariaDB | `rango-mysql` | ✅ backend + CLI (MySQL 8.0+, MariaDB 10.6+) |
-| SQLite | `rango-sqlite` | ✅ |
+| PostgreSQL | `rango-orm-postgres` | 🚧 en cours |
+| MySQL / MariaDB | `rango-orm-mysql` | ✅ backend + CLI (MySQL 8.0+, MariaDB 10.6+) |
+| SQLite | `rango-orm-sqlite` | ✅ |
 | MSSQL | `rango-mssql` | 🔮 futur — SQLx a droppé le support MSSQL en 0.7, backend custom via `tiberius` |
 
 Note : PostgreSQL, MySQL, SQLite passent par SQLx. MSSQL nécessitera un backend séparé basé sur `tiberius`.
@@ -264,7 +264,7 @@ Goal: production-grade by default. Status as of 2026-11-01. P0 = blocks real use
 | P1 | Validate filter/order columns against `M::schema()` | Unknown column → typed error instead of a DB error; defense in depth on top of escaping |
 | P1 | Per-connection `statement_timeout` / `lock_timeout` in `DatabaseConfig` | ✅ `statement_timeout_ms` / `lock_timeout_ms`, sent in the startup packet (no extra round-trip; PgBouncer needs `ignore_startup_parameters`) |
 | P1 | Never log bound values by default | ✅ sqlx only logs SQL text, never bound values; no opt-in added |
-| P1 | Typed errors (`rango::Error`: `NotFound`, `UniqueViolation`, `ForeignKeyViolation`, `Timeout`, `Connection`, …) instead of `anyhow` in library crates | ✅ `rango_core::Error`; each backend maps sqlx errors in `error.rs` (`db_err`); no SQL text in errors; `anyhow` only in `rango-cli` |
+| P1 | Typed errors (`rango::Error`: `NotFound`, `UniqueViolation`, `ForeignKeyViolation`, `Timeout`, `Connection`, …) instead of `anyhow` in library crates | ✅ `rango_orm_core::Error`; each backend maps sqlx errors in `error.rs` (`db_err`); no SQL text in errors; `anyhow` only in `rango-orm-cli` |
 | P1 | `#![forbid(unsafe_code)]` in every crate; `cargo audit` + `cargo deny` in CI | 🚧 `forbid(unsafe_code)` in every crate root ✅; `cargo audit` in CI + `just audit` (exceptions in `.cargo/audit.toml`) ✅; `cargo deny` pending |
 | P2 | Least-privilege guide: a migration role (DDL) separate from the app role (DML only) | `rango migrate` can take its own `MIGRATE_DATABASE_URL` |
 | P2 | `dump` / `backup` files written with `0600` permissions; `restore` refuses non-Rango dumps | |
@@ -298,7 +298,7 @@ Known-CVE checklist (reviewed 2026-11-01) — keep new APIs out of these classes
 | Prio | Item | Notes |
 |---|---|---|
 | P0 | Index every FK column, index M2M pivots, real `REFERENCES … ON DELETE` | ✅ derive marks every FK `index`; CLI emits `CREATE INDEX` on create/add column and on pivots |
-| P0 | `rango-core` must not depend on sqlx (currently pulls postgres + mysql + sqlite drivers) | Core stays pure; compile time and binary size drop for every app |
+| P0 | `rango-orm-core` must not depend on sqlx (currently pulls postgres + mysql + sqlite drivers) | Core stays pure; compile time and binary size drop for every app |
 | P1 | Pool tuning: `test_before_acquire(false)` (sqlx pings on every acquire by default), `max_lifetime`, configurable from `rango.toml` | ✅ `max_lifetime` (1800 s), `test_before_acquire` (false) in `DatabaseConfig`; not yet in `rango.toml` |
 | P2 | Row decoding by column index instead of by name | Measured: ~3% on `select_all_1000` (name lookup is cheap); needs a `RangoRow` API change. Pre-sized result `Vec` ✅ (−4.5%) |
 | P1 | Postgres `bulk_create` via `UNNEST` (one statement, no 65 535-param chunking) | +21% at 1000 rows in benchmarks |

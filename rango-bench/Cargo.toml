@@ -6,10 +6,10 @@ license = "MIT"
 publish = false
 
 [dev-dependencies]
-rango-core = { path = "../rango-core" }
-rango-derive = { path = "../rango-derive" }
-rango-postgres = { path = "../rango-postgres" }
-rango-sqlite = { path = "../rango-sqlite" }
+rango-orm-core = { path = "../rango-orm-core" }
+rango-orm-derive = { path = "../rango-orm-derive" }
+rango-orm-postgres = { path = "../rango-orm-postgres" }
+rango-orm-sqlite = { path = "../rango-orm-sqlite" }
 criterion = { version = "0.5", features = ["async_tokio"] }
 tokio = { version = "1", features = ["full"] }
 uuid = { version = "1", features = ["v4"] }

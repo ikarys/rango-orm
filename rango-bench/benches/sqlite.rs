@@ -3,9 +3,9 @@
 /// Run with:
 ///   cargo bench -p rango-bench --bench sqlite
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, Throughput};
-use rango_core::*;
-use rango_derive::Model;
-use rango_sqlite::*;
+use rango_orm_core::*;
+use rango_orm_derive::Model;
+use rango_orm_sqlite::*;
 use uuid::Uuid;
 
 // ── Test model ────────────────────────────────────────────────────────────────

@@ -7,7 +7,7 @@ index c15f9c8..7cb0cbc 100644
  ] }
  
 +pq-sys = { version = "0.7", features = ["bundled_without_openssl"] }
-+rango = { path = "@RANGO@", optional = true }
++rango = { package = "rango-orm", path = "@RANGO@", optional = true }
 +
  [dependencies.diesel-async]
  git = "https://github.com/diesel-rs/diesel_async"

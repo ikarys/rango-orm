@@ -5,9 +5,9 @@
 ///   MYSQL_URL=mysql://root:rango@127.0.0.1:3307/rango_test cargo test --test integration_mysql --features rango-tests/integration-mysql -- --test-threads=1
 ///
 /// The same file runs against MySQL 8 (port 3307) and MariaDB (port 3308).
-use rango_core::*;
-use rango_derive::Model;
-use rango_mysql::*;
+use rango_orm_core::*;
+use rango_orm_derive::Model;
+use rango_orm_mysql::*;
 use uuid::Uuid;
 
 // ── Test models ───────────────────────────────────────────────────────────────
@@ -43,7 +43,7 @@ struct TestTag {
 async fn pool() -> MySqlPool {
     let url = std::env::var("MYSQL_URL")
         .unwrap_or_else(|_| "mysql://root:rango@127.0.0.1:3307/rango_test".to_string());
-    rango_mysql::connect(&url)
+    rango_orm_mysql::connect(&url)
         .await
         .expect("Failed to create MySQL pool")
 }
@@ -586,8 +586,10 @@ async fn test_mysql_export_json() {
                 r.iter()
                     .map(|(k, v)| {
                         let jv = match v {
-                            rango_core::SqlValue::Text(s) => serde_json::Value::String(s.clone()),
-                            rango_core::SqlValue::BigInt(n) => {
+                            rango_orm_core::SqlValue::Text(s) => {
+                                serde_json::Value::String(s.clone())
+                            }
+                            rango_orm_core::SqlValue::BigInt(n) => {
                                 serde_json::Value::Number((*n).into())
                             }
                             _ => serde_json::Value::Null,
@@ -623,13 +625,13 @@ async fn test_mysql_roundtrip() {
     assert_eq!(rows.len(), 1);
     assert_eq!(
         rows[0].get("email"),
-        Some(&rango_core::SqlValue::Text(
+        Some(&rango_orm_core::SqlValue::Text(
             "roundtrip@mysql.com".to_string()
         ))
     );
     assert_eq!(
         rows[0].get("name"),
-        Some(&rango_core::SqlValue::Text("Test User".to_string()))
+        Some(&rango_orm_core::SqlValue::Text("Test User".to_string()))
     );
 }
 
@@ -643,7 +645,7 @@ async fn test_mysql_update_not_found() {
 
     let u = user("notfound@mysql.com");
     let err = update(&pool, u).await.unwrap_err();
-    assert!(matches!(err, rango_core::Error::NotFound), "{err:?}");
+    assert!(matches!(err, rango_orm_core::Error::NotFound), "{err:?}");
 }
 
 #[tokio::test]
@@ -671,7 +673,7 @@ async fn test_mysql_unique_violation_is_typed() {
     insert(&pool, user("dup@mysql.com")).await.unwrap();
     let err = insert(&pool, user("dup@mysql.com")).await.unwrap_err();
     assert!(
-        matches!(err, rango_core::Error::UniqueViolation { .. }),
+        matches!(err, rango_orm_core::Error::UniqueViolation { .. }),
         "{err:?}"
     );
 }
@@ -870,7 +872,7 @@ async fn test_mysql_fk_cascade_and_violation() {
     };
     let err = insert(&pool, orphan).await.unwrap_err();
     assert!(
-        matches!(err, rango_core::Error::ForeignKeyViolation { .. }),
+        matches!(err, rango_orm_core::Error::ForeignKeyViolation { .. }),
         "{err:?}"
     );
 

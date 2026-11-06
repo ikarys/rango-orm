@@ -13,7 +13,7 @@ if [ ! -d "$WORK/.git" ]; then
 fi
 cd "$WORK"
 git checkout -q --force "$DIESEL_REV"
-sed "s#@RANGO@#$ROOT/rango#" "$HERE/diesel_bench.patch" | git apply
+sed "s#@RANGO@#$ROOT/rango-orm#" "$HERE/diesel_bench.patch" | git apply
 cp "$HERE/rango_benches.rs" diesel_bench/benches/
 
 cd diesel_bench
