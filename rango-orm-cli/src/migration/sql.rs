@@ -487,7 +487,7 @@ fn generate_create_table(schema: &TableSchema, backend: BackendKind) -> String {
                         .join(", ");
                     let cond = uc.condition.as_deref().unwrap_or("");
                     post_stmts.push(format!(
-                        "CREATE UNIQUE INDEX {} ON {} ({}) WHERE {};\n",
+                        "CREATE UNIQUE INDEX IF NOT EXISTS {} ON {} ({}) WHERE {};\n",
                         object_name(backend, &name),
                         backend.quote_ident(&schema.table_name),
                         cols,
