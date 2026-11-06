@@ -278,7 +278,8 @@ async fn restore_fails_on_conflict_instead_of_dropping_rows() {
     assert_ok(&p.cli("a.db", &["dump", "-o", "d.json"]));
     // Restoring into the database it came from collides on every primary key.
     let err = failure_stderr(&p.cli("a.db", &["restore", "d.json"]));
-    assert!(err.contains("t_author"), "{err}");
+    // Table order is not fixed: whichever collides first is named.
+    assert!(err.contains("Failed to insert into t_"), "{err}");
     assert_eq!(p.count("a.db", "t_author").await, Some(2));
     assert_eq!(p.count("a.db", "t_book").await, Some(1));
 }

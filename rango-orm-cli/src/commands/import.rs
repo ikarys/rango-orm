@@ -257,12 +257,30 @@ async fn insert_rows_postgres(
         .join(", ");
     let conflict = match on_conflict {
         OnConflict::Replace => {
+            // Postgres needs a conflict target for DO UPDATE: the primary key.
+            let pk: Vec<String> = sqlx::query_scalar(
+                "SELECT a.attname::text FROM pg_index i \
+                 JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey) \
+                 WHERE i.indrelid = $1::regclass AND i.indisprimary",
+            )
+            .bind(quote_ident(table))
+            .fetch_all(&mut *conn)
+            .await
+            .with_context(|| format!("Failed to read the primary key of {}", table))?;
+            if pk.is_empty() {
+                bail!("--replace needs a primary key on table {}", table);
+            }
             let updates = cols
                 .iter()
                 .map(|c| format!("{} = EXCLUDED.{}", quote_ident(c), quote_ident(c)))
                 .collect::<Vec<_>>()
                 .join(", ");
-            format!("ON CONFLICT DO UPDATE SET {}", updates)
+            let target = pk
+                .iter()
+                .map(|c| quote_ident(c))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("ON CONFLICT ({}) DO UPDATE SET {}", target, updates)
         }
         OnConflict::Skip => "ON CONFLICT DO NOTHING".to_string(),
         OnConflict::Fail => String::new(),
