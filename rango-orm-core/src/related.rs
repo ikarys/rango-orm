@@ -155,21 +155,6 @@ pub fn m2m_pivot(from_table: &str, to_table: &str) -> (String, String, String) {
     (format!("{from_table}_{to_table}"), from_col, to_col)
 }
 
-#[cfg(test)]
-mod pivot_tests {
-    use super::m2m_pivot;
-
-    #[test]
-    fn pivot_columns_are_distinct_for_self_reference() {
-        let s = |t: &str| t.to_string();
-        assert_eq!(m2m_pivot("a", "b"), (s("a_b"), s("a_id"), s("b_id")));
-        assert_eq!(
-            m2m_pivot("u", "u"),
-            (s("u_u"), s("from_u_id"), s("to_u_id"))
-        );
-    }
-}
-
 #[doc(hidden)]
 pub fn sql_value_key(v: &SqlValue) -> Option<String> {
     match v {
@@ -193,5 +178,20 @@ pub fn row_key(row: &dyn RangoRow, col: &str, like: &SqlValue) -> Option<String>
         SqlValue::SmallInt(_) => row.get_i16(col).ok().map(|v| v.to_string()),
         SqlValue::Text(_) => row.get_string(col).ok(),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod pivot_tests {
+    use super::m2m_pivot;
+
+    #[test]
+    fn pivot_columns_are_distinct_for_self_reference() {
+        let s = |t: &str| t.to_string();
+        assert_eq!(m2m_pivot("a", "b"), (s("a_b"), s("a_id"), s("b_id")));
+        assert_eq!(
+            m2m_pivot("u", "u"),
+            (s("u_u"), s("from_u_id"), s("to_u_id"))
+        );
     }
 }
