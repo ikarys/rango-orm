@@ -17,7 +17,7 @@ pub use m2m::M2M;
 pub use ops::{
     all, bulk_create, delete, get, get_or_create, insert, raw, raw_execute, raw_scalar, update,
 };
-pub use query_builder::{QueryBuilder, RangoFilterExt};
+pub use query_builder::{QueryBuilder, RangoFilterExt, SelectAs};
 pub use rango_orm_core::WithRelated;
 pub use transaction::{atomic, MySqlTransaction, TxFuture};
 

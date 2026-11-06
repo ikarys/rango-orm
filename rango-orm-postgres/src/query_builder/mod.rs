@@ -8,6 +8,7 @@ use crate::ops::bind_sql_values;
 use sqlx::postgres::PgRow;
 
 mod exec;
+pub use exec::SelectAs;
 mod filter;
 mod relations;
 

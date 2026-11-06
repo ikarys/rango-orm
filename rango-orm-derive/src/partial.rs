@@ -2,7 +2,7 @@ use proc_macro2::TokenStream;
 use quote::quote;
 use syn::{Data, DeriveInput, Fields, Result};
 
-use crate::model::{extract_option, field_type_to_getter};
+use crate::model::{extract_option, field_type_to_getter, type_name};
 use crate::rango_core_path;
 
 /// Expand `#[derive(Partial)]`.
@@ -53,7 +53,7 @@ pub fn expand(input: DeriveInput) -> Result<TokenStream> {
         let col = quote! { <#model>::#const_name.name() };
         checks.push(quote! { let _: #core::Column<#model, #inner_ty> = <#model>::#const_name; });
         col_names.push(col.clone());
-        let type_str = quote!(#inner_ty).to_string().replace(' ', "");
+        let type_str = type_name(inner_ty);
         let getter = field_type_to_getter(&type_str, &col, nullable, &core);
         from_row_fields.push(quote! { #fname: #getter });
     }

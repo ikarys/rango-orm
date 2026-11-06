@@ -54,12 +54,13 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> syn::Result<Token
     });
     if !has_pk {
         let ty = proc_macro2::Ident::new(ty, proc_macro2::Span::call_site());
+        let core = crate::rango_core_path();
         let vis = fields
             .named
             .first()
             .map(|f| f.vis.clone())
             .unwrap_or_else(|| parse_quote!(pub));
-        let field = syn::Field::parse_named.parse2(quote! { #vis id: #ty })?;
+        let field = syn::Field::parse_named.parse2(quote! { #vis id: #core::#ty })?;
         fields.named.insert(0, field);
     }
 
