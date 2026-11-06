@@ -31,6 +31,8 @@ let pool = connect_mysql(&std::env::var("DATABASE_URL")?).await?;
 
 Every connection uses `utf8mb4`, runs in UTC (`DATETIME` has no time zone) and in strict SQL mode, so invalid values are rejected instead of being silently truncated.
 
+TLS: connections to a remote host use `ssl-mode=REQUIRED` unless the URL sets its own `ssl-mode`, so they never fall back to cleartext. Loopback and Unix socket connections are left as is. `REQUIRED` encrypts but does not check the server certificate: use `ssl-mode=VERIFY_IDENTITY` in production.
+
 ## Type mapping
 
 | Rango type | MySQL / MariaDB column |

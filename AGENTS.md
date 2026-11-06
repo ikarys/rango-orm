@@ -260,7 +260,7 @@ Goal: production-grade by default. Status as of 2026-11-01. P0 = blocks real use
 | P0 | Identifier escaping — every table/column name goes through `quote_ident` (doubles `"`) | ✅ query builder, ops, CLI SQL generation, `import`/`export` (names from files and the catalog are untrusted) |
 | P0 | `FieldPassword` stores plaintext, derives `Debug` + `Serialize` | ✅ argon2id hash on write, redacted `Debug`, no serde, `verify(&self, candidate)` |
 | P0 | `DatabaseConfig` derives `Debug` → password in logs | ✅ manual `Debug` with `redact_url`; CLI config has no `Debug` |
-| P0 | TLS for Postgres (`sslmode=require/verify-full`) | ✅ `tls-rustls`; remote hosts default to `require` when no `sslmode` is given (no silent cleartext fallback); use `verify-full` in prod |
+| P0 | TLS for Postgres and MySQL (`sslmode=require/verify-full`, `ssl-mode=REQUIRED/VERIFY_IDENTITY`) | ✅ `tls-rustls`; remote hosts default to `require` / `REQUIRED` when the URL sets no mode (no silent cleartext fallback); use `verify-full` / `VERIFY_IDENTITY` in prod |
 | P1 | Validate filter/order columns against `M::schema()` | Unknown column → typed error instead of a DB error; defense in depth on top of escaping |
 | P1 | Per-connection `statement_timeout` / `lock_timeout` in `DatabaseConfig` | ✅ `statement_timeout_ms` / `lock_timeout_ms`, sent in the startup packet (no extra round-trip; PgBouncer needs `ignore_startup_parameters`) |
 | P1 | Never log bound values by default | ✅ sqlx only logs SQL text, never bound values; no opt-in added |
@@ -280,7 +280,7 @@ Known-CVE checklist (reviewed 2026-11-01) — keep new APIs out of these classes
 | Query structure from user dicts (`**kwargs`, `_connector`, nested objects) | Django CVE-2025-64459, CVE-2025-59681; TypeORM CVE-2025-60542 | Operators and connectors are Rust enums, never strings from input |
 | Protocol length overflow (> 4 GiB values) | RUSTSEC-2024-0363 (sqlx), RUSTSEC-2024-0365 (diesel) | sqlx ≥ 0.8.1 required (`cargo audit` in CI) |
 | Object names from a dump turned into SQL on restore | PostgreSQL CVE-2025-8714, CVE-2025-8715 | `import`/`restore` treat file contents as untrusted: names quoted, values bound; covered by an e2e test |
-| TLS downgrade (`sslmode=prefer`) | — | Remote hosts default to `require` |
+| TLS downgrade (`sslmode=prefer`, MySQL `PREFERRED`) | — | Remote hosts default to `require` / `REQUIRED` |
 | Bundled SQLite engine bugs | SQLite CVE-2025-6965, CVE-2025-29087 (fixed in 3.50.2 / 3.49.1) | Need attacker-controlled SQL, which Rango never runs; bump `libsqlite3-sys` with sqlx (0.8 bundles 3.46) |
 
 ### Observability

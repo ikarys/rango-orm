@@ -3,12 +3,13 @@
 //! Internal crate: depend on `rango-orm` with feature `mysql`.
 #![forbid(unsafe_code)]
 use crate::error::db_err;
+use rango_orm_core::config::is_local_host;
 use std::str::FromStr;
 use std::time::Duration;
 
 pub use sqlx::MySqlPool;
 use sqlx::{
-    mysql::{MySqlConnectOptions, MySqlPoolOptions},
+    mysql::{MySqlConnectOptions, MySqlPoolOptions, MySqlSslMode},
     ConnectOptions,
 };
 
@@ -51,13 +52,21 @@ impl rango_orm_core::RangoBackend for RangoMySqlPool {
 /// Connect to MySQL 8.0+ / MariaDB 10.6+. The session runs in UTC (`DATETIME` has no time zone)
 /// with strict SQL mode, so invalid values are rejected instead of silently truncated.
 /// `mariadb://` URLs are accepted as an alias of `mysql://`.
+///
+/// TLS: an explicit `ssl-mode` in the URL always wins. Without one, remote hosts get `REQUIRED`
+/// instead of sqlx's `PREFERRED`, which silently falls back to cleartext under a MITM.
+/// Use `ssl-mode=VERIFY_IDENTITY` in production to also authenticate the server certificate.
 pub async fn connect(url: &str) -> rango_orm_core::Result<MySqlPool> {
     let url = match url.strip_prefix("mariadb://") {
         Some(rest) => format!("mysql://{rest}"),
         None => url.to_string(),
     };
-    let opts = MySqlConnectOptions::from_str(&url)
-        .map_err(db_err)?
+    let mut opts = MySqlConnectOptions::from_str(&url).map_err(db_err)?;
+    let explicit_ssl = url.contains("ssl-mode=") || url.contains("sslmode=");
+    if !explicit_ssl && opts.get_socket().is_none() && !is_local_host(opts.get_host()) {
+        opts = opts.ssl_mode(MySqlSslMode::Required);
+    }
+    let opts = opts
         .charset("utf8mb4")
         .timezone(Some("+00:00".to_string()))
         .pipes_as_concat(false)

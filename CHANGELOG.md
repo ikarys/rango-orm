@@ -6,6 +6,7 @@ First release on crates.io. `rango`, `rango-core` and `rango-cli` were already t
 
 **Breaking (Cargo.toml only):** depend on `rango-orm = "0.1.0-beta.3"` instead of the git `rango` crate. The library is still imported as `rango` (`use rango::prelude::*`), and the CLI binary is still `rango` (`cargo install rango-orm-cli --version 0.1.0-beta.3`). Code that used the inner crates directly renames `rango_core` → `rango_orm_core`, `rango_postgres` → `rango_orm_postgres`, and so on.
 
+- Security (MySQL / MariaDB): TLS support. Remote hosts now default to `ssl-mode=REQUIRED` when the URL sets no mode; before, no TLS was compiled in and connections silently went over cleartext.
 - Minimum supported Rust version is now 1.89 (was declared 1.85, but current dependencies such as `uuid` already need 1.89). CI checks it.
 
 ## 0.1.0-beta.2 (2026-11-06)
