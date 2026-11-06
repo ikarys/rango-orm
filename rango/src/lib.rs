@@ -86,8 +86,8 @@ pub use rango_postgres::PgPool;
 #[cfg(feature = "postgres")]
 pub use rango_postgres::{
     M2M, Pg, PgQueryExt, QueryBuilder, RangoExecutor, RangoFilterExt, RangoTransaction, TxFuture,
-    WithRelated, all, atomic, atomic_retry, delete, get, get_or_create, insert, raw, raw_execute,
-    raw_scalar, transaction, update, update_or_create,
+    WithRelated, all, atomic, atomic_retry, bulk_create, bulk_update, bulk_upsert, delete, get,
+    get_or_create, insert, raw, raw_execute, raw_scalar, transaction, update, update_or_create,
 };
 
 #[cfg(feature = "postgres")]
@@ -144,8 +144,9 @@ pub mod prelude {
     #[cfg(feature = "postgres")]
     pub use rango_postgres::{
         M2M, Pg, PgPool, PgQueryExt, QueryBuilder, RangoExecutor, RangoFilterExt, RangoTransaction,
-        TxFuture, WithRelated, all, atomic, atomic_retry, delete, get, get_or_create, insert, raw,
-        raw_execute, raw_scalar, transaction, update, update_or_create,
+        TxFuture, WithRelated, all, atomic, atomic_retry, bulk_create, bulk_update, bulk_upsert,
+        delete, get, get_or_create, insert, raw, raw_execute, raw_scalar, transaction, update,
+        update_or_create,
     };
 
     #[cfg(feature = "sqlite")]
