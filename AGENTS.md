@@ -271,7 +271,7 @@ Goal: production-grade by default. Status as of 2026-11-01. P0 = blocks real use
 | P1 | Per-connection `statement_timeout` / `lock_timeout` in `DatabaseConfig` | ✅ `statement_timeout_ms` / `lock_timeout_ms`, sent in the startup packet (no extra round-trip; PgBouncer needs `ignore_startup_parameters`) |
 | P1 | Never log bound values by default | ✅ sqlx only logs SQL text, never bound values; no opt-in added |
 | P1 | Typed errors (`rango::Error`: `NotFound`, `UniqueViolation`, `ForeignKeyViolation`, `Timeout`, `Connection`, …) instead of `anyhow` in library crates | ✅ `rango_orm_core::Error`; each backend maps sqlx errors in `error.rs` (`db_err`); no SQL text in errors; `anyhow` only in `rango-orm-cli` |
-| P1 | `#![forbid(unsafe_code)]` in every crate; `cargo audit` + `cargo deny` in CI | 🚧 `forbid(unsafe_code)` in every crate root ✅; `cargo audit` in CI + `just audit` (exceptions in `.cargo/audit.toml`) ✅; `cargo deny` pending |
+| P1 | `#![forbid(unsafe_code)]` in every crate; `cargo audit` + `cargo deny` in CI | ✅ `forbid(unsafe_code)` in every crate root ✅; `cargo audit` in CI + `just audit` (exceptions in `.cargo/audit.toml`) ✅; `cargo deny` (`deny.toml`: licenses, sources, advisories) in CI + `just deny` ✅ |
 | P2 | Least-privilege guide: a migration role (DDL) separate from the app role (DML only) | `rango migrate` can take its own `MIGRATE_DATABASE_URL` |
 | P2 | `dump` / `backup` files written with `0600` permissions; `restore` refuses non-Rango dumps | |
 

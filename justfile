@@ -35,7 +35,7 @@ test-mysql: db-mysql
 # Run fmt + clippy checks (same as pre-push hook)
 check:
     cargo fmt --all -- --check
-    cargo clippy --workspace --all-targets -- -D warnings
+    cargo clippy --workspace --all-targets --all-features -- -D warnings
 
 # Run SQLite benchmarks (no DB required)
 bench-sqlite:
@@ -88,3 +88,7 @@ coverage:
 # Scan dependencies for known vulnerabilities (RustSec)
 audit:
     cargo audit
+
+# Check licenses, banned crates, sources and advisories (deny.toml)
+deny:
+    cargo deny check
