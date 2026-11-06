@@ -24,6 +24,37 @@ macro_rules! impl_get {
     };
 }
 
+/// `f64` from FLOAT8, or from NUMERIC (`FieldDecimal` is f64-backed; sqlx has no f64 decoding
+/// for NUMERIC without a decimal crate, so the binary wire format is read directly).
+fn read_f64(row: &PgRow, col: &str) -> Result<f64, RowError> {
+    let err = |e: &dyn std::fmt::Display| RowError(format!("Column '{}': {}", col, e));
+    match row.try_get::<f64, _>(col) {
+        Ok(v) => Ok(v),
+        Err(e) => {
+            let raw = row.try_get_raw(col).map_err(|e| err(&e))?;
+            let is_numeric = sqlx::TypeInfo::name(&*sqlx::ValueRef::type_info(&raw)) == "NUMERIC";
+            let b = raw.as_bytes().map_err(|e| err(&e))?;
+            if !is_numeric || b.len() < 8 {
+                return Err(err(&e));
+            }
+            // header: ndigits, weight, sign, dscale (i16/u16 big-endian), then base-10000 digits
+            let h = |i: usize| i16::from_be_bytes([b[i], b[i + 1]]);
+            let (n, weight, sign) = (h(0) as usize, h(2) as i32, h(4) as u16);
+            if sign == 0xC000 {
+                return Ok(f64::NAN);
+            }
+            if b.len() < 8 + 2 * n {
+                return Err(err(&"truncated NUMERIC"));
+            }
+            let mut v = 0f64;
+            for i in 0..n {
+                v += f64::from(h(8 + 2 * i)) * 10000f64.powi(weight - i as i32);
+            }
+            Ok(if sign == 0x4000 { -v } else { v })
+        }
+    }
+}
+
 macro_rules! impl_rangorow {
     ($type:ty) => {
         impl RangoRow for $type {
@@ -32,7 +63,9 @@ macro_rules! impl_rangorow {
             impl_get!(get_i32, i32);
             impl_get!(get_i64, i64);
             impl_get!(get_f32, f32);
-            impl_get!(get_f64, f64);
+            fn get_f64(&self, col: &str) -> Result<f64, RowError> {
+                read_f64(&self.0, col)
+            }
             impl_get!(get_string, String);
             impl_get!(get_bytes, Vec<u8>);
             impl_get!(get_uuid, uuid::Uuid);
