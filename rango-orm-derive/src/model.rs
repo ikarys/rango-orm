@@ -18,6 +18,7 @@ struct FieldAttr {
     column: Option<String>,
     default: Option<String>,
     comment: Option<String>,
+    on_delete: Option<String>,
 }
 
 /// Parsed `#[model(...)]` attributes on the struct.
@@ -328,6 +329,13 @@ fn parse_field_attr(field: &Field) -> Result<FieldAttr> {
                         attr.default = Some(s.value());
                     }
                 }
+                Meta::NameValue(nv) if nv.path.is_ident("on_delete") => {
+                    if let syn::Expr::Lit(expr_lit) = &nv.value
+                        && let Lit::Str(s) = &expr_lit.lit
+                    {
+                        attr.on_delete = Some(s.value());
+                    }
+                }
                 Meta::NameValue(nv) if nv.path.is_ident("comment") => {
                     if let syn::Expr::Lit(expr_lit) = &nv.value
                         && let Lit::Str(s) = &expr_lit.lit
@@ -385,6 +393,45 @@ fn generate_column_def(field: &Field, core: &TokenStream) -> Result<TokenStream>
         quote! { None }
     };
 
+    // Same rules and defaults as `rango makemigrations`, so the compiled schema and the
+    // migrated one cannot drift (see rango-orm-cli/tests/contract.rs).
+    let references = if is_foreign_key {
+        let target = first_generic(inner_ty).ok_or_else(|| {
+            syn::Error::new_spanned(&field.ty, "expected ForeignKey<Model>")
+        })?;
+        let action = match attr.on_delete.as_deref() {
+            None | Some("cascade") => quote! { Cascade },
+            Some("set_null") => {
+                if !nullable {
+                    return Err(syn::Error::new_spanned(
+                        field,
+                        "on_delete = \"set_null\" requires an Option<ForeignKey<...>> field",
+                    ));
+                }
+                quote! { SetNull }
+            }
+            Some("set_default") => quote! { SetDefault },
+            Some("restrict") => quote! { Restrict },
+            Some("no_action") => quote! { NoAction },
+            Some(other) => {
+                return Err(syn::Error::new_spanned(
+                    field,
+                    format!("Invalid on_delete value: {other}"),
+                ));
+            }
+        };
+        quote! {
+            Some(#core::FkReference {
+                table: <#target as #core::Model>::table_name().to_string(),
+                column: <#target as #core::ModelValues>::pk_column().to_string(),
+                on_delete: #core::ReferentialAction::#action,
+                on_update: #core::ReferentialAction::NoAction,
+            })
+        }
+    } else {
+        quote! { None }
+    };
+
     Ok(quote! {
         #core::ColumnDef {
             name: #col_name.to_string(),
@@ -393,7 +440,7 @@ fn generate_column_def(field: &Field, core: &TokenStream) -> Result<TokenStream>
             primary_key: #is_pk,
             unique: #is_unique,
             default: #default_val,
-            references: None,
+            references: #references,
             index: #is_index || #is_foreign_key,
         }
     })
@@ -439,6 +486,12 @@ pub(crate) fn field_type_to_getter(
             let min_lit = proc_macro2::Literal::usize_unsuffixed(min);
             let max_lit = proc_macro2::Literal::usize_unsuffixed(max);
             quote! { row.get_string(#col).map(|s| #core::FieldPassword::<#min_lit, #max_lit>::from_hash(s))? }
+        }
+        s if s.starts_with("FieldDecimal<") => {
+            let (p, sc) = parse_two_generics(s, "FieldDecimal");
+            let p_lit = proc_macro2::Literal::u8_unsuffixed(p as u8);
+            let sc_lit = proc_macro2::Literal::u8_unsuffixed(sc as u8);
+            quote! { row.get_f64(#col).map(|v| #core::FieldDecimal::<#p_lit, #sc_lit>(v))? }
         }
         s if s.starts_with("FieldRange<") => {
             let (min, max) = parse_two_generics_i64(s, "FieldRange");
