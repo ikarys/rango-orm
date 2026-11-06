@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- License: dual-licensed under MIT OR Apache-2.0 (was MIT only).
+
 ## 0.1.1 (2026-11-06)
 
 **Behavior changes to check before upgrading:**
