@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0 (unreleased)
+## 0.1.0 (2026-11-06)
 
 First stable-track release: the full v0.1.0 to-do list is in.
 
