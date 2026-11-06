@@ -236,22 +236,24 @@ fn diff_to_sql(d: &SchemaDiff, backend: BackendKind) -> String {
         SchemaDiff::AlterColumnIndex {
             table,
             column,
+            col_type,
             index,
         } => {
             if *index {
+                let key = index_key_of(column, col_type, backend);
                 if backend == BackendKind::Mysql {
                     format!(
                         "CREATE INDEX {} ON {} ({});\n\n",
                         object_name(backend, &format!("{}_{}_idx", table, column)),
                         backend.quote_ident(table),
-                        backend.quote_ident(column)
+                        key
                     )
                 } else {
                     format!(
                         "CREATE INDEX IF NOT EXISTS {} ON {} ({});\n\n",
                         object_name(backend, &format!("{}_{}_idx", table, column)),
                         backend.quote_ident(table),
-                        backend.quote_ident(column)
+                        key
                     )
                 }
             } else {
@@ -568,8 +570,12 @@ fn generate_create_table(schema: &TableSchema, backend: BackendKind) -> String {
 
 /// Index key part for `col`. MySQL cannot index a TEXT/BLOB column without a prefix length.
 fn index_key(col: &ColumnDef, backend: BackendKind) -> String {
-    let name = backend.quote_ident(&col.name);
-    match col.col_type {
+    index_key_of(&col.name, &col.col_type, backend)
+}
+
+fn index_key_of(column: &str, col_type: &ColumnType, backend: BackendKind) -> String {
+    let name = backend.quote_ident(column);
+    match col_type {
         ColumnType::Text | ColumnType::Bytea if backend == BackendKind::Mysql => {
             format!("{name}(191)")
         }
@@ -1380,6 +1386,7 @@ mod tests {
         let diff = SchemaDiff::AlterColumnIndex {
             table: "t".to_string(),
             column: "c".to_string(),
+            col_type: ColumnType::Uuid,
             index: false,
         };
 
@@ -1387,6 +1394,27 @@ mod tests {
 
         assert!(sql.contains("DROP INDEX `t_c_idx` ON `t`;"), "got: {}", sql);
         assert!(!sql.contains("DROP INDEX IF EXISTS"), "got: {}", sql);
+    }
+
+    #[test]
+    fn mysql_alter_column_index_on_text_and_blob_has_prefix_length() {
+        let sql_for = |col_type, backend| {
+            generate_sql_from_diff(
+                &[SchemaDiff::AlterColumnIndex {
+                    table: "t".to_string(),
+                    column: "c".to_string(),
+                    col_type,
+                    index: true,
+                }],
+                backend,
+            )
+        };
+        for ty in [ColumnType::Text, ColumnType::Bytea] {
+            let sql = sql_for(ty, BackendKind::Mysql);
+            assert!(sql.contains("ON `t` (`c`(191));"), "got: {}", sql);
+        }
+        assert!(sql_for(ColumnType::Uuid, BackendKind::Mysql).contains("ON `t` (`c`);"));
+        assert!(sql_for(ColumnType::Text, BackendKind::Postgres).contains("ON \"t\" (\"c\");"));
     }
 
     #[test]
