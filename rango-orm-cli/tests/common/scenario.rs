@@ -23,6 +23,7 @@ macro_rules! scenario {
                     bio: None,
                     karma: karma.map(FieldInt),
                     created: FieldDateTime::now(),
+                    followers: ManyToMany::empty(),
                 }
             }
 
@@ -209,6 +210,46 @@ macro_rules! scenario {
                         .len()
                 };
                 assert_eq!((count("first"), count("second"), count("third")), (2, 1, 0));
+
+                // Self-referencing M2M: `add(from, to)` is directional, `reverse` goes back.
+                let who = |n: &'static str| async move {
+                    RpxAuthor::filter(pool)
+                        .eq(RpxAuthor::NAME, n)
+                        .one()
+                        .await
+                        .unwrap()
+                        .unwrap()
+                };
+                let (ada, bob, cyd) = (who("ada").await, who("bob").await, who("cyd").await);
+                M2M::<RpxAuthor, RpxAuthor>::add(pool, &ada, &bob).await.unwrap();
+                M2M::<RpxAuthor, RpxAuthor>::add(pool, &ada, &cyd).await.unwrap();
+                M2M::<RpxAuthor, RpxAuthor>::add(pool, &bob, &ada).await.unwrap();
+                let names = |v: Vec<RpxAuthor>| {
+                    let mut n: Vec<_> = v.iter().map(|a| a.name.0.clone()).collect();
+                    n.sort();
+                    n
+                };
+                                assert_eq!(names(M2M::<RpxAuthor, RpxAuthor>::all(pool, &ada).await.unwrap()), ["bob", "cyd"]);
+                assert_eq!(names(M2M::<RpxAuthor, RpxAuthor>::all(pool, &bob).await.unwrap()), ["ada"]);
+                assert!(M2M::<RpxAuthor, RpxAuthor>::all(pool, &cyd).await.unwrap().is_empty());
+                let back = M2M::<RpxAuthor, RpxAuthor>::reverse(pool, &ada).await.unwrap();
+                assert_eq!(names(back), ["bob"]);
+                let authors = RpxAuthor::filter(pool)
+                    .prefetch_related(RpxAuthor::FOLLOWERS)
+                    .all()
+                    .await
+                    .unwrap();
+                let followed = |n: &str| {
+                    authors
+                        .iter()
+                        .find(|a| a.name.0 == n)
+                        .unwrap()
+                        .prefetched::<RpxAuthor>()
+                        .len()
+                };
+                assert_eq!((followed("ada"), followed("bob"), followed("cyd")), (2, 1, 0));
+                M2M::<RpxAuthor, RpxAuthor>::remove(pool, &ada, &bob).await.unwrap();
+                assert_eq!(names(M2M::<RpxAuthor, RpxAuthor>::all(pool, &ada).await.unwrap()), ["cyd"]);
             }
 
             async fn partial_bulk_keyset(pool: &$Pool) {

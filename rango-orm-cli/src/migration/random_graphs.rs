@@ -6,9 +6,8 @@
 //! MariaDB (`integration-mysql`, `MYSQL_URL`) run about 50 seeds each, on `rg*`-prefixed
 //! tables that are dropped before and after every seed.
 //!
-//! Deliberate limitations of the generator: no self-referencing M2M (the pivot would get two
-//! columns with the same name) and M2M only between tables with a UUID primary key (the
-//! pivot columns are UUID, see `generate_pivot_table`).
+//! Deliberate limitation of the generator: M2M only between tables with a UUID primary key
+//! (the pivot columns are UUID, see `generate_pivot_table`). Self-referencing M2M is covered.
 use crate::migration::diff::{SchemaDiff, diff};
 use crate::migration::scanner::{M2MRelation, generate_pivot_table};
 use crate::migration::snapshot::Snapshot;
@@ -131,7 +130,7 @@ fn random_graph(seed: u64) -> Vec<TableSchema> {
             uuid_tables[rng.below(uuid_tables.len())],
             uuid_tables[rng.below(uuid_tables.len())],
         );
-        if a != b && seen.insert((a, b)) {
+        if seen.insert((a, b)) {
             tables.push(generate_pivot_table(&M2MRelation {
                 from_table: name(a),
                 to_table: name(b),

@@ -141,11 +141,18 @@ fn scanner_matches_derive_for_every_model() {
     let (managed, unmanaged): (Vec<_>, Vec<_>) = all.iter().partition(|s| s.managed);
     assert!(!unmanaged.is_empty(), "fixture must cover managed = false");
 
-    // M2M declared in the fixture: RpxBlogPost.tags -> RpxTag.
-    let pivots = [pivot_schema(
-        models::RpxBlogPost::table_name(),
-        models::RpxTag::table_name(),
-    )];
+    // M2M declared in the fixture: RpxBlogPost.tags -> RpxTag and the self-referencing
+    // RpxAuthor.followers -> RpxAuthor (pivot columns `from_..._id` / `to_..._id`).
+    let pivots = [
+        pivot_schema(
+            models::RpxBlogPost::table_name(),
+            models::RpxTag::table_name(),
+        ),
+        pivot_schema(
+            models::RpxAuthor::table_name(),
+            models::RpxAuthor::table_name(),
+        ),
+    ];
 
     let want: BTreeSet<&str> = managed
         .iter()
