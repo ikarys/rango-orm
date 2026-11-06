@@ -52,6 +52,12 @@ bench-compare: db
         DATABASE_URL={{database_url}} cargo bench -p bench-$p; done
     python3 benchmarks/compare.py
 
+# Run diesel's diesel_bench suite with the Rango adapter (requires Docker); args go to criterion
+bench-diesel *args: db
+    docker compose exec postgres psql -U postgres -tc "SELECT 1 FROM pg_database WHERE datname = 'diesel_bench'" | grep -q 1 || \
+        docker compose exec postgres psql -U postgres -c "CREATE DATABASE diesel_bench"
+    DATABASE_URL=postgres://postgres:postgres@localhost:{{pg_port}}/diesel_bench benchmarks/diesel_bench/run.sh {{args}}
+
 # Run unit tests only (no DB required)
 test:
     cargo test --workspace

@@ -1,0 +1,91 @@
+diff --git a/diesel_bench/Cargo.toml b/diesel_bench/Cargo.toml
+index c15f9c8..7cb0cbc 100644
+--- a/diesel_bench/Cargo.toml
++++ b/diesel_bench/Cargo.toml
+@@ -48,6 +48,9 @@ zero-postgres = { optional = true, version = "=0.8.0", features = [
+     "derive",
+ ] }
+ 
++pq-sys = { version = "0.7", features = ["bundled_without_openssl"] }
++rango = { path = "@RANGO@", optional = true }
++
+ [dependencies.diesel-async]
+ git = "https://github.com/diesel-rs/diesel_async"
+ branch = "main"
+@@ -60,6 +63,7 @@ default-features = false
+ features = []
+ 
+ [build-dependencies]
++pq-sys = { version = "0.7", features = ["bundled_without_openssl"] }
+ diesel = { path = "../diesel", default-features = false }
+ diesel_migrations = { path = "../diesel_migrations" }
+ dotenvy = "0.15"
+@@ -82,6 +86,7 @@ instruction_count = ["criterion-perf-events", "perfcnt"]
+ fast_run = []
+ zero-mysql = ["dep:zero-mysql", "tokio"]
+ zero-postgres = ["dep:zero-postgres", "tokio"]
++rango-bench = ["dep:rango", "tokio"]
+ tokio_postgres = ["dep:tokio_postgres", "tokio", "futures-util"]
+ 
+ [profile.release]
+diff --git a/diesel_bench/benches/lib.rs b/diesel_bench/benches/lib.rs
+index 2a9c704..ba68716 100644
+--- a/diesel_bench/benches/lib.rs
++++ b/diesel_bench/benches/lib.rs
+@@ -14,6 +14,8 @@ mod rust_orm_benches;
+ mod sea_orm_benches;
+ #[cfg(feature = "sqlx-bench")]
+ mod sqlx_benches;
++#[cfg(feature = "rango-bench")]
++mod rango_benches;
+ #[cfg(all(feature = "postgres", feature = "tokio_postgres"))]
+ mod tokio_postgres_benches;
+ #[cfg(all(feature = "wtx", not(feature = "sqlite")))]
+@@ -109,6 +111,11 @@ fn bench_trivial_query(c: &mut CriterionType) {
+             crate::rust_orm_benches::bench_trivial_query(b, *i);
+         });
+ 
++        #[cfg(feature = "rango-bench")]
++        group.bench_with_input(BenchmarkId::new("rango", size), size, |b, i| {
++            crate::rango_benches::bench_trivial_query(b, *i);
++        });
++
+         #[cfg(feature = "sqlx-bench")]
+         group.bench_with_input(
+             BenchmarkId::new("sqlx_query_as_macro", size),
+@@ -289,6 +296,11 @@ fn bench_medium_complex_query(c: &mut CriterionType) {
+             |b, i| crate::diesel_async_benches::bench_medium_complex_query_queryable_by_name(b, *i),
+         );
+ 
++        #[cfg(feature = "rango-bench")]
++        group.bench_with_input(BenchmarkId::new("rango", size), size, |b, i| {
++            crate::rango_benches::bench_medium_complex_query(b, *i);
++        });
++
+         #[cfg(all(feature = "sqlx-bench", not(feature = "sqlite")))]
+         group.bench_with_input(
+             BenchmarkId::new("sqlx_query_as_macro", size),
+@@ -424,6 +436,11 @@ fn bench_loading_associations_sequentially(c: &mut CriterionType) {
+         crate::rusqlite_benches::loading_associations_sequentially(b)
+     });
+ 
++    #[cfg(feature = "rango-bench")]
++    group.bench_function("rango", |b| {
++        crate::rango_benches::loading_associations_sequentially(b)
++    });
++
+     #[cfg(feature = "sqlx-bench")]
+     group.bench_function("sqlx", |b| {
+         crate::sqlx_benches::loading_associations_sequentially(b)
+@@ -485,6 +502,11 @@ fn bench_insert(c: &mut CriterionType) {
+             crate::diesel_async_benches::bench_insert(b, *i);
+         });
+ 
++        #[cfg(feature = "rango-bench")]
++        group.bench_with_input(BenchmarkId::new("rango", size), size, |b, i| {
++            crate::rango_benches::bench_insert(b, *i);
++        });
++
+         #[cfg(feature = "sqlx-bench")]
+         group.bench_with_input(BenchmarkId::new("sqlx", size), size, |b, i| {
+             crate::sqlx_benches::bench_insert(b, *i);
