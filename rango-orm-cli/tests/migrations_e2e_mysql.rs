@@ -587,3 +587,188 @@ async fn import_does_not_inject_column_names() {
     drop_tables(&pool, &["e2e_my_import_victim", "e2e_my_import_target"]).await;
     project.remove();
 }
+
+// ─── dump / restore ───────────────────────────────────────────────────────────
+
+const DUMP_MODELS: &str = r#"
+#[derive(Model)]
+pub struct Person {
+    pub id: FieldUuid,
+    pub name: FieldVarchar<1, 100>,
+    pub bio: Option<FieldText>,
+    pub active: FieldBool,
+    pub score: FieldDouble,
+    pub price: FieldDecimal<10, 2>,
+    pub born: FieldDate,
+    pub seen: FieldDateTime,
+    pub data: FieldJson,
+}
+
+#[derive(Model)]
+pub struct Post {
+    pub id: FieldUuid,
+    pub author: ForeignKey<Person>,
+    pub title: FieldText,
+}
+"#;
+
+const DUMP_TABLES: [&str; 3] = ["e2e_mydump_post", "e2e_mydump_person", "_rango_migrations"];
+
+/// Project with the dump models migrated and two persons + one post inserted.
+async fn dump_project(pool: &MySqlPool, name: &str) -> Project {
+    drop_tables(pool, &DUMP_TABLES).await;
+    let project = Project::new(name);
+    project.write_models(DUMP_MODELS);
+    let out = project.run_cli(&[
+        "makemigrations",
+        "src",
+        "-o",
+        "migrations",
+        "-p",
+        "e2e_mydump",
+        "--yes",
+    ]);
+    assert_success(&out, "makemigrations");
+    assert_success(&project.migrate(), "migrate");
+    for sql in [
+        "INSERT INTO e2e_mydump_person (id, name, bio, active, score, price, born, seen, data) VALUES \
+         (UNHEX('00000000000000000000000000000001'), 'Ann \"q\"', 'hé', true, 1.5, 12.34, '2024-02-29', '2024-05-06 07:08:09.123456', '{\"k\":[1,\"é\",null]}'), \
+         (UNHEX('00000000000000000000000000000002'), 'Bob', NULL, false, -0.25, 0.01, '1999-12-31', '2000-01-01 00:00:00', '{}')",
+        "INSERT INTO e2e_mydump_post (id, author, title) VALUES \
+         (UNHEX('000000000000000000000000000000a1'), UNHEX('00000000000000000000000000000001'), 'Hello')",
+    ] {
+        sqlx::query(sql).execute(pool).await.expect(sql);
+    }
+    project
+}
+
+async fn dump_state(pool: &MySqlPool) -> Vec<String> {
+    use sqlx::Row;
+    let mut out = Vec::new();
+    for sql in [
+        "SELECT CAST(CONCAT_WS('|', HEX(id), name, COALESCE(bio, '<null>'), active, score, price, born, seen, CAST(data AS CHAR)) AS CHAR) \
+         FROM e2e_mydump_person ORDER BY id",
+        "SELECT CAST(CONCAT_WS('|', HEX(id), HEX(author), title) AS CHAR) FROM e2e_mydump_post ORDER BY id",
+    ] {
+        let rows = sqlx::query(sql).fetch_all(pool).await.expect(sql);
+        out.extend(rows.iter().map(|r| r.get::<String, _>(0)));
+    }
+    out
+}
+
+async fn dump_count(pool: &MySqlPool, table: &str) -> Option<i64> {
+    sqlx::query_scalar(&format!("SELECT count(*) FROM `{table}`"))
+        .fetch_one(pool)
+        .await
+        .ok()
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-mysql"), ignore)]
+async fn dump_restore_round_trip() {
+    let pool = MySqlPool::connect(&database_url()).await.expect("connect");
+    let project = dump_project(&pool, "dump_rt").await;
+    let before = dump_state(&pool).await;
+
+    assert_success(
+        &project.run_cli(&[
+            "dump",
+            "-t",
+            "e2e_mydump_person",
+            "-t",
+            "e2e_mydump_post",
+            "-o",
+            "d.json",
+        ]),
+        "dump",
+    );
+    let dump: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(project.dir.join("d.json")).unwrap()).unwrap();
+    let names: Vec<&str> = dump["tables"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["e2e_mydump_person", "e2e_mydump_post"]);
+
+    // Restoring over existing data fails and changes nothing.
+    let out = project.run_cli(&["restore", "d.json"]);
+    assert_failure(&out, "restore over existing rows");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("Failed to insert into e2e_mydump_"), "{err}");
+    assert_eq!(dump_state(&pool).await, before);
+
+    drop_tables(&pool, &DUMP_TABLES).await;
+    assert_success(&project.run_cli(&["restore", "d.json"]), "restore");
+    assert_eq!(dump_state(&pool).await, before);
+
+    drop_tables(&pool, &DUMP_TABLES).await;
+    project.remove();
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-mysql"), ignore)]
+async fn dump_schema_only_restores_empty_tables() {
+    let pool = MySqlPool::connect(&database_url()).await.expect("connect");
+    let project = dump_project(&pool, "dump_schema").await;
+    assert_success(
+        &project.run_cli(&["dump", "--schema-only", "-o", "s.json"]),
+        "dump",
+    );
+    drop_tables(&pool, &DUMP_TABLES).await;
+    assert_success(&project.run_cli(&["restore", "s.json"]), "restore");
+    assert_eq!(dump_count(&pool, "e2e_mydump_person").await, Some(0));
+    assert_eq!(dump_count(&pool, "e2e_mydump_post").await, Some(0));
+    drop_tables(&pool, &DUMP_TABLES).await;
+    project.remove();
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-mysql"), ignore)]
+async fn dump_restore_rolls_back_rows() {
+    let pool = MySqlPool::connect(&database_url()).await.expect("connect");
+    let project = dump_project(&pool, "dump_atomic").await;
+    assert_success(
+        &project.run_cli(&[
+            "dump",
+            "-t",
+            "e2e_mydump_person",
+            "-t",
+            "e2e_mydump_post",
+            "-o",
+            "d.json",
+        ]),
+        "dump",
+    );
+    // NOT NULL violation in the last table: the person rows must roll back.
+    // (MySQL DDL auto-commits, so the empty tables stay; FK checks are off during restore.)
+    let mut dump: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(project.dir.join("d.json")).unwrap()).unwrap();
+    dump["tables"][1]["rows"][0]["title"] = serde_json::Value::Null;
+    std::fs::write(project.dir.join("bad.json"), dump.to_string()).unwrap();
+
+    drop_tables(&pool, &DUMP_TABLES).await;
+    assert_failure(&project.run_cli(&["restore", "bad.json"]), "restore");
+    assert_eq!(dump_count(&pool, "e2e_mydump_person").await, Some(0));
+    assert_eq!(dump_count(&pool, "e2e_mydump_post").await, Some(0));
+    drop_tables(&pool, &DUMP_TABLES).await;
+    project.remove();
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-mysql"), ignore)]
+async fn export_import_round_trip_typed() {
+    let pool = MySqlPool::connect(&database_url()).await.expect("connect");
+    let project = dump_project(&pool, "dump_exp").await;
+    let before = dump_state(&pool).await;
+    assert_success(&project.run_cli(&["export", "-o", "e.json"]), "export");
+    sqlx::raw_sql("SET FOREIGN_KEY_CHECKS = 0; DELETE FROM e2e_mydump_post; DELETE FROM e2e_mydump_person; SET FOREIGN_KEY_CHECKS = 1;")
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_success(&project.run_cli(&["import", "e.json"]), "import");
+    assert_eq!(dump_state(&pool).await, before);
+    drop_tables(&pool, &DUMP_TABLES).await;
+    project.remove();
+}
