@@ -703,6 +703,12 @@ async fn export_import_round_trip_typed() {
     }
     assert_success(&project.run_cli(&["import", "e.json"]), "import");
     assert_eq!(dump_state(&pool).await, before);
+    // Every row now conflicts on its primary key: --replace updates them in place.
+    assert_success(
+        &project.run_cli(&["import", "e.json", "--replace"]),
+        "import --replace",
+    );
+    assert_eq!(dump_state(&pool).await, before);
     drop_dump_tables(&pool).await;
     project.remove();
 }
