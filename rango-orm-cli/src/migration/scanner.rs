@@ -118,7 +118,7 @@ impl<'ast> Visit<'ast> for ModelVisitor<'_> {
             for field in &fields.named {
                 // Detect ManyToMany<T> — record relation, skip column
                 let ty = &field.ty;
-                let type_str = quote::quote!(#ty).to_string().replace(" ", "");
+                let type_str = type_name(ty);
                 if type_str.starts_with("ManyToMany<") {
                     let to_model = type_str
                         .trim_start_matches("ManyToMany<")
@@ -203,7 +203,7 @@ fn has_derive_model(node: &ItemStruct) -> bool {
             syn::punctuated::Punctuated::<syn::Path, syn::Token![,]>::parse_terminated,
         ) {
             for path in list {
-                if path.is_ident("Model") {
+                if path.segments.last().is_some_and(|s| s.ident == "Model") {
                     return true;
                 }
             }
@@ -249,7 +249,7 @@ fn build_column_def(field: &syn::Field) -> Result<ColumnDef> {
     let is_pk = field_attrs.primary_key || field_name == "id";
 
     let (nullable, inner_ty) = extract_option(&field.ty);
-    let type_str = quote::quote!(#inner_ty).to_string().replace(" ", "");
+    let type_str = type_name(inner_ty);
     let is_foreign_key = type_str.starts_with("ForeignKey<");
     let col_type = map_field_type(inner_ty)?;
 
@@ -345,6 +345,18 @@ fn parse_field_attrs(field: &syn::Field) -> FieldAttrs {
     attrs
 }
 
+/// Type text without its module path (`rango::FieldVarchar<1, 100>` becomes `FieldVarchar<1,100>`),
+/// the same normalisation as the derive, so imported and path-qualified types mean the same.
+fn type_name(ty: &Type) -> String {
+    let last = match ty {
+        Type::Path(tp) => tp.path.segments.last().map(|seg| quote::quote!(#seg)),
+        _ => None,
+    };
+    last.unwrap_or_else(|| quote::quote!(#ty))
+        .to_string()
+        .replace(' ', "")
+}
+
 fn extract_option(ty: &Type) -> (bool, &Type) {
     if let Type::Path(tp) = ty
         && let Some(seg) = tp.path.segments.last()
@@ -358,7 +370,7 @@ fn extract_option(ty: &Type) -> (bool, &Type) {
 }
 
 fn map_field_type(ty: &Type) -> Result<ColumnType> {
-    let s = quote::quote!(#ty).to_string().replace(" ", "");
+    let s = type_name(ty);
     let col = match s.as_str() {
         "FieldBool" => ColumnType::Bool,
         "FieldSmallInt" => ColumnType::SmallInt,
@@ -628,7 +640,7 @@ fn parse_on_delete(value: &Option<String>) -> Result<ReferentialAction> {
 }
 
 fn extract_foreign_key_target(ty: &Type) -> Option<String> {
-    let s = quote::quote!(#ty).to_string().replace(" ", "");
+    let s = type_name(ty);
     let inner = s.strip_prefix("ForeignKey<")?.strip_suffix('>')?;
     let last = inner.rsplit("::").next()?;
     Some(last.to_string())
@@ -639,6 +651,14 @@ fn resolve_model_tables(
     m2m_relations: &mut [M2MRelation],
     model_tables: &HashMap<String, String>,
 ) {
+    // A foreign key points at the target's primary key column, whatever its name.
+    let pk_columns: HashMap<String, String> = schemas
+        .iter()
+        .filter_map(|s| {
+            let pk = s.columns.iter().find(|c| c.primary_key)?;
+            Some((s.table_name.clone(), pk.name.clone()))
+        })
+        .collect();
     for schema in schemas {
         for col in &mut schema.columns {
             if let Some(fk) = &mut col.references {
@@ -646,6 +666,9 @@ fn resolve_model_tables(
                     .get(&fk.table)
                     .cloned()
                     .unwrap_or_else(|| fk.table.clone());
+                if let Some(pk) = pk_columns.get(&fk.table) {
+                    fk.column = pk.clone();
+                }
             }
         }
     }
