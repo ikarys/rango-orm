@@ -107,13 +107,13 @@ In production, pass the URL via `DATABASE_URL`; never put credentials in `rango.
 
 ## Rango vs other Rust ORMs
 
-|  | Diesel | SeaORM | sqlx | **Rango** |
+|  | **Rango** | Diesel | SeaORM | sqlx |
 |---|---|---|---|---|
-| Migrations | SQL by hand | Rust files by hand | SQL by hand | generated from structs |
-| Model definition | `table!` macro + struct | Entity + ActiveModel | none | `#[derive(Model)]` only |
-| Async | via diesel-async | yes | yes | yes, native |
-| Typed queries | strong | runtime column checks | `query!` macros need a live DB | typed columns, name and value checked |
-| Maturity | large | medium | large | early |
+| Migrations | generated from structs | SQL by hand | Rust files by hand | SQL by hand |
+| Model definition | `#[derive(Model)]` only | `table!` macro + struct | Entity + ActiveModel | none |
+| Async | yes, native | via diesel-async | yes | yes |
+| Typed queries | typed columns, name and value checked | strong | runtime column checks | `query!` macros need a live DB |
+| Maturity | early | large | medium | large |
 
 Full comparison: [docs](docs/src/introduction.md).
 
