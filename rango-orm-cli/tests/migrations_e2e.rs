@@ -516,3 +516,193 @@ async fn import_inserts_parents_first_and_is_atomic() {
     }
     project.remove();
 }
+
+// ─── dump / restore ───────────────────────────────────────────────────────────
+
+const DUMP_MODELS: &str = r#"
+#[derive(Model)]
+pub struct Person {
+    pub id: FieldUuid,
+    pub name: FieldVarchar<1, 100>,
+    pub bio: Option<FieldText>,
+    pub active: FieldBool,
+    pub score: FieldDouble,
+    pub price: FieldDecimal<10, 2>,
+    pub born: FieldDate,
+    pub seen: FieldDateTime,
+    pub data: FieldJson,
+}
+
+#[derive(Model)]
+pub struct Post {
+    pub id: FieldUuid,
+    pub author: ForeignKey<Person>,
+    pub title: FieldText,
+}
+"#;
+
+const DUMP_TABLES: [&str; 2] = ["e2e_dump_post", "e2e_dump_person"];
+
+async fn drop_dump_tables(pool: &PgPool) {
+    for t in DUMP_TABLES {
+        sqlx::query(&format!("DROP TABLE IF EXISTS {t} CASCADE"))
+            .execute(pool)
+            .await
+            .expect("drop dump table");
+    }
+    sqlx::query("DROP TABLE IF EXISTS _rango_migrations")
+        .execute(pool)
+        .await
+        .expect("drop ledger");
+}
+
+/// Project with the dump models migrated and two persons + one post inserted.
+async fn dump_project(pool: &PgPool, name: &str) -> Project {
+    drop_dump_tables(pool).await;
+    let project = Project::new(name);
+    project.write_models(DUMP_MODELS);
+    let out = project.run_cli(&[
+        "makemigrations",
+        "src",
+        "-o",
+        "migrations",
+        "-p",
+        "e2e_dump",
+        "--yes",
+    ]);
+    assert_success(&out, "makemigrations");
+    assert_success(&project.migrate(), "migrate");
+    for sql in [
+        "INSERT INTO e2e_dump_person (id, name, bio, active, score, price, born, seen, data) VALUES \
+         ('00000000-0000-0000-0000-000000000001', 'Ann \"q\"', 'hé', true, 1.5, 12.34, '2024-02-29', '2024-05-06 07:08:09.123456+00', '{\"k\":[1,\"é\",null]}'), \
+         ('00000000-0000-0000-0000-000000000002', 'Bob', NULL, false, -0.25, 0.01, '1999-12-31', '2000-01-01 00:00:00+00', '{}')",
+        "INSERT INTO e2e_dump_post (id, author, title) VALUES \
+         ('00000000-0000-0000-0000-0000000000a1', '00000000-0000-0000-0000-000000000001', 'Hello')",
+    ] {
+        sqlx::query(sql).execute(pool).await.expect(sql);
+    }
+    project
+}
+
+async fn dump_state(pool: &PgPool) -> Vec<String> {
+    let mut out = Vec::new();
+    for t in ["e2e_dump_person", "e2e_dump_post"] {
+        let rows: Vec<String> =
+            sqlx::query_scalar(&format!("SELECT to_jsonb(t)::text FROM {t} t ORDER BY id"))
+                .fetch_all(pool)
+                .await
+                .expect("select rows");
+        out.extend(rows);
+    }
+    out
+}
+
+async fn dump_count(pool: &PgPool, table: &str) -> Option<i64> {
+    sqlx::query_scalar(&format!("SELECT count(*) FROM {table}"))
+        .fetch_one(pool)
+        .await
+        .ok()
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration"), ignore)]
+async fn dump_restore_round_trip() {
+    let pool = PgPool::connect(&database_url()).await.expect("connect");
+    let project = dump_project(&pool, "dump_rt").await;
+    let before = dump_state(&pool).await;
+
+    assert_success(&project.run_cli(&["dump", "-o", "d.json"]), "dump");
+    let dump: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(project.dir.join("d.json")).unwrap()).unwrap();
+    let names: Vec<&str> = dump["tables"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["e2e_dump_person", "e2e_dump_post"]);
+
+    // Restoring over existing data fails and changes nothing.
+    let out = project.run_cli(&["restore", "d.json"]);
+    assert_failure(&out, "restore over existing rows");
+    assert!(String::from_utf8_lossy(&out.stderr).contains("e2e_dump_person"));
+    assert_eq!(dump_state(&pool).await, before);
+
+    drop_dump_tables(&pool).await;
+    assert_success(&project.run_cli(&["restore", "d.json"]), "restore");
+    assert_eq!(dump_state(&pool).await, before);
+
+    // A backup is restorable too.
+    assert_success(&project.run_cli(&["backup", "--dir", "bk"]), "backup");
+    let file = std::fs::read_dir(project.dir.join("bk"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap();
+    drop_dump_tables(&pool).await;
+    let path = file.path();
+    assert_success(
+        &project.run_cli(&["restore", path.to_str().unwrap()]),
+        "restore backup",
+    );
+    assert_eq!(dump_state(&pool).await, before);
+
+    drop_dump_tables(&pool).await;
+    project.remove();
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration"), ignore)]
+async fn dump_schema_only_restores_empty_tables() {
+    let pool = PgPool::connect(&database_url()).await.expect("connect");
+    let project = dump_project(&pool, "dump_schema").await;
+    assert_success(
+        &project.run_cli(&["dump", "--schema-only", "-o", "s.json"]),
+        "dump",
+    );
+    drop_dump_tables(&pool).await;
+    assert_success(&project.run_cli(&["restore", "s.json"]), "restore");
+    assert_eq!(dump_count(&pool, "e2e_dump_person").await, Some(0));
+    assert_eq!(dump_count(&pool, "e2e_dump_post").await, Some(0));
+    drop_dump_tables(&pool).await;
+    project.remove();
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration"), ignore)]
+async fn dump_restore_is_all_or_nothing() {
+    let pool = PgPool::connect(&database_url()).await.expect("connect");
+    let project = dump_project(&pool, "dump_atomic").await;
+    assert_success(&project.run_cli(&["dump", "-o", "d.json"]), "dump");
+    // Dangling FK in the last table: persons and the schema must roll back.
+    let mut dump: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(project.dir.join("d.json")).unwrap()).unwrap();
+    dump["tables"][1]["rows"][0]["author"] =
+        serde_json::json!("00000000-0000-0000-0000-0000000000ff");
+    std::fs::write(project.dir.join("bad.json"), dump.to_string()).unwrap();
+
+    drop_dump_tables(&pool).await;
+    assert_failure(&project.run_cli(&["restore", "bad.json"]), "restore");
+    assert_eq!(dump_count(&pool, "e2e_dump_person").await, None);
+    assert_eq!(dump_count(&pool, "e2e_dump_post").await, None);
+    project.remove();
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration"), ignore)]
+async fn export_import_round_trip_typed() {
+    let pool = PgPool::connect(&database_url()).await.expect("connect");
+    let project = dump_project(&pool, "dump_exp").await;
+    let before = dump_state(&pool).await;
+    assert_success(&project.run_cli(&["export", "-o", "e.json"]), "export");
+    for t in DUMP_TABLES {
+        sqlx::query(&format!("DELETE FROM {t}"))
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+    assert_success(&project.run_cli(&["import", "e.json"]), "import");
+    assert_eq!(dump_state(&pool).await, before);
+    drop_dump_tables(&pool).await;
+    project.remove();
+}
