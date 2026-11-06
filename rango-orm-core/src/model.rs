@@ -31,3 +31,158 @@ pub fn unknown_column<M: Model>(name: &str) -> Option<String> {
         ))
     }
 }
+
+#[cfg(test)]
+mod fuzz_tests {
+    //! Fuzz tests for identifier quoting and exact column matching.
+
+    use super::{Model, unknown_column};
+    use crate::query::{quote_ident, quote_ident_mysql};
+    use crate::schema::{ColumnDef, ColumnType, TableSchema};
+
+    struct XorShift64(u64);
+
+    impl XorShift64 {
+        fn new(seed: u64) -> Self {
+            Self(seed)
+        }
+
+        fn next_u64(&mut self) -> u64 {
+            let mut x = self.0;
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            self.0 = x;
+            x
+        }
+    }
+
+    const SEED: u64 = 0x1234_5678_9abc_def0;
+
+    const ALPHABET: [char; 18] = [
+        '"', '`', '\'', ';', '-', '/', '*', '\\', ' ', '\n', '\0', 'a', 'Z', '_', 'é', '€',
+        '\u{FF02}', '\u{202E}',
+    ];
+
+    fn random_string(rng: &mut XorShift64, max_len: usize) -> String {
+        let len = (rng.next_u64() % max_len as u64) as usize;
+        (0..len)
+            .map(|_| ALPHABET[(rng.next_u64() % ALPHABET.len() as u64) as usize])
+            .collect()
+    }
+
+    fn unquote(s: &str, q: char) -> Option<String> {
+        let mut chars = s.chars();
+        if chars.next()? != q {
+            return None;
+        }
+
+        let mut out = String::new();
+        loop {
+            match chars.next()? {
+                c if c == q => match chars.next() {
+                    Some(q2) if q2 == q => out.push(q),
+                    None => return Some(out),
+                    Some(_) => return None,
+                },
+                c => out.push(c),
+            }
+        }
+    }
+
+    struct TestModel;
+
+    impl Model for TestModel {
+        fn table_name() -> &'static str {
+            "test_models"
+        }
+
+        fn schema() -> TableSchema {
+            TableSchema {
+                table_name: "test_models".to_string(),
+                columns: vec![
+                    column("id", true, false, true),
+                    column("email", false, true, true),
+                    column("created_at", false, false, false),
+                ],
+                ..TableSchema::default()
+            }
+        }
+    }
+
+    fn column(name: &str, primary_key: bool, unique: bool, index: bool) -> ColumnDef {
+        ColumnDef {
+            name: name.to_string(),
+            col_type: ColumnType::Text,
+            nullable: false,
+            primary_key,
+            unique,
+            default: None,
+            references: None,
+            index,
+        }
+    }
+
+    #[test]
+    fn quote_ident_is_one_token_roundtrip() {
+        let mut rng = XorShift64::new(SEED);
+        for _ in 0..10_000 {
+            let s = random_string(&mut rng, 32);
+            assert_eq!(
+                unquote(&quote_ident(&s), '"'),
+                Some(s.clone()),
+                "quote_ident roundtrip failed for input {:?}",
+                s
+            );
+            assert_eq!(
+                unquote(&quote_ident_mysql(&s), '`'),
+                Some(s.clone()),
+                "quote_ident_mysql roundtrip failed for input {:?}",
+                s
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_column_only_accepts_exact_names() {
+        for name in ["id", "email", "created_at"] {
+            assert_eq!(
+                unknown_column::<TestModel>(name),
+                None,
+                "exact column name should be known: {:?}",
+                name
+            );
+        }
+
+        let mut rng = XorShift64::new(SEED);
+        for _ in 0..10_000 {
+            let s = random_string(&mut rng, 32);
+            if s != "id" && s != "email" && s != "created_at" {
+                assert!(
+                    unknown_column::<TestModel>(&s).is_some(),
+                    "non-exact name should be unknown: {:?}",
+                    s
+                );
+            }
+        }
+
+        let near_misses = [
+            "Email",
+            "email ",
+            " email",
+            "email\0",
+            "\"email\"",
+            "email;--",
+            "email\u{200B}",
+            "ema\u{456}l",
+            "",
+        ];
+        for name in near_misses {
+            assert!(
+                unknown_column::<TestModel>(name).is_some(),
+                "near-miss name should be unknown: {:?}",
+                name
+            );
+        }
+    }
+}
