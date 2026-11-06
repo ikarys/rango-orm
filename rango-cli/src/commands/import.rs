@@ -131,18 +131,26 @@ async fn import_postgres(
         .await
         .context("Failed to connect to Postgres")?;
 
+    // Postgres cannot disable FK checks without superuser, so parents are inserted
+    // first. One transaction, so a failed import leaves nothing behind.
+    let mut tx = pool.begin().await.context("Failed to start transaction")?;
+    let edges = fk_edges_postgres(&mut tx).await?;
+
     // Group rows by table
     let groups = group_by_table(rows, table);
+    let order = order_by_dependencies(groups.keys().cloned().collect(), &edges);
     let mut total = 0;
 
-    for (table, table_rows) in groups {
-        total += insert_rows_postgres(&pool, &table, &table_rows, replace).await?;
+    for table in order {
+        total += insert_rows_postgres(&mut tx, &table, &groups[&table], replace).await?;
     }
+
+    tx.commit().await.context("Failed to commit import")?;
     Ok(total)
 }
 
 async fn insert_rows_postgres(
-    pool: &sqlx::PgPool,
+    conn: &mut sqlx::PgConnection,
     table: &str,
     rows: &[&serde_json::Map<String, serde_json::Value>],
     replace: bool,
@@ -190,7 +198,7 @@ async fn insert_rows_postgres(
         for col in &cols {
             q = bind_json_value_pg(q, row.get(*col).unwrap_or(&serde_json::Value::Null));
         }
-        q.execute(pool)
+        q.execute(&mut *conn)
             .await
             .with_context(|| format!("Failed to insert into {}", table))?;
         count += 1;
@@ -231,17 +239,27 @@ async fn import_sqlite(
         .await
         .context("Failed to connect to SQLite")?;
 
+    let mut tx = pool.begin().await.context("Failed to start transaction")?;
+    // FK checks run at COMMIT, so tables can come in any order. The pragma resets
+    // itself at the end of the transaction.
+    sqlx::query("PRAGMA defer_foreign_keys = ON")
+        .execute(&mut *tx)
+        .await
+        .context("Failed to defer foreign keys")?;
+
     let groups = group_by_table(rows, table);
     let mut total = 0;
 
     for (table, table_rows) in groups {
-        total += insert_rows_sqlite(&pool, &table, &table_rows, replace).await?;
+        total += insert_rows_sqlite(&mut tx, &table, &table_rows, replace).await?;
     }
+
+    tx.commit().await.context("Failed to commit import")?;
     Ok(total)
 }
 
 async fn insert_rows_sqlite(
-    pool: &sqlx::SqlitePool,
+    conn: &mut sqlx::SqliteConnection,
     table: &str,
     rows: &[&serde_json::Map<String, serde_json::Value>],
     replace: bool,
@@ -282,7 +300,7 @@ async fn insert_rows_sqlite(
         for col in &cols {
             q = bind_json_value_sqlite(q, row.get(*col).unwrap_or(&serde_json::Value::Null));
         }
-        q.execute(pool)
+        q.execute(&mut *conn)
             .await
             .with_context(|| format!("Failed to insert into {}", table))?;
         count += 1;
@@ -544,6 +562,90 @@ fn group_by_table<'a>(
     groups
 }
 
+/// Orders tables so that referenced (parent) tables come before the tables that
+/// reference them. `edges` are `(child, parent)` pairs; edges touching tables not
+/// in `tables`, and self-references, are ignored. Ties are broken alphabetically so
+/// the order is deterministic.
+fn order_by_dependencies(mut tables: Vec<String>, edges: &[(String, String)]) -> Vec<String> {
+    tables.sort();
+    tables.dedup();
+
+    let table_set: HashSet<&str> = tables.iter().map(String::as_str).collect();
+
+    let mut indegree: std::collections::HashMap<String, usize> =
+        tables.iter().map(|t| (t.clone(), 0)).collect();
+    let mut children: std::collections::HashMap<String, Vec<String>> =
+        tables.iter().map(|t| (t.clone(), Vec::new())).collect();
+
+    for (child, parent) in edges {
+        if child == parent {
+            continue;
+        }
+        if table_set.contains(child.as_str()) && table_set.contains(parent.as_str()) {
+            if let Some(dependents) = children.get_mut(parent) {
+                dependents.push(child.clone());
+            }
+            if let Some(deg) = indegree.get_mut(child) {
+                *deg += 1;
+            }
+        }
+    }
+
+    let mut available: Vec<String> = tables
+        .iter()
+        .filter(|t| indegree.get(*t).copied().unwrap_or(0) == 0)
+        .cloned()
+        .collect();
+    available.sort();
+
+    let mut ordered = Vec::with_capacity(tables.len());
+    while !available.is_empty() {
+        let table = available.remove(0);
+        ordered.push(table.clone());
+
+        if let Some(dependents) = children.get(&table) {
+            for dependent in dependents {
+                if let Some(deg) = indegree.get_mut(dependent) {
+                    *deg -= 1;
+                    if *deg == 0 {
+                        available.push(dependent.clone());
+                    }
+                }
+            }
+        }
+
+        available.sort();
+    }
+
+    // ponytail: cycles between tables are inserted in alphabetical order and may
+    // still fail; deferrable FKs would be the upgrade.
+    let ordered_set: HashSet<String> = ordered.iter().cloned().collect();
+    let mut remaining: Vec<String> = tables
+        .iter()
+        .filter(|t| !ordered_set.contains(*t))
+        .cloned()
+        .collect();
+    remaining.sort();
+    ordered.extend(remaining);
+
+    ordered
+}
+
+/// Foreign keys between tables of the current schema, as `(child, parent)` pairs.
+async fn fk_edges_postgres(conn: &mut sqlx::PgConnection) -> Result<Vec<(String, String)>> {
+    let sql = "SELECT c.relname::text, p.relname::text
+FROM pg_constraint k
+JOIN pg_class c ON c.oid = k.conrelid
+JOIN pg_class p ON p.oid = k.confrelid
+JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE k.contype = 'f' AND n.nspname = current_schema()";
+
+    sqlx::query_as::<_, (String, String)>(sql)
+        .fetch_all(&mut *conn)
+        .await
+        .context("Failed to read foreign keys")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -570,5 +672,55 @@ mod tests {
         assert!(uuid_text_to_bytes("123e4567-e89b-12d3-a456-42661417400g").is_none());
         assert!(uuid_text_to_bytes("123e4567-e89b-12d3-a456-4266141740000").is_none());
         assert!(uuid_text_to_bytes("123e4567e89b12d3a4564266141740000").is_none());
+    }
+
+    #[test]
+    fn order_by_dependencies_puts_parents_first() {
+        let tables = vec![
+            "post".to_string(),
+            "comment".to_string(),
+            "user".to_string(),
+        ];
+        let edges = vec![
+            ("post".to_string(), "user".to_string()),
+            ("comment".to_string(), "post".to_string()),
+            ("comment".to_string(), "user".to_string()),
+        ];
+        assert_eq!(
+            order_by_dependencies(tables, &edges),
+            vec![
+                "user".to_string(),
+                "post".to_string(),
+                "comment".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn order_by_dependencies_ignores_self_refs_and_unknown_tables() {
+        let tables = vec!["b".to_string(), "a".to_string()];
+        let edges = vec![
+            ("a".to_string(), "a".to_string()),
+            ("b".to_string(), "zzz".to_string()),
+        ];
+        assert_eq!(
+            order_by_dependencies(tables, &edges),
+            vec!["a".to_string(), "b".to_string()]
+        );
+    }
+
+    #[test]
+    fn order_by_dependencies_keeps_cycles() {
+        let tables = vec!["x".to_string(), "y".to_string(), "z".to_string()];
+        let edges = vec![
+            ("x".to_string(), "y".to_string()),
+            ("y".to_string(), "x".to_string()),
+            ("x".to_string(), "z".to_string()),
+        ];
+        let ordered = order_by_dependencies(tables, &edges);
+        assert_eq!(ordered[0], "z");
+        assert_eq!(ordered.len(), 3);
+        assert!(ordered.contains(&"x".to_string()));
+        assert!(ordered.contains(&"y".to_string()));
     }
 }
