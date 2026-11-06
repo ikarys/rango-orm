@@ -1,0 +1,19 @@
+[package]
+name = "rango-orm-core"
+version.workspace = true
+edition = "2024"
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Database-free core of Rango ORM: model traits, schema and field types"
+keywords = ["orm", "database", "sql"]
+categories = ["database"]
+
+[dependencies]
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+argon2 = { version = "0.5", features = ["std"] }

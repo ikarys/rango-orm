@@ -1,0 +1,22 @@
+[package]
+name = "rango-orm-derive"
+version.workspace = true
+edition = "2024"
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "#[derive(Model)] proc-macro for Rango ORM"
+keywords = ["orm", "database", "derive"]
+categories = ["database"]
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { version = "2", features = ["full", "extra-traits"] }
+quote = "1"
+proc-macro2 = "1"
+proc-macro-crate = "3"
+rango-orm-core = { workspace = true }

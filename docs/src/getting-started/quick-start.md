@@ -12,7 +12,7 @@ rango init --backend sqlite
 Add Rango to `Cargo.toml`:
 ```toml
 [dependencies]
-rango = { git = "https://github.com/ikarys/rango-orm", features = ["sqlite"] }
+rango-orm = { version = "0.1.0-beta.3", default-features = false, features = ["sqlite"] }
 tokio = { version = "1", features = ["full"] }
 anyhow = "1"
 ```

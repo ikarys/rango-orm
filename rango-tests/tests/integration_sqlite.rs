@@ -2,9 +2,9 @@
 ///
 /// Run with:
 ///   cargo test --test integration_sqlite --features rango-tests/integration-sqlite
-use rango_core::*;
-use rango_derive::Model;
-use rango_sqlite::*;
+use rango_orm_core::*;
+use rango_orm_derive::Model;
+use rango_orm_sqlite::*;
 use uuid::Uuid;
 
 // ── Test models ───────────────────────────────────────────────────────────────
@@ -552,8 +552,10 @@ async fn test_sqlite_export_json() {
                 r.iter()
                     .map(|(k, v)| {
                         let jv = match v {
-                            rango_core::SqlValue::Text(s) => serde_json::Value::String(s.clone()),
-                            rango_core::SqlValue::BigInt(n) => {
+                            rango_orm_core::SqlValue::Text(s) => {
+                                serde_json::Value::String(s.clone())
+                            }
+                            rango_orm_core::SqlValue::BigInt(n) => {
                                 serde_json::Value::Number((*n).into())
                             }
                             _ => serde_json::Value::Null,
@@ -589,21 +591,21 @@ async fn test_sqlite_roundtrip() {
     assert_eq!(rows.len(), 1);
     assert_eq!(
         rows[0].get("email"),
-        Some(&rango_core::SqlValue::Text(
+        Some(&rango_orm_core::SqlValue::Text(
             "roundtrip@sqlite.com".to_string()
         ))
     );
     assert_eq!(
         rows[0].get("name"),
-        Some(&rango_core::SqlValue::Text("Test User".to_string()))
+        Some(&rango_orm_core::SqlValue::Text("Test User".to_string()))
     );
 }
 
 // ── SqliteQueryExt ────────────────────────────────────────────────────────────
 
-use rango_sqlite::SqliteQueryExt;
+use rango_orm_sqlite::SqliteQueryExt;
 
-#[derive(rango_derive::Model, Debug, Clone)]
+#[derive(rango_orm_derive::Model, Debug, Clone)]
 #[model(table = "test_article_sqlite")]
 struct TestArticleSqlite {
     id: FieldUuid,

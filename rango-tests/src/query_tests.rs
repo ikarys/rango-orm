@@ -1,6 +1,6 @@
-use rango_core::*;
-use rango_derive::Model;
-use rango_postgres::{PgPool, RangoFilterExt};
+use rango_orm_core::*;
+use rango_orm_derive::Model;
+use rango_orm_postgres::{PgPool, RangoFilterExt};
 
 /// Minimal model used only for query-builder SQL generation tests.
 #[derive(Model)]

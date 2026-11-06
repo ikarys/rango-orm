@@ -1,4 +1,4 @@
 [advisories]
 # rsa (Marvin attack): only in Cargo.lock through sqlx-macros' optional MySQL driver.
-# Rango enables no MySQL feature, so the crate is never compiled. Re-check when rango-mysql lands.
+# Rango enables no MySQL feature, so the crate is never compiled. Re-check when rango-orm-mysql lands.
 ignore = ["RUSTSEC-2023-0071"]

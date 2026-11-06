@@ -4,7 +4,7 @@ A Django-inspired async ORM for Rust: define a struct, Rango generates the schem
 
 [![CI](https://github.com/ikarys/rango-orm/actions/workflows/ci.yml/badge.svg)](https://github.com/ikarys/rango-orm/actions/workflows/ci.yml) [![codecov](https://codecov.io/gh/ikarys/rango-orm/graph/badge.svg)](https://codecov.io/gh/ikarys/rango-orm)
 
-> Beta (`v0.1.0-beta.2`): the API may still change between betas. Not on crates.io yet.
+> Beta (`0.1.0-beta.3`, on crates.io as [`rango-orm`](https://crates.io/crates/rango-orm)): the API may still change between betas.
 
 ## Why Rango
 
@@ -67,20 +67,20 @@ rango migrate                   # applies pending migrations (reads DATABASE_URL
 
 ## Installation
 
-Rango is in beta: pin a tag, the API may still change between betas.
+Rango is in beta: pin the version, the API may still change between betas. The package is `rango-orm`; the crate you import is `rango` (`use rango::prelude::*`).
 
 ```toml
 [dependencies]
-rango = { git = "https://github.com/ikarys/rango-orm", tag = "v0.1.0-beta.2" } # PostgreSQL, default
+rango-orm = "0.1.0-beta.3" # PostgreSQL, default
 # SQLite variant:
-# rango = { git = "https://github.com/ikarys/rango-orm", tag = "v0.1.0-beta.2", default-features = false, features = ["sqlite"] }
+# rango-orm = { version = "0.1.0-beta.3", default-features = false, features = ["sqlite"] }
 # MySQL / MariaDB variant:
-# rango = { git = "https://github.com/ikarys/rango-orm", tag = "v0.1.0-beta.2", default-features = false, features = ["mysql"] }
+# rango-orm = { version = "0.1.0-beta.3", default-features = false, features = ["mysql"] }
 tokio = { version = "1", features = ["full"] }
 ```
 
 ```bash
-cargo install --git https://github.com/ikarys/rango-orm --tag v0.1.0-beta.2 rango-cli
+cargo install rango-orm-cli --version 0.1.0-beta.3
 ```
 
 In production, pass the URL via `DATABASE_URL`; never put credentials in `rango.toml`.
@@ -146,13 +146,13 @@ The user guide is an mdBook in `docs/` (`mdbook serve docs`).
 
 | Crate | Role |
 |---|---|
-| `rango` | facade crate, re-exports everything, features `postgres` default / `sqlite` / `mysql` |
-| `rango-core` | DB-free traits, schema types, field types |
-| `rango-derive` | `#[derive(Model)]` |
-| `rango-postgres` | PostgreSQL backend (sqlx) |
-| `rango-sqlite` | SQLite backend (sqlx) |
-| `rango-mysql` | MySQL / MariaDB backend (sqlx) |
-| `rango-cli` | `rango` binary |
+| `rango-orm` | facade crate (imported as `rango`), re-exports everything, features `postgres` default / `sqlite` / `mysql` |
+| `rango-orm-core` | DB-free traits, schema types, field types |
+| `rango-orm-derive` | `#[derive(Model)]` |
+| `rango-orm-postgres` | PostgreSQL backend (sqlx) |
+| `rango-orm-sqlite` | SQLite backend (sqlx) |
+| `rango-orm-mysql` | MySQL / MariaDB backend (sqlx) |
+| `rango-orm-cli` | `rango` binary |
 | `rango-tests` | integration tests |
 | `benchmarks/` | Criterion: Rango vs sqlx, SeaORM, Diesel |
 

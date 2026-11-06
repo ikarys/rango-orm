@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
-use rango_core::*;
-use rango_derive::{Model, ModelMixin};
+use rango_orm_core::*;
+use rango_orm_derive::{Model, ModelMixin};
 
 // ── Existing models ────────────────────────────────────────────────────────────
 

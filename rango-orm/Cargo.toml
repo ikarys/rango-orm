@@ -1,0 +1,33 @@
+[package]
+name = "rango-orm"
+version.workspace = true
+edition = "2024"
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Django-inspired async ORM for Rust: define structs, get generated migrations and a typed query builder (PostgreSQL, SQLite, MySQL/MariaDB)"
+keywords = ["orm", "database", "sql", "async", "migrations"]
+categories = ["database", "asynchronous"]
+readme = "../README.md"
+
+[lib]
+name = "rango"
+
+[package.metadata.docs.rs]
+all-features = true
+
+[features]
+default = ["postgres"]
+postgres = ["dep:rango-orm-postgres"]
+sqlite = ["dep:rango-orm-sqlite"]
+mysql = ["dep:rango-orm-mysql"]
+
+[dependencies]
+rango-orm-core     = { workspace = true }
+rango-orm-derive   = { workspace = true }
+rango-orm-postgres = { workspace = true, optional = true }
+rango-orm-sqlite   = { workspace = true, optional = true }
+rango-orm-mysql    = { workspace = true, optional = true }
+sqlx = { version = "0.8", default-features = false }

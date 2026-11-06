@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.0-beta.3 (2026-11-06)
+
+First release on crates.io. `rango`, `rango-core` and `rango-cli` were already taken there, so every crate is renamed `rango-orm-*`.
+
+**Breaking (Cargo.toml only):** depend on `rango-orm = "0.1.0-beta.3"` instead of the git `rango` crate. The library is still imported as `rango` (`use rango::prelude::*`), and the CLI binary is still `rango` (`cargo install rango-orm-cli --version 0.1.0-beta.3`). Code that used the inner crates directly renames `rango_core` → `rango_orm_core`, `rango_postgres` → `rango_orm_postgres`, and so on.
+
 ## 0.1.0-beta.2 (2026-11-06)
 
 **Breaking:** on SQLite and MySQL, `QueryBuilder::all()` now returns `Vec<WithRelated<M>>` (derefs to `M`), like Postgres.

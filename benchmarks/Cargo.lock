@@ -335,9 +335,9 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "criterion",
- "rango-core",
- "rango-derive",
- "rango-postgres",
+ "rango-orm-core",
+ "rango-orm-derive",
+ "rango-orm-postgres",
  "sqlx 0.8.6",
  "tokio",
  "uuid",
@@ -2096,7 +2096,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "63b8176103e19a2643978565ca18b50549f6101881c443590420e4dc998a3c69"
 
 [[package]]
-name = "rango-core"
+name = "rango-orm-core"
 version = "0.1.0"
 dependencies = [
  "argon2",
@@ -2107,23 +2107,23 @@ dependencies = [
 ]
 
 [[package]]
-name = "rango-derive"
+name = "rango-orm-derive"
 version = "0.1.0"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
  "quote",
- "rango-core",
+ "rango-orm-core",
  "syn 2.0.117",
 ]
 
 [[package]]
-name = "rango-postgres"
+name = "rango-orm-postgres"
 version = "0.1.0"
 dependencies = [
  "chrono",
  "log",
- "rango-core",
+ "rango-orm-core",
  "serde_json",
  "sqlx 0.8.6",
  "tokio",

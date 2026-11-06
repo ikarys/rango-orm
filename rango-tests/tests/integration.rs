@@ -4,10 +4,10 @@
 ///   DATABASE_URL=postgres://postgres:postgres@localhost/rango_test cargo test --features integration
 ///
 /// These tests create and drop their own tables using a unique prefix per run.
-use rango_core::*;
-use rango_derive::Model;
-use rango_postgres::PgQueryExt;
-use rango_postgres::*;
+use rango_orm_core::*;
+use rango_orm_derive::Model;
+use rango_orm_postgres::PgQueryExt;
+use rango_orm_postgres::*;
 use uuid::Uuid;
 
 // ── Test models ───────────────────────────────────────────────────────────────
