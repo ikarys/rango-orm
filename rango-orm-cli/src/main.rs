@@ -6,7 +6,7 @@ mod commands;
 mod config;
 mod migration;
 
-use commands::{export, import, init, makemigrations, migrate};
+use commands::{dump, export, import, init, makemigrations, migrate};
 
 #[derive(Parser)]
 #[command(name = "rango", about = "Rango ORM CLI")]
@@ -92,6 +92,54 @@ enum Command {
         database_url: Option<String>,
     },
 
+    /// Dump schema and data to a backend-independent Rango JSON file
+    Dump {
+        /// Dump the schema snapshot only (no rows)
+        #[arg(long, conflicts_with = "data_only")]
+        schema_only: bool,
+
+        /// Dump the rows only (no schema)
+        #[arg(long)]
+        data_only: bool,
+
+        /// Table to dump; repeat for several (default: all tables)
+        #[arg(short, long)]
+        table: Vec<String>,
+
+        /// Output file, written with 0600 permissions (default: stdout)
+        #[arg(short, long)]
+        output: Option<String>,
+
+        /// Directory containing the schema snapshot (default: migrations/)
+        #[arg(short, long, default_value = "migrations")]
+        migrations: String,
+
+        /// Database URL (overrides DATABASE_URL env var)
+        #[arg(short, long)]
+        database_url: Option<String>,
+    },
+
+    /// Restore a Rango dump (plain JSON or gzip) in one transaction
+    Restore {
+        /// Dump file
+        input: String,
+
+        /// Database URL (overrides DATABASE_URL env var)
+        #[arg(short, long)]
+        database_url: Option<String>,
+    },
+
+    /// Write a gzip-compressed, timestamped full dump
+    Backup {
+        /// Directory for backup files (created if missing)
+        #[arg(long, default_value = "backups")]
+        dir: String,
+
+        /// Database URL (overrides DATABASE_URL env var)
+        #[arg(short, long)]
+        database_url: Option<String>,
+    },
+
     /// Apply pending migrations to the database
     Migrate {
         /// Database URL (overrides DATABASE_URL from .env)
@@ -155,6 +203,50 @@ fn main() -> Result<()> {
                 table.as_deref(),
                 format.as_deref(),
                 replace,
+            ))?;
+        }
+
+        Command::Dump {
+            schema_only,
+            data_only,
+            table,
+            output,
+            migrations,
+            database_url,
+        } => {
+            let cfg = config::RangoConfig::load()?;
+            let url = cfg.resolve_database_url(database_url.as_deref())?;
+            let dir = if migrations == "migrations" {
+                cfg.migrations.dir.clone()
+            } else {
+                migrations
+            };
+            tokio::runtime::Runtime::new()?.block_on(dump::dump(
+                &url,
+                &table,
+                schema_only,
+                data_only,
+                &dir,
+                output.as_deref(),
+            ))?;
+        }
+
+        Command::Restore {
+            input,
+            database_url,
+        } => {
+            let cfg = config::RangoConfig::load()?;
+            let url = cfg.resolve_database_url(database_url.as_deref())?;
+            tokio::runtime::Runtime::new()?.block_on(dump::restore(&url, &input))?;
+        }
+
+        Command::Backup { dir, database_url } => {
+            let cfg = config::RangoConfig::load()?;
+            let url = cfg.resolve_database_url(database_url.as_deref())?;
+            tokio::runtime::Runtime::new()?.block_on(dump::backup(
+                &url,
+                &dir,
+                &cfg.migrations.dir,
             ))?;
         }
 
