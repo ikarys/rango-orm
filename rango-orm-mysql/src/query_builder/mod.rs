@@ -9,6 +9,7 @@ use sqlx::{Executor, MySqlPool};
 use std::any::TypeId;
 
 mod exec;
+pub use exec::SelectAs;
 mod filter;
 mod relations;
 

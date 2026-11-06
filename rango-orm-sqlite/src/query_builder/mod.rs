@@ -8,6 +8,7 @@ use sqlx::{Executor, SqlitePool};
 use std::any::TypeId;
 
 mod exec;
+pub use exec::SelectAs;
 mod filter;
 mod relations;
 

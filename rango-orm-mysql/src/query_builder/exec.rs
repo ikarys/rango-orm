@@ -111,17 +111,12 @@ where
     }
 
     /// Fetch the first matching row (no relation population).
-    pub async fn one(self) -> Result<Option<M>> {
+    pub async fn one(mut self) -> Result<Option<M>> {
         self.ensure_valid()?;
-        let table = M::table_name();
-        let (where_clause, binds) = self.build_where();
-
-        let mut sql = format!("SELECT * FROM {}", quote_ident(table));
-        if !where_clause.is_empty() {
-            sql.push(' ');
-            sql.push_str(&where_clause);
-        }
-        sql.push_str(" LIMIT 1");
+        // Same SQL as `all()` (filters, ordering, offset), capped at one row.
+        self.limit = Some(1);
+        self.explicit_limit = true;
+        let (sql, binds) = self.select_sql();
 
         let rows = bind_and_fetch_all(&self.pool, &sql, binds).await?;
         match rows.into_iter().next() {

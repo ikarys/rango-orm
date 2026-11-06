@@ -139,7 +139,7 @@ pub fn expand(input: DeriveInput) -> Result<TokenStream> {
         let fname = f.ident.as_ref().unwrap();
         let col_name = column_name(fname, parse_field_attr(f)?.column);
         let (nullable, inner_ty) = extract_option(&f.ty);
-        let type_str = quote!(#inner_ty).to_string().replace(" ", "");
+        let type_str = type_name(inner_ty);
 
         let getter = field_type_to_getter(&type_str, &col_name, nullable, &core);
         from_row_fields.push(quote! { #fname: #getter });
@@ -360,14 +360,11 @@ fn generate_column_def(field: &Field, core: &TokenStream) -> Result<TokenStream>
 
     // Map Rust field type to ColumnType
     let col_type = map_field_type(inner_ty, core)?;
-    let is_foreign_key = quote!(#inner_ty)
-        .to_string()
-        .replace(" ", "")
-        .starts_with("ForeignKey<");
+    let is_foreign_key = type_name(inner_ty).starts_with("ForeignKey<");
 
     // Validate: auto_now_add / auto_now only on date/time fields
     if attr.auto_now_add || attr.auto_now {
-        let type_str = quote!(#inner_ty).to_string().replace(" ", "");
+        let type_str = type_name(inner_ty);
         if !matches!(
             type_str.as_str(),
             "FieldDate" | "FieldTime" | "FieldDateTime"
@@ -537,9 +534,21 @@ fn first_generic(ty: &Type) -> Option<&Type> {
     })
 }
 
+/// Type text without its module path: `rango::FieldVarchar<1, 100>` → `FieldVarchar<1,100>`,
+/// so field types match whether they are imported or written with a path.
+pub(crate) fn type_name(ty: &Type) -> String {
+    let last = match ty {
+        Type::Path(tp) => tp.path.segments.last().map(|seg| quote!(#seg)),
+        _ => None,
+    };
+    last.unwrap_or_else(|| quote!(#ty))
+        .to_string()
+        .replace(' ', "")
+}
+
 /// Returns true if the type is ManyToMany<T>.
 fn is_many_to_many(ty: &Type) -> bool {
-    let s = quote!(#ty).to_string().replace(" ", "");
+    let s = type_name(ty);
     s.starts_with("ManyToMany<")
 }
 
@@ -559,7 +568,7 @@ pub(crate) fn extract_option(ty: &Type) -> (bool, &Type) {
 
 /// Map a Rango field type path to a `ColumnType` token.
 fn map_field_type(ty: &Type, core: &TokenStream) -> Result<TokenStream> {
-    let type_str = quote!(#ty).to_string().replace(" ", "");
+    let type_str = type_name(ty);
 
     let col_type = match type_str.as_str() {
         "FieldBool" => quote! { #core::ColumnType::Bool },

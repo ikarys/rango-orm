@@ -68,7 +68,6 @@ pub fn derive_model(input: TokenStream) -> TokenStream {
 /// - a PK already exists (`id` field or `#[field(primary_key)]`): nothing is injected
 /// - `#[derive(Model)]` is added unless the struct already has it
 ///
-/// The injected type is a bare `FieldUuid` / `FieldAutoBigInt`: import it (e.g. `rango::prelude::*`).
 /// The default is not read from `rango.toml`: cargo does not track that file,
 /// so builds would go stale when it changes.
 ///
