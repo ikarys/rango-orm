@@ -566,6 +566,40 @@ async fn test_bulk_create() {
 
 #[tokio::test]
 #[cfg_attr(not(feature = "integration"), ignore)]
+async fn test_bulk_create_unnest_large_with_nulls() {
+    let pool = pool().await;
+    setup(&pool).await;
+
+    // 1500 rows with a nullable column, all in one UNNEST statement.
+    let mut users: Vec<TestUser> = (0..1500)
+        .map(|i| user(&format!("unnest{}@test.com", i)))
+        .collect();
+    for (i, u) in users.iter_mut().enumerate() {
+        u.score = (i % 3 != 0).then_some(FieldInt(i as i32));
+    }
+
+    let n = bulk_create(&pool, &users)
+        .await
+        .expect("bulk_create failed");
+    assert_eq!(n, 1500);
+
+    let mut fetched: Vec<TestUser> = TestUser::filter(&pool)
+        .unlimited()
+        .all()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|r| r.inner)
+        .collect();
+    fetched.sort_by(|a, b| a.email.0.cmp(&b.email.0));
+    users.sort_by(|a, b| a.email.0.cmp(&b.email.0));
+    assert_eq!(fetched, users);
+
+    teardown(&pool).await;
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration"), ignore)]
 async fn test_bulk_update() {
     let pool = pool().await;
     setup(&pool).await;

@@ -3,6 +3,8 @@
 use crate::error::db_err;
 use rango_orm_core::Result;
 use rango_orm_core::{Model, ModelValues, SqlValue, quote_ident};
+use sqlx::postgres::PgArguments;
+use sqlx::query::Query;
 use sqlx::{Acquire, Postgres};
 
 use super::*;
@@ -10,8 +12,9 @@ use super::*;
 // ─── Bulk ops ─────────────────────────────────────────────────────────────────
 /// INSERT multiple rows in a single query.
 ///
-/// Automatically chunks to stay within PostgreSQL's 65 535 bind-parameter limit.
-/// Returns the total number of rows inserted.
+/// Uses `INSERT … SELECT FROM UNNEST(…)`: one array parameter per column, so the
+/// 65 535 bind-parameter limit does not apply (JSON columns use chunked multi-row
+/// `VALUES` instead). Returns the total number of rows inserted.
 ///
 /// # Example
 /// ```rust,ignore
@@ -28,6 +31,13 @@ where
     }
 
     let mut conn = executor.acquire().await.map_err(db_err)?;
+
+    // One statement, one array parameter per column; falls back for unsupported types.
+    if let Some((sql, cols)) = build_bulk_create_unnest_sql::<M>(models) {
+        let q = cols.into_iter().fold(sqlx::query(&sql), |q, c| c.bind(q));
+        let result = q.execute(&mut *conn).await.map_err(db_err)?;
+        return Ok(result.rows_affected() as usize);
+    }
 
     let n_cols = rango_orm_core::insert_values(&models[0]).len();
     let chunk_size = (65535 / n_cols).max(1);
@@ -143,6 +153,97 @@ fn sql_type_cast(val: &SqlValue) -> &'static str {
         SqlValue::Time(_) => "::time",
         SqlValue::Json(_) => "::jsonb",
     }
+}
+
+/// One column of a bulk insert, as a typed array bound to a single `UNNEST` parameter.
+macro_rules! unnest_cols {
+    ($($var:ident, $null:ident, $ty:ty, $pg:literal);* $(;)?) => {
+        enum UnnestCol { $($var(Vec<Option<$ty>>)),* }
+
+        impl UnnestCol {
+            /// `None` for value types without an array mapping (JSON).
+            fn for_value(v: &SqlValue, cap: usize) -> Option<Self> {
+                match v {
+                    $(SqlValue::$var(_) | SqlValue::$null => Some(Self::$var(Vec::with_capacity(cap))),)*
+                    _ => None,
+                }
+            }
+
+            fn pg_type(&self) -> &'static str {
+                match self { $(Self::$var(_) => $pg),* }
+            }
+
+            /// `false` when the value does not match the column type.
+            fn push(&mut self, v: SqlValue) -> bool {
+                match (self, v) {
+                    $(
+                        (Self::$var(c), SqlValue::$var(x)) => c.push(Some(x)),
+                        (Self::$var(c), SqlValue::$null) => c.push(None),
+                    )*
+                    _ => return false,
+                }
+                true
+            }
+
+            fn bind<'q>(self, q: Query<'q, Postgres, PgArguments>) -> Query<'q, Postgres, PgArguments> {
+                match self { $(Self::$var(c) => q.bind(c)),* }
+            }
+        }
+    };
+}
+
+unnest_cols! {
+    Bool, NullBool, bool, "bool[]";
+    SmallInt, NullSmallInt, i16, "int2[]";
+    Int, NullInt, i32, "int4[]";
+    BigInt, NullBigInt, i64, "int8[]";
+    Float, NullFloat, f32, "float4[]";
+    Double, NullDouble, f64, "float8[]";
+    Text, NullText, String, "text[]";
+    Bytes, NullBytes, Vec<u8>, "bytea[]";
+    Uuid, NullUuid, uuid::Uuid, "uuid[]";
+    DateTime, NullDateTime, chrono::DateTime<chrono::Utc>, "timestamptz[]";
+    Date, NullDate, chrono::NaiveDate, "date[]";
+    Time, NullTime, chrono::NaiveTime, "time[]";
+}
+
+fn unnest_sql(table: &str, cols: &[(&str, &str)]) -> String {
+    let names: Vec<String> = cols.iter().map(|(c, _)| quote_ident(c)).collect();
+    let arrays: Vec<String> = cols
+        .iter()
+        .enumerate()
+        .map(|(i, (_, ty))| format!("${}::{}", i + 1, ty))
+        .collect();
+    format!(
+        "INSERT INTO {} ({}) SELECT * FROM UNNEST({})",
+        quote_ident(table),
+        names.join(", "),
+        arrays.join(", "),
+    )
+}
+
+/// `None` when a column has no array mapping: the caller uses the multi-row `VALUES` path.
+fn build_bulk_create_unnest_sql<M: Model + ModelValues>(
+    models: &[M],
+) -> Option<(String, Vec<UnnestCol>)> {
+    let first = rango_orm_core::insert_values(&models[0]);
+    let mut cols = Vec::with_capacity(first.len());
+    for (_, v) in &first {
+        cols.push(UnnestCol::for_value(v, models.len())?);
+    }
+    for model in models {
+        for (col, (_, v)) in cols.iter_mut().zip(rango_orm_core::insert_values(model)) {
+            if !col.push(v) {
+                return None;
+            }
+        }
+    }
+    let spec: Vec<(&str, &str)> = first
+        .iter()
+        .zip(&cols)
+        .map(|((name, _), c)| (*name, c.pg_type()))
+        .collect();
+    Some((unnest_sql(M::table_name(), &spec), cols))
 }
 
 /// Columns come from the first model: give every model a PK, or none (auto-increment).
@@ -298,4 +399,17 @@ fn build_bulk_upsert_sql<M: Model + ModelValues>(
         )
     };
     (sql, all_values)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::unnest_sql;
+
+    #[test]
+    fn unnest_sql_one_array_per_column() {
+        assert_eq!(
+            unnest_sql("user", &[("id", "uuid[]"), ("sc\"ore", "int4[]")]),
+            r#"INSERT INTO "user" ("id", "sc""ore") SELECT * FROM UNNEST($1::uuid[], $2::int4[])"#
+        );
+    }
 }
