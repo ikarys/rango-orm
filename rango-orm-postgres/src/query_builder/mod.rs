@@ -125,6 +125,8 @@ pub struct QueryBuilder<M> {
     /// Raw WHERE clauses injected by backend-specific extensions (e.g. PgQueryExt).
     /// Each entry is (sql_fragment, bind_values) where `$__` is replaced by `$N`.
     pub(crate) raw_conditions: Vec<(String, Vec<SqlValue>)>,
+    /// First unknown column met while building; returned as `Error::Invalid` on execution.
+    invalid: Option<String>,
     _phantom: std::marker::PhantomData<M>,
 }
 

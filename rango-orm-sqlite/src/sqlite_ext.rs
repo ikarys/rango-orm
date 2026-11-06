@@ -74,7 +74,9 @@ where
     M: Model + ModelValues + FromRow,
 {
     fn json_extract_eq(self, col: impl ColumnRef<M>, path: &str, value: &str) -> Self {
-        self.raw_where(
+        let mut q = self;
+        q.check_col::<M>(col.column_name());
+        q.raw_where(
             format!("json_extract({}, ?) = ?", quote_ident(col.column_name())),
             vec![
                 SqlValue::Text(path.to_string()),
@@ -84,7 +86,9 @@ where
     }
 
     fn json_extract_like(self, col: impl ColumnRef<M>, path: &str, pattern: &str) -> Self {
-        self.raw_where(
+        let mut q = self;
+        q.check_col::<M>(col.column_name());
+        q.raw_where(
             format!("json_extract({}, ?) LIKE ?", quote_ident(col.column_name())),
             vec![
                 SqlValue::Text(path.to_string()),
@@ -94,7 +98,9 @@ where
     }
 
     fn json_extract_exists(self, col: impl ColumnRef<M>, path: &str) -> Self {
-        self.raw_where(
+        let mut q = self;
+        q.check_col::<M>(col.column_name());
+        q.raw_where(
             format!(
                 "json_extract({}, ?) IS NOT NULL",
                 quote_ident(col.column_name())

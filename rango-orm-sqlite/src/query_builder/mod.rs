@@ -112,6 +112,8 @@ pub struct QueryBuilder<M> {
     pub(crate) raw_conditions: Vec<(String, Vec<SqlValue>)>,
     select_related: Vec<SelectRelatedSpec>,
     prefetch_related: Vec<PrefetchSpec>,
+    /// First unknown column met while building; returned as `Error::Invalid` on execution.
+    invalid: Option<String>,
     _phantom: std::marker::PhantomData<M>,
 }
 

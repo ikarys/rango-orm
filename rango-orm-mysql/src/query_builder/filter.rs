@@ -21,7 +21,22 @@ where
             next_connector: Connector::And,
             select_related: Vec::new(),
             prefetch_related: Vec::new(),
+            invalid: None,
             _phantom: std::marker::PhantomData,
+        }
+    }
+
+    /// Remember the first unknown column of model `T`; reported when the query runs.
+    pub(crate) fn check_col<T: Model>(&mut self, name: &str) {
+        if self.invalid.is_none() {
+            self.invalid = rango_orm_core::unknown_column::<T>(name);
+        }
+    }
+
+    pub(super) fn ensure_valid(&self) -> Result<()> {
+        match &self.invalid {
+            Some(msg) => Err(rango_orm_core::Error::Invalid(msg.clone())),
+            None => Ok(()),
         }
     }
 
@@ -112,6 +127,9 @@ where
     {
         let inner = QueryBuilder::<M>::new(&self.pool);
         let inner = f(inner);
+        if self.invalid.is_none() {
+            self.invalid = inner.invalid;
+        }
         let connector = std::mem::replace(&mut self.next_connector, Connector::And);
         self.conditions.push(ConditionGroup {
             node: ConditionNode::Group(inner.conditions),
@@ -172,7 +190,7 @@ where
     /// Prefer `.not().where_exists(...)` over `.not().in_subquery(...)`: `NOT IN`
     /// matches nothing as soon as the subquery returns a NULL.
     pub fn in_subquery<R>(
-        self,
+        mut self,
         col: impl ColumnRef<M>,
         sub_col: impl ColumnRef<R>,
         sub: impl FnOnce(QueryBuilder<R>) -> QueryBuilder<R>,
@@ -180,6 +198,8 @@ where
     where
         R: Model + ModelValues + FromRow,
     {
+        self.check_col::<M>(col.column_name());
+        self.check_col::<R>(sub_col.column_name());
         let head = format!(
             "{} IN (SELECT {} FROM {}",
             quote_ident(col.column_name()),
@@ -194,6 +214,9 @@ where
     where
         R: Model + ModelValues + FromRow,
     {
+        if self.invalid.is_none() {
+            self.invalid = sub.invalid;
+        }
         let connector = std::mem::replace(&mut self.next_connector, Connector::And);
         self.conditions.push(ConditionGroup {
             node: ConditionNode::Subquery(Box::new(Subquery {
@@ -209,6 +232,7 @@ where
     /// ORDER BY col ASC. Accepts `User::NAME`, `User::NAME.desc()`, or `"name"` / `"-name"` (DESC).
     pub fn order_by(mut self, col: impl OrderRef<M>) -> Self {
         let (name, descending) = col.order_parts();
+        self.check_col::<M>(name);
         let dir = if descending { "DESC" } else { "ASC" };
         self.order_by.push(format!("{} {dir}", quote_ident(name)));
         self
@@ -237,6 +261,7 @@ where
         value: Option<SqlValue>,
         values: Option<Vec<SqlValue>>,
     ) -> Self {
+        self.check_col::<M>(col);
         let connector = std::mem::replace(&mut self.next_connector, Connector::And);
         self.conditions.push(ConditionGroup {
             node: ConditionNode::Single(Condition {

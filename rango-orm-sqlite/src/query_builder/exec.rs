@@ -21,6 +21,7 @@ where
     /// Returns `Vec<WithRelated<M>>` — each item derefs to `M`, and related
     /// objects are accessible via `.related::<R>()` / `.prefetched::<R>()`.
     pub async fn all(self) -> Result<Vec<WithRelated<M>>> {
+        self.ensure_valid()?;
         let (sql, binds) = self.select_sql();
 
         // One connection for the main query and every prefetch query.
@@ -111,6 +112,7 @@ where
 
     /// Fetch the first matching row (no relation population).
     pub async fn one(self) -> Result<Option<M>> {
+        self.ensure_valid()?;
         let table = M::table_name();
         let (where_clause, binds) = self.build_where();
 
@@ -130,6 +132,7 @@ where
 
     /// Count matching rows.
     pub async fn count(self) -> Result<i64> {
+        self.ensure_valid()?;
         use sqlx::Row;
         let table = M::table_name();
         let (where_clause, binds) = self.build_where();
@@ -146,6 +149,7 @@ where
 
     /// Check if any matching row exists.
     pub async fn exists(self) -> Result<bool> {
+        self.ensure_valid()?;
         Ok(self.count().await? > 0)
     }
 
@@ -168,6 +172,12 @@ where
         self,
         cols: &[&str],
     ) -> Result<Vec<std::collections::HashMap<String, SqlValue>>> {
+        self.ensure_valid()?;
+        for c in cols {
+            if let Some(msg) = rango_orm_core::unknown_column::<M>(c) {
+                return Err(Error::Invalid(msg));
+            }
+        }
         use sqlx::Row;
         let table = M::table_name();
         let (where_clause, binds) = self.build_where();
@@ -219,6 +229,10 @@ where
 
     /// SELECT SUM(col) FROM ... WHERE ... — returns None if the table is empty or all values are NULL.
     pub async fn sum(self, col: impl ColumnRef<M>) -> Result<Option<f64>> {
+        self.ensure_valid()?;
+        if let Some(msg) = rango_orm_core::unknown_column::<M>(col.column_name()) {
+            return Err(Error::Invalid(msg));
+        }
         use sqlx::Row;
         let table = M::table_name();
         let (where_clause, binds) = self.build_where();
@@ -237,6 +251,10 @@ where
 
     /// SELECT AVG(col) FROM ... WHERE ... — returns None if the table is empty or all values are NULL.
     pub async fn avg(self, col: impl ColumnRef<M>) -> Result<Option<f64>> {
+        self.ensure_valid()?;
+        if let Some(msg) = rango_orm_core::unknown_column::<M>(col.column_name()) {
+            return Err(Error::Invalid(msg));
+        }
         use sqlx::Row;
         let table = M::table_name();
         let (where_clause, binds) = self.build_where();
@@ -267,6 +285,10 @@ where
     where
         T: for<'r> sqlx::Decode<'r, sqlx::Sqlite> + sqlx::Type<sqlx::Sqlite>,
     {
+        self.ensure_valid()?;
+        if let Some(msg) = rango_orm_core::unknown_column::<M>(col.column_name()) {
+            return Err(Error::Invalid(msg));
+        }
         use sqlx::Row;
         let table = M::table_name();
         let (where_clause, binds) = self.build_where();
@@ -297,6 +319,10 @@ where
     where
         T: for<'r> sqlx::Decode<'r, sqlx::Sqlite> + sqlx::Type<sqlx::Sqlite>,
     {
+        self.ensure_valid()?;
+        if let Some(msg) = rango_orm_core::unknown_column::<M>(col.column_name()) {
+            return Err(Error::Invalid(msg));
+        }
         use sqlx::Row;
         let table = M::table_name();
         let (where_clause, binds) = self.build_where();
