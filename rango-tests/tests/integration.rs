@@ -566,6 +566,40 @@ async fn test_bulk_create() {
 
 #[tokio::test]
 #[cfg_attr(not(feature = "integration"), ignore)]
+async fn test_bulk_create_unnest_large_with_nulls() {
+    let pool = pool().await;
+    setup(&pool).await;
+
+    // 1500 rows with a nullable column, all in one UNNEST statement.
+    let mut users: Vec<TestUser> = (0..1500)
+        .map(|i| user(&format!("unnest{}@test.com", i)))
+        .collect();
+    for (i, u) in users.iter_mut().enumerate() {
+        u.score = (i % 3 != 0).then_some(FieldInt(i as i32));
+    }
+
+    let n = bulk_create(&pool, &users)
+        .await
+        .expect("bulk_create failed");
+    assert_eq!(n, 1500);
+
+    let mut fetched: Vec<TestUser> = TestUser::filter(&pool)
+        .unlimited()
+        .all()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|r| r.inner)
+        .collect();
+    fetched.sort_by(|a, b| a.email.0.cmp(&b.email.0));
+    users.sort_by(|a, b| a.email.0.cmp(&b.email.0));
+    assert_eq!(fetched, users);
+
+    teardown(&pool).await;
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration"), ignore)]
 async fn test_bulk_update() {
     let pool = pool().await;
     setup(&pool).await;
@@ -1295,4 +1329,51 @@ async fn test_pg_select_as_partial() {
         .await
         .unwrap();
     assert!(none.is_none());
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration"), ignore)]
+async fn test_keyset_pagination_after_and_before() {
+    let pool = pool().await;
+    setup(&pool).await;
+
+    let users: Vec<TestUser> = (0..25)
+        .map(|i| user(&format!("page{i}@test.com")))
+        .collect();
+    bulk_create(&pool, &users).await.unwrap();
+    let mut ids: Vec<Uuid> = users.iter().map(|u| u.id.0).collect();
+    ids.sort();
+
+    // Forward: pages of 10 with `after(last id)`.
+    let mut seen = Vec::new();
+    let mut last: Option<Uuid> = None;
+    loop {
+        let mut q = TestUser::filter(&pool).limit(10);
+        if let Some(id) = last {
+            q = q.after(TestUser::ID, id);
+        }
+        let page = q.order_by(TestUser::ID).all().await.unwrap();
+        let Some(row) = page.last() else { break };
+        last = Some(row.id.0);
+        seen.extend(page.iter().map(|r| r.id.0));
+    }
+    assert_eq!(seen, ids);
+
+    // Backward: mirror with `before`, newest first.
+    let mut seen = Vec::new();
+    let mut first: Option<Uuid> = None;
+    loop {
+        let mut q = TestUser::filter(&pool).limit(10);
+        if let Some(id) = first {
+            q = q.before(TestUser::ID, id);
+        }
+        let page = q.order_by(TestUser::ID.desc()).all().await.unwrap();
+        let Some(row) = page.last() else { break };
+        first = Some(row.id.0);
+        seen.extend(page.iter().map(|r| r.id.0));
+    }
+    ids.reverse();
+    assert_eq!(seen, ids);
+
+    teardown(&pool).await;
 }

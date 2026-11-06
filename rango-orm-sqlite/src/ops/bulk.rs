@@ -7,6 +7,7 @@ use sqlx::SqlitePool;
 
 use super::*;
 
+#[tracing::instrument(name = "db.query", skip_all, fields(db.system = "sqlite", db.operation = "INSERT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
 pub async fn bulk_create<M>(pool: &SqlitePool, models: &[M]) -> Result<usize>
 where
     M: Model + ModelValues,

@@ -70,6 +70,43 @@ where
         self.add(col.column_name(), Op::Lte, Some(val), None)
     }
 
+    /// Keyset pagination: rows with `col > value`, ordered by `col ASC` first.
+    ///
+    /// Unlike `offset`, cost does not grow with the page number. `col` should be
+    /// unique and indexed (the primary key, for instance).
+    ///
+    /// # Example
+    /// ```rust,ignore
+    /// let mut last = None;
+    /// loop {
+    ///     let mut q = User::filter(&pool).limit(100);
+    ///     if let Some(id) = last {
+    ///         q = q.after(User::ID, id);
+    ///     }
+    ///     let page = q.order_by(User::ID).all().await?;
+    ///     let Some(row) = page.last() else { break };
+    ///     last = Some(row.id.clone());
+    /// }
+    /// ```
+    pub fn after<V>(self, col: impl FilterColumn<M, V>, val: V) -> Self {
+        let name = col.column_name().to_string();
+        self.gt(col, val).order_first(&name)
+    }
+
+    /// Keyset pagination backwards: rows with `col < value`, ordered by `col DESC` first.
+    pub fn before<V>(self, col: impl FilterColumn<M, V>, val: V) -> Self {
+        let name = col.column_name().to_string();
+        self.lt(col, val).order_first(&format!("-{name}"))
+    }
+
+    /// `order_by`, but as the highest-priority ordering.
+    fn order_first(mut self, col: &str) -> Self {
+        self = self.order_by(col);
+        let last = self.order_by.pop().expect("order_by pushed one entry");
+        self.order_by.insert(0, last);
+        self
+    }
+
     pub fn like(self, col: impl ColumnRef<M>, pattern: impl Into<String>) -> Self {
         self.add(
             col.column_name(),
