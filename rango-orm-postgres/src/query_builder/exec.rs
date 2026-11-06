@@ -21,6 +21,7 @@ where
     ///
     /// Returns `Vec<WithRelated<M>>` — each item derefs to `M`, and related
     /// objects are accessible via `.related::<R>()` / `.prefetched::<R>()`.
+    #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "postgresql", db.operation = "SELECT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
     pub async fn all(self) -> Result<Vec<WithRelated<M>>> {
         self.ensure_valid()?;
         let (sql, binds) = self.select_sql();
@@ -28,6 +29,7 @@ where
         // One connection for the main query and every prefetch query: one pool round-trip.
         let mut conn = self.pool.acquire().await.map_err(db_err)?;
         let rows = bind_and_fetch_all(&mut *conn, &sql, binds).await?;
+        tracing::Span::current().record("db.rows", rows.len());
         let mut results: Vec<WithRelated<M>> = Vec::with_capacity(rows.len());
         if self.select_related.is_empty() {
             for row in rows {
@@ -110,6 +112,7 @@ where
     }
 
     /// Fetch the first matching row (no relation population).
+    #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "postgresql", db.operation = "SELECT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
     pub async fn one(self) -> Result<Option<WithRelated<M>>> {
         self.ensure_valid()?;
         let table = M::table_name();
@@ -134,6 +137,7 @@ where
     }
 
     /// Count matching rows.
+    #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "postgresql", db.operation = "SELECT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
     pub async fn count(self) -> Result<i64> {
         self.ensure_valid()?;
         let table = M::table_name();
@@ -170,6 +174,7 @@ where
     ///     println!("{:?}", row["email"]);
     /// }
     /// ```
+    #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "postgresql", db.operation = "SELECT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
     pub async fn values(
         self,
         cols: &[&str],
@@ -274,6 +279,7 @@ where
     }
 
     /// SELECT SUM(col) FROM ... WHERE ... — returns None if the table is empty or all values are NULL.
+    #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "postgresql", db.operation = "SELECT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
     pub async fn sum(self, col: impl ColumnRef<M>) -> Result<Option<f64>> {
         self.ensure_valid()?;
         if let Some(msg) = rango_orm_core::unknown_column::<M>(col.column_name()) {
@@ -295,6 +301,7 @@ where
     }
 
     /// SELECT AVG(col) FROM ... WHERE ... — returns None if the table is empty or all values are NULL.
+    #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "postgresql", db.operation = "SELECT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
     pub async fn avg(self, col: impl ColumnRef<M>) -> Result<Option<f64>> {
         self.ensure_valid()?;
         if let Some(msg) = rango_orm_core::unknown_column::<M>(col.column_name()) {
@@ -325,6 +332,7 @@ where
     /// let oldest: Option<NaiveDate> = Event::filter(&pool).min::<NaiveDate>("date").await?;
     /// let lowest: Option<f64>       = Order::filter(&pool).min::<f64>("price").await?;
     /// ```
+    #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "postgresql", db.operation = "SELECT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
     pub async fn min<T>(self, col: impl ColumnRef<M>) -> Result<Option<T>>
     where
         T: for<'r> sqlx::Decode<'r, Postgres> + sqlx::Type<Postgres>,
@@ -358,6 +366,7 @@ where
     /// let latest: Option<DateTime<Utc>> = Post::filter(&pool).max::<DateTime<Utc>>("created_at").await?;
     /// let highest: Option<f64>          = Order::filter(&pool).max::<f64>("price").await?;
     /// ```
+    #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "postgresql", db.operation = "SELECT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
     pub async fn max<T>(self, col: impl ColumnRef<M>) -> Result<Option<T>>
     where
         T: for<'r> sqlx::Decode<'r, Postgres> + sqlx::Type<Postgres>,
