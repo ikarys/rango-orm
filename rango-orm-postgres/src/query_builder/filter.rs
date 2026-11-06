@@ -301,8 +301,13 @@ where
 
     /// The main `.all()` query: filtered rows of M, plus one LEFT JOIN per `select_related`.
     pub(super) fn select_sql(&self) -> (String, Vec<SqlValue>) {
+        self.select_sql_cols("*")
+    }
+
+    /// `select_sql` with an explicit column list (already quoted) instead of `*`.
+    pub(super) fn select_sql_cols(&self, cols: &str) -> (String, Vec<SqlValue>) {
         let (where_clause, binds) = self.build_where();
-        let mut sql = format!("SELECT * FROM {}", quote_ident(M::table_name()));
+        let mut sql = format!("SELECT {cols} FROM {}", quote_ident(M::table_name()));
         if !where_clause.is_empty() {
             sql.push(' ');
             sql.push_str(&where_clause);

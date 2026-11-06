@@ -67,6 +67,28 @@
 //! # }
 //! # #[cfg(not(feature = "postgres"))] compile_error!("needs the postgres feature");
 //! ```
+//!
+//! # Partial selects
+//!
+//! `#[derive(Partial)]` declares a struct holding some of a model's columns;
+//! `select_as` fetches only those columns. A field whose name or type does not
+//! match the model does not compile:
+//!
+//! ```rust,compile_fail
+//! use rango::prelude::*;
+//!
+//! #[derive(Model)]
+//! struct User {
+//!     id: FieldUuid,
+//!     age: FieldInt,
+//! }
+//!
+//! #[derive(Partial)]
+//! #[partial(model = User)]
+//! struct UserLite {
+//!     age: FieldText,
+//! }
+//! ```
 #![forbid(unsafe_code)]
 // Re-export core types — always available
 pub use rango_orm_core::*;
@@ -78,6 +100,7 @@ pub extern crate rango_orm_core;
 // Re-export derive macros
 pub use rango_orm_derive::Model;
 pub use rango_orm_derive::ModelMixin;
+pub use rango_orm_derive::Partial;
 pub use rango_orm_derive::model;
 
 // ─── Postgres backend (feature `postgres`, enabled by default) ───────────────
@@ -140,7 +163,7 @@ pub async fn connect_mysql(url: &str) -> Result<MySqlPool> {
 pub mod prelude {
     pub use rango_orm_core::ModelHooks;
     pub use rango_orm_core::*;
-    pub use rango_orm_derive::{Model, ModelMixin};
+    pub use rango_orm_derive::{Model, ModelMixin, Partial};
 
     #[cfg(feature = "postgres")]
     pub use rango_orm_postgres::{

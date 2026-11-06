@@ -10,6 +10,7 @@ use syn::{DeriveInput, parse_macro_input};
 mod implicit_pk;
 mod mixin;
 mod model;
+mod partial;
 mod utils;
 
 /// Returns the path to rango_orm_core: through the `rango-orm` facade, or directly.
@@ -124,4 +125,25 @@ pub(crate) fn rango_derive_path() -> TokenStream2 {
         }
         Err(_) => quote! { ::rango_orm_derive::Model },
     }
+}
+
+/// Derive macro for typed partial selects: a struct holding a subset of a model's
+/// columns, read with `QueryBuilder::select_as::<Self>()`.
+///
+/// Every field must match a model column by name and type (checked at compile time).
+///
+/// ```rust,ignore
+/// #[derive(Partial)]
+/// #[partial(model = User)]
+/// struct UserLite {
+///     id: FieldUuid,
+///     email: FieldEmail,
+/// }
+/// ```
+#[proc_macro_derive(Partial, attributes(partial))]
+pub fn derive_partial(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    partial::expand(input)
+        .unwrap_or_else(|e| e.to_compile_error())
+        .into()
 }
