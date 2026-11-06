@@ -107,7 +107,7 @@ fn diff_to_sql(d: &SchemaDiff, backend: BackendKind) -> String {
                         "CREATE INDEX {} ON {} ({});\n",
                         object_name(backend, &format!("{}_{}_idx", table, column.name)),
                         backend.quote_ident(table),
-                        backend.quote_ident(&column.name)
+                        index_key(column, backend)
                     ));
                 }
 
@@ -138,7 +138,7 @@ fn diff_to_sql(d: &SchemaDiff, backend: BackendKind) -> String {
                         "CREATE INDEX IF NOT EXISTS {} ON {} ({});\n\n",
                         object_name(backend, &format!("{}_{}_idx", table, column.name)),
                         backend.quote_ident(table),
-                        backend.quote_ident(&column.name)
+                        index_key(column, backend)
                     ));
                 }
 
@@ -464,7 +464,7 @@ fn generate_create_table(schema: &TableSchema, backend: BackendKind) -> String {
                 lines.push(format!(
                     "    INDEX {} ({})",
                     object_name(backend, &format!("{}_{}_idx", schema.table_name, col.name)),
-                    backend.quote_ident(&col.name)
+                    index_key(col, backend)
                 ));
             }
 
@@ -564,6 +564,17 @@ fn generate_create_table(schema: &TableSchema, backend: BackendKind) -> String {
     }
 
     sql
+}
+
+/// Index key part for `col`. MySQL cannot index a TEXT/BLOB column without a prefix length.
+fn index_key(col: &ColumnDef, backend: BackendKind) -> String {
+    let name = backend.quote_ident(&col.name);
+    match col.col_type {
+        ColumnType::Text | ColumnType::Bytea if backend == BackendKind::Mysql => {
+            format!("{name}(191)")
+        }
+        _ => name,
+    }
 }
 
 fn column_definition(table: &str, col: &ColumnDef, backend: BackendKind) -> String {
