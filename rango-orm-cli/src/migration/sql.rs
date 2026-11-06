@@ -20,8 +20,41 @@ pub(crate) fn generate_sql_from_diff(diffs: &[SchemaDiff], backend: BackendKind)
     let create_order = sort_create_tables_topologically(&creates);
     let mut sql = String::new();
 
+    // Postgres/MySQL reject a REFERENCES to a table not created yet (circular FKs): emit
+    // those as ALTER TABLE after all CREATEs. SQLite accepts forward references.
+    let batch: std::collections::HashSet<&str> =
+        creates.iter().map(|s| s.table_name.as_str()).collect();
+    let mut created: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    let mut deferred = String::new();
+
     for i in create_order {
-        sql.push_str(&generate_create_table(&creates[i], backend));
+        let mut schema = creates[i].clone();
+        created.insert(creates[i].table_name.as_str());
+        if backend != BackendKind::Sqlite {
+            for col in &mut schema.columns {
+                let forward = col.references.as_ref().is_some_and(|fk| {
+                    fk.table != schema.table_name
+                        && batch.contains(fk.table.as_str())
+                        && !created.contains(fk.table.as_str())
+                });
+                if forward && let Some(fk) = col.references.take() {
+                    deferred.push_str(&format!(
+                        "ALTER TABLE {} ADD CONSTRAINT {} FOREIGN KEY ({}) REFERENCES {} ({}) ON DELETE {};\n",
+                        backend.quote_ident(&schema.table_name),
+                        object_name(backend, &format!("{}_{}_fkey", schema.table_name, col.name)),
+                        backend.quote_ident(&col.name),
+                        backend.quote_ident(&fk.table),
+                        backend.quote_ident(&fk.column),
+                        referential_action_sql(&fk.on_delete)
+                    ));
+                }
+            }
+        }
+        sql.push_str(&generate_create_table(&schema, backend));
+        sql.push('\n');
+    }
+    if !deferred.is_empty() {
+        sql.push_str(&deferred);
         sql.push('\n');
     }
 
@@ -1060,6 +1093,54 @@ mod tests {
             .expect("comments table should exist");
 
         assert!(posts_pos < comments_pos);
+    }
+
+    // ── circular foreign keys ─────────────────────────────────────────────────
+    fn cycle_diffs() -> Vec<SchemaDiff> {
+        let table = |name: &str, other: &str| TableSchema {
+            table_name: name.to_string(),
+            columns: vec![
+                uuid_col("id", true),
+                fk_col(&format!("{other}_id"), other, ReferentialAction::Cascade),
+            ],
+            ..Default::default()
+        };
+        vec![
+            SchemaDiff::CreateTable(table("projects", "generations")),
+            SchemaDiff::CreateTable(table("generations", "projects")),
+        ]
+    }
+
+    #[test]
+    fn test_circular_fk_deferred_to_alter_table() {
+        for backend in [BackendKind::Postgres, BackendKind::Mysql] {
+            let sql = generate_sql_from_diff(&cycle_diffs(), backend);
+            let q = |n: &str| backend.quote_ident(n);
+            let first = sql.find("CREATE TABLE").unwrap();
+            let second = first + 1 + sql[first + 1..].find("CREATE TABLE").unwrap();
+            let alter = sql.find("ALTER TABLE").expect(&sql);
+            assert!(alter > second, "got: {sql}");
+            // Only the second table keeps its inline reference (target already created).
+            assert_eq!(sql.matches("REFERENCES").count(), 2, "got: {sql}");
+            assert_eq!(sql[..alter].matches("REFERENCES").count(), 1, "got: {sql}");
+            assert!(
+                sql[alter..].contains(&format!(
+                    "ADD CONSTRAINT {} FOREIGN KEY ({}) REFERENCES {} ({}) ON DELETE CASCADE;",
+                    q("projects_generations_id_fkey"),
+                    q("generations_id"),
+                    q("generations"),
+                    q("id")
+                )),
+                "got: {sql}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_circular_fk_stays_inline_on_sqlite() {
+        let sql = generate_sql_from_diff(&cycle_diffs(), BackendKind::Sqlite);
+        assert!(!sql.contains("ALTER TABLE"), "got: {sql}");
+        assert_eq!(sql.matches("REFERENCES").count(), 2, "got: {sql}");
     }
 
     // ── indexes ───────────────────────────────────────────────────────────────

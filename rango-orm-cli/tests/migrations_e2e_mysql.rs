@@ -758,3 +758,48 @@ async fn export_import_round_trip_typed() {
     drop_tables(&pool, &DUMP_TABLES).await;
     project.remove();
 }
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-mysql"), ignore)]
+async fn circular_foreign_keys_migrate() {
+    let pool = MySqlPool::connect(&database_url())
+        .await
+        .expect("connect to mysql");
+    let project = Project::new("cycle");
+    let tables = [
+        "e2e_my_cycle_projects",
+        "e2e_my_cycle_generations",
+        "_rango_migrations",
+    ];
+    drop_tables(&pool, &tables).await;
+
+    project.write_models(
+        r#"
+#[derive(Model)]
+#[model(table = "e2e_my_cycle_projects")]
+pub struct Project {
+    pub id: FieldUuid,
+    pub identity: Option<ForeignKey<Generation>>,
+}
+
+#[derive(Model)]
+#[model(table = "e2e_my_cycle_generations")]
+pub struct Generation {
+    pub id: FieldUuid,
+    pub project: ForeignKey<Project>,
+}
+"#,
+    );
+    assert_success(&project.makemigrations(), "makemigrations");
+    assert!(project.latest_migration_sql().contains("ADD CONSTRAINT"));
+    assert_success(&project.migrate(), "migrate");
+
+    let fks = constraint_names(&pool, "e2e_my_cycle_projects", "FOREIGN KEY").await;
+    assert_eq!(fks.len(), 1, "{fks:?}");
+
+    assert_success(&project.makemigrations(), "second makemigrations");
+    assert_eq!(project.migration_sql_files().len(), 1);
+
+    drop_tables(&pool, &tables).await;
+    project.remove();
+}

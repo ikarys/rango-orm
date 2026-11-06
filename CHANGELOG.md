@@ -17,6 +17,7 @@ First stable-track release: the full v0.1.0 to-do list is in.
 - Fix: `rango import --replace` on Postgres generated invalid SQL (`ON CONFLICT DO UPDATE` without a conflict target); it now targets the primary key.
 - Fix (MySQL / MariaDB): `rango import` inserted rows outside the transaction when it also ran DDL, so a failed import left partial rows.
 - Fix (breaking for migrations): `makemigrations` no longer prefixes table names with the package name. The `#[derive(Model)]` table name (`table = "..."` or snake_case of the struct) is the only source of truth, so migrations create the tables the runtime queries; M2M pivots use the runtime's `m2m_pivot` names. `--prefix` and `[models] prefix` are removed (`makemigrations` fails if `prefix` is still in rango.toml). With an existing snapshot of prefixed names, the next `makemigrations` sees the old tables as dropped and the new ones as created (table renames are not detected, only column renames): it asks before dropping and would drop the data. Either rename the tables in your database by hand (`ALTER TABLE old RENAME TO new`, pivots too) and edit the snapshot to match, or regenerate the migrations on a fresh database.
+- Fix: models with a circular foreign key (A -> B -> A) now migrate on Postgres and MySQL: the forward reference is emitted as `ALTER TABLE ... ADD CONSTRAINT` after all `CREATE TABLE`s.
 
 ## 0.1.0-beta.3 (2026-11-06)
 
