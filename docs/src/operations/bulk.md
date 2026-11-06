@@ -21,7 +21,7 @@ let inserted = bulk_create(&pool, &users).await?;
 println!("Inserted {} rows", inserted);
 ```
 
-Generates a single `INSERT INTO ... VALUES (...), (...), ...` per chunk.
+On PostgreSQL, generates one `INSERT INTO ... SELECT * FROM UNNEST($1::type[], $2::type[], ...)` with one array per column, whatever the row count (falls back to multi-row `VALUES` for JSON columns). On SQLite and MySQL, generates one `INSERT INTO ... VALUES (...), (...), ...` per chunk.
 
 ## bulk_update
 
@@ -53,7 +53,7 @@ Uses `INSERT ... ON CONFLICT (email) DO UPDATE SET ...`.
 ## Chunking
 
 PostgreSQL has a limit of 65,535 bind parameters per query. SQLite has a limit of 999.
-Rango automatically splits large batches into chunks — transparent to the caller.
+Rango automatically splits large batches into chunks — transparent to the caller. Postgres `bulk_create` needs no chunking: UNNEST binds one array per column.
 
 ## Inside transactions
 

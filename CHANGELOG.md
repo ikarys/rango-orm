@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.1.0 (unreleased)
+
+First stable-track release: the full v0.1.0 to-do list is in.
+
+- Partial selects (only / defer): `#[derive(Partial)]` + `#[partial(model = User)]` on a struct holding a subset of the model's columns, then `.select_as::<UserLite>().all()` / `.one()`. The `SELECT` lists only those columns; names and types are checked at compile time.
+- Implicit primary key: `#[rango::model]` injects `pub id: FieldUuid` when the struct declares no primary key (`pk = "bigint"` / `"int"` for database-generated ids), then derives `Model`.
+- CLI: `rango dump` (`--schema-only`, `--data-only`, `--table`, `--output`), `rango restore <file>` and `rango backup`. Backend-independent Rango JSON format (schema snapshot + rows), gzip for backups, files written `0600`. Restore treats the file as untrusted (names checked against the dump schema and quoted, values bound, decompressed size capped) and runs in one transaction.
+- Keyset pagination: `.after(col, value)` / `.before(col, value)`, constant cost per page unlike `OFFSET`.
+- Tracing: every database operation emits a `db.query` span with OpenTelemetry fields (`db.system`, `db.operation`, `db.sql.table`, `db.rows`).
+- Perf (Postgres): `bulk_create` is one `INSERT … SELECT FROM UNNEST(…)` statement, one array per column, with no parameter-limit chunking (multi-row `VALUES` kept for JSON columns).
+- Fix: `one()` ignored `order_by` and `offset`; it now runs the same query as `all()` capped at one row.
+- Fix: `#[derive(Model)]` recognises field types written with a path (`rango::FieldUuid`, `rango::ForeignKey<User>`).
+- Fix: `rango export` on Postgres wrote `null` for uuid, timestamp and other non-JSON-native columns; it now serialises every column.
+- Change: `rango import` on SQLite fails on rows violating a constraint instead of skipping them silently.
+- Fix: `rango import --replace` on Postgres generated invalid SQL (`ON CONFLICT DO UPDATE` without a conflict target); it now targets the primary key.
+- Fix (MySQL / MariaDB): `rango import` inserted rows outside the transaction when it also ran DDL, so a failed import left partial rows.
+
 ## 0.1.0-beta.3 (2026-11-06)
 
 First release on crates.io. `rango`, `rango-core` and `rango-cli` were already taken there, so every crate is renamed `rango-orm-*`.
