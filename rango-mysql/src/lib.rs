@@ -9,6 +9,7 @@ use sqlx::{
     ConnectOptions,
 };
 
+pub use m2m::M2M;
 pub use ops::{
     all, bulk_create, delete, get, get_or_create, insert, raw, raw_execute, raw_scalar, update,
 };
@@ -17,6 +18,7 @@ pub use rango_core::WithRelated;
 pub use transaction::{atomic, MySqlTransaction, TxFuture};
 
 mod error;
+pub mod m2m;
 mod ops;
 mod query_builder;
 mod row;

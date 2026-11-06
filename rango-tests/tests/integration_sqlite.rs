@@ -33,7 +33,6 @@ struct TestPost {
 struct TestBlog {
     id: FieldUuid,
     title: FieldVarchar<1, 100>,
-    #[allow(dead_code)] // M2M fields are never read: relations load via prefetch_related
     tags: ManyToMany<TestTag>,
 }
 
@@ -127,20 +126,12 @@ async fn test_sqlite_prefetch_related_many_to_many() {
     insert(&pool, t1.clone()).await.unwrap();
     insert(&pool, t2.clone()).await.unwrap();
 
-    raw_execute(
-        &pool,
-        r#"INSERT INTO "test_blog_test_tag" ("test_blog_id", "test_tag_id") VALUES (?, ?)"#,
-        vec![SqlValue::Uuid(b1.id.0), SqlValue::Uuid(t1.id.0)],
-    )
-    .await
-    .unwrap();
-    raw_execute(
-        &pool,
-        r#"INSERT INTO "test_blog_test_tag" ("test_blog_id", "test_tag_id") VALUES (?, ?)"#,
-        vec![SqlValue::Uuid(b1.id.0), SqlValue::Uuid(t2.id.0)],
-    )
-    .await
-    .unwrap();
+    M2M::<TestBlog, TestTag>::add(&pool, &b1, &t1)
+        .await
+        .unwrap();
+    M2M::<TestBlog, TestTag>::add(&pool, &b1, &t2)
+        .await
+        .unwrap();
 
     let blogs = TestBlog::filter(&pool)
         .prefetch_related(TestBlog::TAGS)
@@ -161,6 +152,36 @@ async fn test_sqlite_prefetch_related_many_to_many() {
     tag_names.sort();
     assert_eq!(tag_names, vec!["async".to_string(), "orm".to_string()]);
     assert_eq!(b2_blog.prefetched::<TestTag>().len(), 0);
+
+    // M2M ops: set replaces atomically, exists, reverse, idempotent add, remove.
+    M2M::<TestBlog, TestTag>::set(&pool, &b2, std::slice::from_ref(&t1))
+        .await
+        .unwrap();
+    assert!(
+        M2M::<TestBlog, TestTag>::exists(&pool, &b2, &t1)
+            .await
+            .unwrap()
+    );
+    assert_eq!(
+        M2M::<TestBlog, TestTag>::reverse(&pool, &t1)
+            .await
+            .unwrap()
+            .len(),
+        2
+    );
+    M2M::<TestBlog, TestTag>::add(&pool, &b2, &t1)
+        .await
+        .unwrap();
+    M2M::<TestBlog, TestTag>::remove(&pool, &b1, &t1)
+        .await
+        .unwrap();
+    assert_eq!(
+        M2M::<TestBlog, TestTag>::all(&pool, &b1)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
 }
 
 fn user(email: &str) -> TestUser {

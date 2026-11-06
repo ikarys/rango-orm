@@ -62,7 +62,7 @@ This creates a pivot table `myapp_article_myapp_tag` with two UUID columns.
 
 ### M2M operations
 
-`M2M` is Postgres-only for now; `prefetch_related` on a M2M field works on every backend.
+`M2M` works on every backend. `add` is idempotent (adding an existing link is a no-op).
 
 ```rust
 // Add a relation
@@ -77,7 +77,7 @@ let tags = M2M::<Article, Tag>::all(&pool, &article).await?;
 // Get all articles for a tag (reverse)
 let articles = M2M::<Article, Tag>::reverse(&pool, &tag).await?;
 
-// Set exact relations (replaces all existing)
+// Set exact relations (replaces all existing, in one transaction)
 M2M::<Article, Tag>::set(&pool, &article, &tags).await?;
 
 // Clear all relations
