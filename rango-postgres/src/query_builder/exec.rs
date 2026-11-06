@@ -9,8 +9,8 @@ use std::collections::{HashMap, HashSet};
 // ─── Bind helpers ─────────────────────────────────────────────────────────────
 use sqlx::Row;
 
-use super::relations::{extract_key_from_row, sql_value_key};
 use super::*;
+use rango_core::related::{row_key, sql_value_key};
 
 impl<M> QueryBuilder<M>
 where
@@ -84,13 +84,15 @@ where
                 quote_ident(spec.table_name),
                 quote_ident(&spec.related_fk_col),
             );
+            let like = unique_pks[0].clone();
             let prefetch_rows = fetch_by_keys(&mut *conn, &prefetch_sql, unique_pks).await?;
 
             // Group boxed R items by the FK value they carry.
             let mut grouped: HashMap<String, Vec<Box<dyn Any + Send + Sync>>> = HashMap::new();
             for row in &prefetch_rows {
-                if let Some(fk_key) = extract_key_from_row(row, &spec.related_fk_col) {
-                    let boxed = (spec.from_row)(&PgRangoRow2::new(row)).map_err(|e| {
+                let r_row = PgRangoRow2::new(row);
+                if let Some(fk_key) = row_key(&r_row, &spec.related_fk_col, &like) {
+                    let boxed = (spec.from_row)(&r_row).map_err(|e| {
                         Error::Decode(format!("prefetch_related({}): {}", spec.related_fk_col, e))
                     })?;
                     grouped.entry(fk_key).or_default().push(boxed);

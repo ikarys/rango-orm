@@ -3,7 +3,6 @@ use rango_core::{
     ModelValues, OrderRef, SqlValue,
 };
 use sqlx::MySqlPool;
-// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 use super::*;
 
@@ -20,6 +19,8 @@ where
             offset: None,
             explicit_limit: false,
             next_connector: Connector::And,
+            select_related: Vec::new(),
+            prefetch_related: Vec::new(),
             _phantom: std::marker::PhantomData,
         }
     }
@@ -259,25 +260,63 @@ where
         }
     }
 
-    pub fn explain(&self) -> String {
-        let table = M::table_name();
-        let (where_clause, _) = self.build_where();
-        let mut sql = format!("SELECT * FROM {}", quote_ident(table));
+    pub(super) fn select_sql(&self) -> (String, Vec<SqlValue>) {
+        let (where_clause, binds) = self.build_where();
+        let mut sql = format!("SELECT * FROM {}", quote_ident(M::table_name()));
         if !where_clause.is_empty() {
             sql.push(' ');
             sql.push_str(&where_clause);
         }
-        if !self.order_by.is_empty() {
-            sql.push_str(&format!(" ORDER BY {}", self.order_by.join(", ")));
-        }
-        if let Some(l) = self.limit {
-            sql.push_str(&format!(" LIMIT {}", l));
-        } else if !self.explicit_limit {
+        let order_by = if self.order_by.is_empty() {
+            String::new()
+        } else {
+            format!(" ORDER BY {}", self.order_by.join(", "))
+        };
+        sql.push_str(&order_by);
+        // Default row cap unless .limit() or .unlimited() was called.
+        if !self.explicit_limit {
             sql.push_str(&format!(" LIMIT {}", DEFAULT_QUERY_LIMIT));
+        } else if let Some(l) = self.limit {
+            sql.push_str(&format!(" LIMIT {}", l));
         }
         if let Some(o) = self.offset {
             sql.push_str(&format!(" OFFSET {}", o));
         }
-        sql
+        if self.select_related.is_empty() {
+            return (sql, binds);
+        }
+
+        // Filter, order and paginate M first, then join: LIMIT applies to M rows and
+        // the filters keep their unqualified column names. R's columns get a
+        // `__r{i}_` prefix so they cannot clash with M's.
+        let mut select = format!("SELECT {}.*", quote_ident("__m"));
+        let mut joins = String::new();
+        for (i, spec) in self.select_related.iter().enumerate() {
+            let alias = quote_ident(&format!("__r{i}"));
+            for col in &spec.columns {
+                select.push_str(&format!(
+                    ", {alias}.{} AS {}",
+                    quote_ident(col),
+                    quote_ident(&format!("__r{i}_{col}"))
+                ));
+            }
+            joins.push_str(&format!(
+                " LEFT JOIN {} AS {alias} ON {alias}.{} = {}.{}",
+                quote_ident(spec.table_name),
+                quote_ident(spec.pk_col),
+                quote_ident("__m"),
+                quote_ident(&spec.fk_col),
+            ));
+        }
+        // The outer ORDER BY resolves to M's output columns (R's are prefixed).
+        let sql = format!(
+            "{select} FROM ({sql}) AS {}{joins}{order_by}",
+            quote_ident("__m")
+        );
+        (sql, binds)
+    }
+
+    pub fn explain(&self) -> String {
+        self.select_sql().0
     }
 }

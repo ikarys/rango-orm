@@ -1,6 +1,6 @@
-use rango_core::Result;
-use rango_core::{ForeignKeyRef, FromRow, Model, ModelValues, RowError, SqlValue};
-use std::any::{Any, TypeId};
+use rango_core::related::{collect_vec_erased, erased_from_row};
+use rango_core::{ForeignKeyRef, FromRow, Model, ModelValues};
+use std::any::TypeId;
 // ─── Bind helpers ─────────────────────────────────────────────────────────────
 
 use super::*;
@@ -80,65 +80,4 @@ where
         });
         self
     }
-}
-
-// ─── Type-erased helpers (monomorphized at call site) ─────────────────────────
-pub(super) fn erased_from_row<R>(
-    row: &dyn rango_core::RangoRow,
-) -> Result<Box<dyn Any + Send + Sync>, RowError>
-where
-    R: FromRow + Send + Sync + 'static,
-{
-    R::from_row(row).map(|v| Box::new(v) as Box<dyn Any + Send + Sync>)
-}
-
-pub(super) fn collect_vec_erased<R>(
-    items: Vec<Box<dyn Any + Send + Sync>>,
-) -> Box<dyn Any + Send + Sync>
-where
-    R: Any + Send + Sync + 'static,
-{
-    let typed: Vec<R> = items
-        .into_iter()
-        .map(|b| {
-            *b.downcast::<R>()
-                .expect("prefetch_related type mismatch — this is a bug")
-        })
-        .collect();
-    Box::new(typed) as Box<dyn Any + Send + Sync>
-}
-
-// ─── Row key extraction helpers ───────────────────────────────────────────────
-/// Convert a `SqlValue` to a string key for use in HashMap lookups.
-pub(super) fn sql_value_key(v: &SqlValue) -> Option<String> {
-    match v {
-        SqlValue::Uuid(u) => Some(u.to_string()),
-        SqlValue::BigInt(i) => Some(i.to_string()),
-        SqlValue::Int(i) => Some(i.to_string()),
-        SqlValue::SmallInt(i) => Some(i.to_string()),
-        SqlValue::Text(s) => Some(s.clone()),
-        _ => None,
-    }
-}
-
-/// Extract a string key for `col` from a raw `PgRow`.
-/// Tries UUID, i64, i32, i16, String in order.
-pub(super) fn extract_key_from_row(row: &sqlx::postgres::PgRow, col: &str) -> Option<String> {
-    use sqlx::Row;
-    if let Ok(v) = row.try_get::<uuid::Uuid, _>(col) {
-        return Some(v.to_string());
-    }
-    if let Ok(v) = row.try_get::<i64, _>(col) {
-        return Some(v.to_string());
-    }
-    if let Ok(v) = row.try_get::<i32, _>(col) {
-        return Some(v.to_string());
-    }
-    if let Ok(v) = row.try_get::<i16, _>(col) {
-        return Some(v.to_string());
-    }
-    if let Ok(v) = row.try_get::<String, _>(col) {
-        return Some(v);
-    }
-    None
 }

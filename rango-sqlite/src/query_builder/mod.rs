@@ -1,13 +1,15 @@
 use crate::error::db_err;
 use crate::ops::bind_sql_values;
+use rango_core::related::{CollectVecFn, FromRowFn};
 use rango_core::Result;
 use rango_core::{quote_ident, FromRow, Model, ModelValues, SqlValue};
-use sqlx::SqlitePool;
-// ─── Helpers ─────────────────────────────────────────────────────────────────
 use sqlx::sqlite::SqliteRow;
+use sqlx::{Executor, SqlitePool};
+use std::any::TypeId;
 
 mod exec;
 mod filter;
+mod relations;
 
 pub const DEFAULT_QUERY_LIMIT: i64 = 1000;
 
@@ -67,6 +69,38 @@ struct ConditionGroup {
     connector: Connector,
 }
 
+/// Spec for a `.select_related(fk_col)` call.
+/// The FK is on the main model's table: `m.fk_col = r.pk`, loaded with a LEFT JOIN.
+struct SelectRelatedSpec {
+    /// Column on M's table containing the FK to R.
+    fk_col: String,
+    /// `TypeId::of::<R>()` — used as the `WithRelated` cache key.
+    type_id: TypeId,
+    /// R's table name.
+    table_name: &'static str,
+    /// R's primary key column name.
+    pk_col: &'static str,
+    /// R's columns, selected as `"r{i}"."col" AS "__r{i}_col"`.
+    columns: Vec<String>,
+    /// Type-erased `R::from_row`.
+    from_row: FromRowFn,
+}
+
+/// Spec for a `.prefetch_related(related_fk_col)` call.
+/// The FK is on R's table: `r.related_fk_col = m.pk`.
+struct PrefetchSpec {
+    /// Column on R's table pointing back to M.
+    related_fk_col: String,
+    /// `TypeId::of::<Vec<R>>()` — used as the `WithRelated` cache key.
+    vec_type_id: TypeId,
+    /// R's table name.
+    table_name: &'static str,
+    /// Type-erased `R::from_row`.
+    from_row: FromRowFn,
+    /// Collects `Vec<Box<dyn Any>>` into a `Box<dyn Any>` containing `Vec<R>`.
+    collect_vec: CollectVecFn,
+}
+
 pub struct QueryBuilder<M> {
     pool: SqlitePool,
     conditions: Vec<ConditionGroup>,
@@ -77,6 +111,8 @@ pub struct QueryBuilder<M> {
     next_connector: Connector,
     /// Raw WHERE clauses injected by SqliteQueryExt. Each entry is (sql_fragment, binds).
     pub(crate) raw_conditions: Vec<(String, Vec<SqlValue>)>,
+    select_related: Vec<SelectRelatedSpec>,
+    prefetch_related: Vec<PrefetchSpec>,
     _phantom: std::marker::PhantomData<M>,
 }
 
@@ -168,24 +204,30 @@ fn build_condition(c: &Condition, binds: &mut Vec<SqlValue>) -> String {
     }
 }
 
-async fn bind_and_fetch_all(
-    pool: &SqlitePool,
+async fn bind_and_fetch_all<'e, E>(
+    executor: E,
     sql: &str,
     binds: Vec<SqlValue>,
-) -> Result<Vec<SqliteRow>> {
+) -> Result<Vec<SqliteRow>>
+where
+    E: Executor<'e, Database = sqlx::Sqlite>,
+{
     let q = sqlx::query(sql);
     let q = bind_sql_values(q, binds);
-    q.fetch_all(pool).await.map_err(db_err)
+    q.fetch_all(executor).await.map_err(db_err)
 }
 
-async fn bind_and_fetch_one(
-    pool: &SqlitePool,
+async fn bind_and_fetch_one<'e, E>(
+    executor: E,
     sql: &str,
     binds: Vec<SqlValue>,
-) -> Result<SqliteRow> {
+) -> Result<SqliteRow>
+where
+    E: Executor<'e, Database = sqlx::Sqlite>,
+{
     let q = sqlx::query(sql);
     let q = bind_sql_values(q, binds);
-    q.fetch_one(pool).await.map_err(db_err)
+    q.fetch_one(executor).await.map_err(db_err)
 }
 
 // ─── RangoFilterExt trait ─────────────────────────────────────────────────────
@@ -252,5 +294,21 @@ mod tests {
             r#"WHERE "a" = ? OR NOT EXISTS (SELECT 1 FROM "test_model" AS "__sub" WHERE "__sub"."parent_id" = "test_model"."id" AND ("b" = ?)) AND "c" IN (SELECT "id" FROM "test_model") AND "d" = ?"#
         );
         assert_eq!(format!("{:?}", binds), "[Int(1), Int(2), Int(3)]");
+    }
+
+    #[tokio::test]
+    async fn select_related_joins_after_paginating() {
+        let pool = SqlitePool::connect_lazy("sqlite::memory:").unwrap();
+        let sql = QueryBuilder::<TestModel>::new(&pool)
+            .select_related::<TestModel>("parent_id")
+            .order_by("-a")
+            .limit(5)
+            .explain();
+        assert_eq!(
+            sql,
+            "SELECT \"__m\".* FROM (SELECT * FROM \"test_model\" ORDER BY \"a\" DESC LIMIT 5) \
+             AS \"__m\" LEFT JOIN \"test_model\" AS \"__r0\" \
+             ON \"__r0\".\"id\" = \"__m\".\"parent_id\" ORDER BY \"a\" DESC"
+        );
     }
 }

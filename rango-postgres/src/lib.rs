@@ -5,7 +5,7 @@ pub mod m2m;
 mod ops;
 pub mod pg_ext;
 mod query_builder;
-pub mod related;
+pub use rango_core::related;
 mod row;
 mod transaction;
 
@@ -24,7 +24,7 @@ pub use ops::{
 };
 pub use pg_ext::{Pg, PgQueryExt};
 pub use query_builder::QueryBuilder;
-pub use related::WithRelated;
+pub use rango_core::WithRelated;
 pub use sqlx::PgPool;
 pub use transaction::{RangoTransaction, TxFuture, atomic, atomic_retry, transaction};
 

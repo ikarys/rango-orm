@@ -13,6 +13,7 @@ pub use ops::{
     all, bulk_create, delete, get, get_or_create, insert, raw, raw_execute, raw_scalar, update,
 };
 pub use query_builder::{QueryBuilder, RangoFilterExt};
+pub use rango_core::WithRelated;
 pub use transaction::{atomic, MySqlTransaction, TxFuture};
 
 mod error;

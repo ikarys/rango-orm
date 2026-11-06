@@ -34,6 +34,11 @@ async fn pool() -> MySqlPool {
 }
 
 async fn setup(pool: &MySqlPool) {
+    // test_post references test_user: drop it first.
+    sqlx::query("DROP TABLE IF EXISTS `test_post`")
+        .execute(pool)
+        .await
+        .expect("setup failed");
     sqlx::query("DROP TABLE IF EXISTS `test_user`")
         .execute(pool)
         .await
@@ -61,6 +66,61 @@ fn user(email: &str) -> TestUser {
         active: FieldBool(true),
         score: None,
     }
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-mysql"), ignore)]
+async fn test_mysql_select_and_prefetch_related() {
+    let pool = pool().await;
+    setup(&pool).await;
+    sqlx::query(
+        r#"CREATE TABLE `test_post` (
+            `id`        BINARY(16) PRIMARY KEY,
+            `author`    BINARY(16) NOT NULL,
+            `title`     VARCHAR(100) NOT NULL,
+            FOREIGN KEY (`author`) REFERENCES `test_user` (`id`)
+        ) ENGINE=InnoDB"#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let alice = insert(&pool, user("alice@mysql.com")).await.unwrap();
+    let bob = insert(&pool, user("bob@mysql.com")).await.unwrap();
+    for title in ["first", "second"] {
+        let post = TestPost {
+            id: FieldUuid(Uuid::new_v4()),
+            author: ForeignKey::new(alice.id.0),
+            title: FieldVarchar(title.to_string()),
+        };
+        insert(&pool, post).await.unwrap();
+    }
+
+    let q = TestPost::filter(&pool)
+        .select_related(TestPost::AUTHOR)
+        .order_by("-title")
+        .limit(1);
+    assert!(q.explain().contains("LEFT JOIN"), "{}", q.explain());
+    let posts = q.all().await.unwrap();
+    assert_eq!(posts.len(), 1);
+    assert_eq!(posts[0].title.0, "second");
+    assert_eq!(posts[0].related::<TestUser>().email, alice.email);
+
+    let users = TestUser::filter(&pool)
+        .prefetch_related(TestPost::AUTHOR)
+        .all()
+        .await
+        .unwrap();
+    let posts_of = |u: &TestUser| {
+        users
+            .iter()
+            .find(|w| w.id == u.id)
+            .unwrap()
+            .prefetched::<TestPost>()
+            .len()
+    };
+    assert_eq!(posts_of(&alice), 2);
+    assert_eq!(posts_of(&bob), 0);
 }
 
 // ── CRUD ──────────────────────────────────────────────────────────────────────

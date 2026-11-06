@@ -1,8 +1,8 @@
 use crate::error::db_err;
 use rango_core::Result;
-use rango_core::{RowError, SqlValue, quote_ident};
+use rango_core::{SqlValue, quote_ident};
 use sqlx::PgPool;
-use std::any::{Any, TypeId};
+use std::any::TypeId;
 // ─── Bind helpers ─────────────────────────────────────────────────────────────
 use crate::ops::bind_sql_values;
 use sqlx::postgres::PgRow;
@@ -12,9 +12,7 @@ mod filter;
 mod relations;
 
 // ─── Type aliases ─────────────────────────────────────────────────────────────
-type FromRowFn = fn(&dyn rango_core::RangoRow) -> Result<Box<dyn Any + Send + Sync>, RowError>;
-
-type CollectVecFn = fn(Vec<Box<dyn Any + Send + Sync>>) -> Box<dyn Any + Send + Sync>;
+use rango_core::related::{CollectVecFn, FromRowFn};
 
 // ─── Filter types ─────────────────────────────────────────────────────────────
 #[derive(Debug, Clone)]
