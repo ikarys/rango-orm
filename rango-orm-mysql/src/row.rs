@@ -34,9 +34,15 @@ impl RangoRow for MySqlRowRef<'_> {
             .map_err(|e| RowError(format!("{}: {}", col, e)))
     }
     fn get_f64(&self, col: &str) -> Result<f64, RowError> {
-        self.0
-            .try_get(col)
-            .map_err(|e| RowError(format!("{}: {}", col, e)))
+        self.0.try_get(col).or_else(|e| {
+            // `FieldDecimal` is f64-backed but the column is DECIMAL, which sqlx only
+            // sends as text: read it unchecked as a string and parse.
+            self.0
+                .try_get_unchecked::<String, _>(col)
+                .ok()
+                .and_then(|s| s.parse::<f64>().ok())
+                .ok_or_else(|| RowError(format!("{}: {}", col, e)))
+        })
     }
     fn get_string(&self, col: &str) -> Result<String, RowError> {
         self.0
