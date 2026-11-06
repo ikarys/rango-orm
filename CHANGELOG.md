@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.1.1 (unreleased)
+
+**Behavior changes to check before upgrading:**
+
+- Breaking: `FieldDecimal<P, S>` now wraps `rust_decimal::Decimal` (re-exported as `rango::Decimal`) instead of `f64`. Construct it with `FieldDecimal("12.50".parse().unwrap())` or `FieldDecimal::from_decimal(d)`; filters take a `Decimal`, not an `f64`. `SqlValue` gains `Decimal` / `NullDecimal`, and `RangoRow` gains `get_decimal` (custom `RangoRow` impls must add it). SQLite stores decimals in a `NUMERIC` column (was `REAL`); a new migration is not generated for existing columns, which keep working.
+- Model `ordering = [...]` is now applied as the default `ORDER BY` of every query builder (it was parsed and ignored). Queries on models that declare `ordering` return rows in that order unless you call `order_by`.
+- Dump format version 2: binary columns are base64 strings (version 1 wrote `\x` hex and `null` on some backends). Version 1 files are still read.
+- Postgres: FKs that close a cycle are created `DEFERRABLE INITIALLY IMMEDIATE`.
+
+Changes:
+
+- Feat: self-referencing `ManyToMany` (`followers: ManyToMany<User>`). The pivot columns are `from_<table>_id` and `to_<table>_id` when both sides are the same table; other pivots are unchanged. `M2M::add(from, to)` is directional, `reverse` goes the other way.
+- Fix: `rango dump` / `restore` round-trip binary columns on every backend.
+- Fix: decimals are written as JSON strings in dumps, so no digit or trailing zero is lost (`rango dump` on Postgres and MySQL wrote numbers).
+- Fix: Postgres `restore` loads a cycle made only of NOT NULL FKs (`SET CONSTRAINTS ALL DEFERRED`); nullable forward FKs are filled after the inserts.
+- Fix: MySQL `AlterColumnIndex` on a TEXT/BLOB column uses the same 191-byte prefix as `CREATE TABLE`; MySQL index creation on such columns no longer fails.
+- Fix (SQLite): `ON DELETE RESTRICT` now returns `Error::ForeignKeyViolation` instead of `Error::Database`.
+- Fix: DECIMAL/NUMERIC columns are read on MySQL and Postgres; `#[derive(Model)]` generates `FromRow` for `FieldDecimal`, FK `references` and `on_delete` in `schema()`.
+- Fix: the derive sets the generated primary key for path-qualified `FieldAutoInt` / `FieldAutoBigInt`.
+- Fix: SQLite `DEFAULT CURRENT_TIMESTAMP` instead of `now()`.
+- Fix: the CLI scanner accepts path-qualified types and `#[derive(rango::Model)]`.
+- Tests: derive/CLI contract test, a real-project end-to-end flow on every backend (migrate, queries, dump, wipe, restore), random model graphs on every backend, and runtime `ON DELETE` effects (cascade, set_null, restrict).
+
 ## 0.1.0 (2026-11-06)
 
 First stable-track release: the full v0.1.0 to-do list is in.

@@ -317,11 +317,8 @@ Known-CVE checklist (reviewed 2026-11-01) — keep new APIs out of these classes
 
 ## Known limitations
 
-- `dump` / `restore` does not round-trip binary columns (`bytea` / BLOB are exported as `null`), so a restore of a table with a NOT NULL binary column fails. The real-project e2e leaves those tables out of the dump comparison.
-- `FieldDecimal` is f64-backed: values are exact only within f64 precision.
-- `restore` on Postgres fills nullable FK columns that point forward (cycles, self references) after the inserts; a cycle made only of NOT NULL FKs cannot be restored.
-- On MySQL, `index` on a TEXT/BLOB column gets a 191-byte prefix when the column is created or added; a later `AlterColumnIndex` on such a column (the diff only carries the column name) still emits a plain `CREATE INDEX` and fails.
-- Self-referencing `ManyToMany` is not supported (the pivot would have two columns with the same name); the random-graph test does not generate it.
+- SQLite has no decimal type: `FieldDecimal` is stored in a `NUMERIC` column, so a value with more than 15 significant digits is kept exactly as text, and one with up to 15 digits is a number again once read (scale restored from the column). Postgres and MySQL are exact.
+- A Postgres FK cycle is restorable because the FKs that close it are `DEFERRABLE`; databases created by an older `rango migrate` have them non-deferrable, so a NOT NULL cycle there still needs the constraints recreated (`ALTER TABLE ... ALTER CONSTRAINT ... DEFERRABLE`).
 
 ## Style
 
