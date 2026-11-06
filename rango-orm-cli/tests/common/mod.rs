@@ -141,21 +141,12 @@ where
     exercise().await;
 
     // dump -> wipe -> restore: same rows.
-    // Known limitation: dump/restore does not round-trip binary (`bytea`) columns, so the
-    // tables that have one are left out (see AGENTS.md, "Known limitations").
     let snap = p.snapshot();
     let dumped: Vec<String> = snap["tables"]
         .as_object()
         .unwrap()
-        .iter()
-        .filter(|(_, t)| {
-            !t["columns"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|c| c["col_type"] == "bytea")
-        })
-        .map(|(n, _)| n.clone())
+        .keys()
+        .cloned()
         .collect();
     let original = dump_rows(p, url, &dumped);
     assert!(original.values().any(|r| !r.is_empty()));

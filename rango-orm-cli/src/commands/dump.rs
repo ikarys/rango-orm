@@ -9,7 +9,8 @@ use std::io::{Read, Write};
 use std::path::Path;
 
 const FORMAT: &str = "rango-dump";
-const VERSION: u32 = 1;
+/// Version 2: binary columns are base64 (version 1 wrote `\x` hex, still read).
+const VERSION: u32 = 2;
 /// Upper bound on a decompressed dump, against gzip bombs.
 const MAX_DUMP_BYTES: u64 = 8 << 30;
 /// Rango's own bookkeeping table: never part of a dump unless asked for by name.
@@ -181,9 +182,9 @@ fn parse_dump(bytes: &[u8]) -> Result<Dump> {
         bail!("Not a Rango dump: expected \"format\": \"{}\"", FORMAT);
     }
     match value.get("version").and_then(|v| v.as_u64()) {
-        Some(v) if v == u64::from(VERSION) => {}
+        Some(1 | 2) => {}
         other => bail!(
-            "Unsupported dump version {} (this rango reads version {})",
+            "Unsupported dump version {} (this rango reads versions 1 and {})",
             other.map_or("(missing)".to_string(), |v| v.to_string()),
             VERSION
         ),

@@ -34,6 +34,7 @@ toml = "0.8"
 sqlx = { version = "0.8", features = ["runtime-tokio", "mysql"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 flate2 = "1"
+base64 = "0.22"
 
 [features]
 integration = []

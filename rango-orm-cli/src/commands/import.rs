@@ -107,6 +107,40 @@ where
     Ok(())
 }
 
+// ─── Binary columns ───────────────────────────────────────────────────────────
+
+/// Bytes of a binary column value in a Rango JSON file: base64, or the `\x` + hex form
+/// that dumps of version 1 and `to_jsonb` use (`\` is not a base64 character).
+pub(crate) fn decode_binary(column: &str, s: &str) -> Result<Vec<u8>> {
+    use base64::Engine;
+    match s.strip_prefix("\\x") {
+        Some(hex) => hex_to_bytes(hex),
+        None => base64::engine::general_purpose::STANDARD.decode(s).ok(),
+    }
+    .with_context(|| format!("Column '{column}' holds a binary value that is not base64"))
+}
+
+pub(crate) fn encode_binary(bytes: &[u8]) -> String {
+    use base64::Engine;
+    base64::engine::general_purpose::STANDARD.encode(bytes)
+}
+
+/// Binary (`bytea`) columns of a Postgres table.
+pub(crate) async fn binary_columns_postgres(
+    conn: &mut sqlx::PgConnection,
+    table: &str,
+) -> Result<HashSet<String>> {
+    let cols: Vec<String> = sqlx::query_scalar(
+        "SELECT column_name::text FROM information_schema.columns \
+         WHERE table_schema = current_schema() AND table_name = $1 AND data_type = 'bytea'",
+    )
+    .bind(table)
+    .fetch_all(conn)
+    .await
+    .context("Failed to read binary columns")?;
+    Ok(cols.into_iter().collect())
+}
+
 // ─── Parsers ──────────────────────────────────────────────────────────────────
 
 fn parse_json(content: &str) -> Result<Vec<serde_json::Map<String, serde_json::Value>>> {
@@ -368,17 +402,18 @@ async fn insert_rows_postgres(
         cols = col_list,
     );
 
+    let binary = binary_columns_postgres(&mut *conn, table).await?;
     let mut count = 0;
     for row in rows {
-        let values: serde_json::Map<_, _> = cols
-            .iter()
-            .map(|c| {
-                (
-                    c.to_string(),
-                    row.get(*c).cloned().unwrap_or(serde_json::Value::Null),
-                )
-            })
-            .collect();
+        let mut values = serde_json::Map::new();
+        for c in &cols {
+            let mut v = row.get(*c).cloned().unwrap_or(serde_json::Value::Null);
+            if let (true, serde_json::Value::String(s)) = (binary.contains(*c), &v) {
+                // jsonb_populate_record reads bytea in its `\x` hex text form.
+                v = serde_json::Value::String(format!("\\x{}", hex_encode(&decode_binary(c, s)?)));
+            }
+            values.insert(c.to_string(), v);
+        }
         sqlx::query(&sql)
             .bind(serde_json::Value::Object(values).to_string())
             .execute(&mut *conn)
@@ -438,6 +473,7 @@ async fn insert_rows_sqlite(
         .map(|k| k.as_str())
         .collect();
 
+    let binary = binary_columns_sqlite(&mut *conn, table).await?;
     let mut count = 0;
     for row in rows {
         let col_list = cols
@@ -464,7 +500,13 @@ async fn insert_rows_sqlite(
 
         let mut q = sqlx::query(&sql);
         for col in &cols {
-            q = bind_json_value_sqlite(q, row.get(*col).unwrap_or(&serde_json::Value::Null));
+            let val = row.get(*col).unwrap_or(&serde_json::Value::Null);
+            q = match val {
+                serde_json::Value::String(s) if binary.contains(*col) => {
+                    q.bind(decode_binary(col, s)?)
+                }
+                _ => bind_json_value_sqlite(q, val),
+            };
         }
         q.execute(&mut *conn)
             .await
@@ -472,6 +514,20 @@ async fn insert_rows_sqlite(
         count += 1;
     }
     Ok(count)
+}
+
+/// Columns declared `BLOB`.
+async fn binary_columns_sqlite(
+    conn: &mut sqlx::SqliteConnection,
+    table: &str,
+) -> Result<HashSet<String>> {
+    let cols: Vec<String> =
+        sqlx::query_scalar("SELECT name FROM pragma_table_info(?) WHERE upper(type) = 'BLOB'")
+            .bind(table)
+            .fetch_all(conn)
+            .await
+            .context("Failed to read binary columns")?;
+    Ok(cols.into_iter().collect())
 }
 
 fn bind_json_value_sqlite<'q>(
@@ -558,6 +614,7 @@ async fn insert_rows_mysql(
     }
 
     let uuid_cols = fetch_uuid_columns_mysql(&mut *conn, table).await?;
+    let binary = binary_columns_mysql(&mut *conn, table).await?;
     let mut count = 0;
 
     for row in rows {
@@ -604,6 +661,7 @@ async fn insert_rows_mysql(
                 row.get(*col).unwrap_or(&serde_json::Value::Null),
                 col,
                 uuid_cols.contains(*col),
+                binary.contains(*col),
             )?;
         }
         q.execute(&mut *conn)
@@ -643,6 +701,7 @@ fn bind_json_value_mysql<'q>(
     val: &serde_json::Value,
     column: &str,
     is_uuid_col: bool,
+    is_binary_col: bool,
 ) -> Result<sqlx::query::Query<'q, sqlx::MySql, sqlx::mysql::MySqlArguments>> {
     match val {
         serde_json::Value::Null => Ok(q.bind(Option::<String>::None)),
@@ -666,12 +725,32 @@ fn bind_json_value_mysql<'q>(
                         s
                     ),
                 }
+            } else if is_binary_col {
+                Ok(q.bind(decode_binary(column, s)?))
             } else {
                 Ok(q.bind(s.clone()))
             }
         }
         serde_json::Value::Array(_) | serde_json::Value::Object(_) => Ok(q.bind(val.to_string())),
     }
+}
+
+/// BLOB / VARBINARY columns (the 16-byte `BINARY` UUID columns are handled apart).
+async fn binary_columns_mysql(
+    conn: &mut sqlx::MySqlConnection,
+    table: &str,
+) -> Result<HashSet<String>> {
+    let cols: Vec<String> = sqlx::query_scalar(
+        "SELECT CAST(COLUMN_NAME AS CHAR) FROM information_schema.COLUMNS \
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? \
+           AND DATA_TYPE IN ('tinyblob', 'blob', 'mediumblob', 'longblob', 'varbinary', 'binary') \
+           AND NOT (DATA_TYPE = 'binary' AND CHARACTER_OCTET_LENGTH = 16)",
+    )
+    .bind(table)
+    .fetch_all(conn)
+    .await
+    .context("Failed to read binary columns")?;
+    Ok(cols.into_iter().collect())
 }
 
 fn uuid_text_to_bytes(s: &str) -> Option<Vec<u8>> {
@@ -687,6 +766,10 @@ fn uuid_text_to_bytes(s: &str) -> Option<Vec<u8>> {
     } else {
         None
     }
+}
+
+fn hex_encode(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 fn hex_to_bytes(hex: &str) -> Option<Vec<u8>> {
@@ -867,6 +950,14 @@ mod tests {
         assert_eq!(bytes.len(), 16);
         assert_eq!(bytes[0], 0x12);
         assert_eq!(bytes[15], 0x00);
+    }
+
+    #[test]
+    fn binary_values_read_base64_and_v1_hex() {
+        assert_eq!(decode_binary("c", "AAEC/w==").unwrap(), [0, 1, 2, 255]);
+        assert_eq!(decode_binary("c", "\\x000102ff").unwrap(), [0, 1, 2, 255]);
+        assert_eq!(encode_binary(&[0, 1, 2, 255]), "AAEC/w==");
+        assert!(decode_binary("c", "not base64!").is_err());
     }
 
     #[test]
