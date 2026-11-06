@@ -1,6 +1,7 @@
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use rango_orm_core::{
-    ColumnType, DefaultValue, ReferentialAction, TableSchema,
+    CheckConstraint, ColumnDef, ColumnType, Constraint, DefaultValue, FkReference,
+    ReferentialAction, TableSchema, UniqueConstraint,
     constraints::{constraint_definition, constraint_name},
 };
 use serde::{Deserialize, Serialize};
@@ -110,6 +111,153 @@ impl Snapshot {
     }
 }
 
+impl Snapshot {
+    /// Inverse of `from_schemas`, for a snapshot that comes from an untrusted file.
+    /// Raw SQL fragments (defaults, CHECK conditions) must be a single statement.
+    pub fn to_schemas(&self) -> Result<Vec<TableSchema>> {
+        let mut names: Vec<&String> = self.tables.keys().collect();
+        names.sort();
+        names.into_iter().map(|n| self.table_schema(n)).collect()
+    }
+
+    fn table_schema(&self, name: &str) -> Result<TableSchema> {
+        let table = &self.tables[name];
+        let mut columns = Vec::new();
+        for c in &table.columns {
+            if let Some(d) = &c.default {
+                single_statement(d)?;
+            }
+            columns.push(ColumnDef {
+                name: c.name.clone(),
+                col_type: parse_col_type(&c.col_type)?,
+                nullable: c.nullable,
+                primary_key: c.primary_key,
+                unique: c.unique,
+                default: c.default.as_deref().map(parse_default),
+                index: c.index,
+                references: c
+                    .references
+                    .as_ref()
+                    .map(|r| {
+                        Ok::<_, anyhow::Error>(FkReference {
+                            table: r.table.clone(),
+                            column: r.column.clone(),
+                            on_delete: parse_referential_action(&r.on_delete)?,
+                            on_update: ReferentialAction::NoAction,
+                        })
+                    })
+                    .transpose()?,
+            });
+        }
+        let constraints = table
+            .constraints
+            .iter()
+            .map(parse_constraint)
+            .collect::<Result<_>>()?;
+        Ok(TableSchema {
+            table_name: name.to_string(),
+            columns,
+            constraints,
+            ..TableSchema::default()
+        })
+    }
+}
+
+fn single_statement(sql: &str) -> Result<()> {
+    if sql.contains(';') || sql.contains("--") || sql.contains("/*") {
+        bail!("Refusing SQL fragment with ';' or a comment: {}", sql);
+    }
+    Ok(())
+}
+
+fn parse_col_type(s: &str) -> Result<ColumnType> {
+    let args = |prefix: &str| s.strip_prefix(prefix)?.strip_suffix(')');
+    Ok(match s {
+        "bool" => ColumnType::Bool,
+        "smallint" => ColumnType::SmallInt,
+        "int" => ColumnType::Int,
+        "bigint" => ColumnType::BigInt,
+        "autoint" => ColumnType::AutoInt,
+        "autobigint" => ColumnType::AutoBigInt,
+        "float" => ColumnType::Float,
+        "double" => ColumnType::Double,
+        "text" => ColumnType::Text,
+        "bytea" => ColumnType::Bytea,
+        "uuid" => ColumnType::Uuid,
+        "date" => ColumnType::Date,
+        "time" => ColumnType::Time,
+        "datetime" => ColumnType::DateTime,
+        "json" => ColumnType::Json,
+        "jsonb" => ColumnType::Jsonb,
+        _ => {
+            if let Some(n) = args("varchar(").and_then(|n| n.parse().ok()) {
+                ColumnType::Varchar(n)
+            } else if let Some((p, sc)) = args("decimal(").and_then(|a| a.split_once(',')) {
+                match (p.parse(), sc.parse()) {
+                    (Ok(precision), Ok(scale)) => ColumnType::Decimal { precision, scale },
+                    _ => bail!("Unknown column type '{}'", s),
+                }
+            } else {
+                bail!("Unknown column type '{}'", s)
+            }
+        }
+    })
+}
+
+fn parse_default(s: &str) -> DefaultValue {
+    match s {
+        "now()" => DefaultValue::CurrentTimestamp,
+        "gen_random_uuid()" => DefaultValue::GeneratedUuid,
+        _ => DefaultValue::Literal(s.to_string()),
+    }
+}
+
+fn parse_referential_action(s: &str) -> Result<ReferentialAction> {
+    Ok(match s {
+        "cascade" => ReferentialAction::Cascade,
+        "set_null" => ReferentialAction::SetNull,
+        "set_default" => ReferentialAction::SetDefault,
+        "restrict" => ReferentialAction::Restrict,
+        "no_action" => ReferentialAction::NoAction,
+        _ => bail!("Unknown referential action '{}'", s),
+    })
+}
+
+/// Inverse of `constraint_definition`.
+fn parse_constraint(c: &SnapshotConstraint) -> Result<Constraint> {
+    let d = c.definition.as_str();
+    if let Some(sql) = d.strip_prefix("CHECK (").and_then(|r| r.strip_suffix(')')) {
+        single_statement(sql)?;
+        return Ok(CheckConstraint::new(sql).name(&c.name).into());
+    }
+    let (cols, cond) = match d.strip_prefix("UNIQUE (") {
+        Some(rest) => match rest.split_once(") WHERE ") {
+            Some((cols, cond)) => (cols, Some(cond)),
+            None => (rest.strip_suffix(')').unwrap_or(rest), None),
+        },
+        None => bail!("Unknown constraint definition '{}'", d),
+    };
+    let fields: Vec<String> = cols
+        .split(", ")
+        .map(|f| {
+            f.strip_prefix('"')
+                .and_then(|f| f.strip_suffix('"'))
+                .map(|f| f.replace("\"\"", "\""))
+                .with_context(|| format!("Bad column list in constraint '{}'", d))
+        })
+        .collect::<Result<_>>()?;
+    let mut unique = UniqueConstraint {
+        fields,
+        condition: None,
+        name: c.name.clone(),
+    };
+    if let Some(cond) = cond {
+        single_statement(cond)?;
+        unique.condition = Some(cond.to_string());
+    }
+    Ok(unique.into())
+}
+
 pub(crate) fn serialize_col_type(t: &ColumnType) -> String {
     match t {
         ColumnType::Bool => "bool".into(),
@@ -181,5 +329,23 @@ mod tests {
         let col = &table.columns[0];
         assert!(!col.index);
         assert!(col.references.is_none());
+    }
+
+    #[test]
+    fn to_schemas_round_trips_and_rejects_injected_sql() {
+        let json = r#"{"tables": {"t": {"columns": [
+            {"name": "id", "col_type": "varchar(20)", "nullable": false, "primary_key": true,
+             "unique": true, "default": null}],
+            "constraints": [{"name": "c", "definition": "CHECK (id <> 'x')"},
+                            {"name": "u", "definition": "UNIQUE (\"a\", \"b\") WHERE a > 1"}]}}}"#;
+        let snap: Snapshot = serde_json::from_str(json).unwrap();
+        let schemas = snap.to_schemas().unwrap();
+        let again = Snapshot::from_schemas(&schemas);
+        assert_eq!(again.tables["t"].constraints, snap.tables["t"].constraints);
+        assert_eq!(again.tables["t"].columns, snap.tables["t"].columns);
+
+        let evil = json.replace("id <> 'x'", "1); DROP TABLE t; --");
+        let snap: Snapshot = serde_json::from_str(&evil).unwrap();
+        assert!(snap.to_schemas().is_err());
     }
 }

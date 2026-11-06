@@ -43,13 +43,42 @@ pub async fn run(
         return Ok(());
     }
 
-    let count = match backend {
-        BackendKind::Sqlite => import_sqlite(database_url, &rows, table, replace).await?,
-        BackendKind::Mysql => import_mysql(database_url, &rows, table, replace).await?,
-        _ => import_postgres(database_url, &rows, table, replace).await?,
-    };
+    let count = insert_rows(backend, database_url, &rows, table, replace, None).await?;
 
     println!("✅ Imported {} row(s) from {}", count, input);
+    Ok(())
+}
+
+/// Insert `rows` in one transaction. `setup_sql` (DDL for `restore`) runs first in that
+/// same transaction; MySQL DDL auto-commits, so there it is not rolled back.
+pub(crate) async fn insert_rows(
+    backend: BackendKind,
+    database_url: &str,
+    rows: &[serde_json::Map<String, serde_json::Value>],
+    table: Option<&str>,
+    replace: bool,
+    setup_sql: Option<&str>,
+) -> Result<usize> {
+    match backend {
+        BackendKind::Sqlite => import_sqlite(database_url, rows, table, replace, setup_sql).await,
+        BackendKind::Mysql => import_mysql(database_url, rows, table, replace, setup_sql).await,
+        _ => import_postgres(database_url, rows, table, replace, setup_sql).await,
+    }
+}
+
+async fn run_setup<'c, DB: sqlx::Database>(
+    conn: &'c mut DB::Connection,
+    setup_sql: Option<&'c str>,
+) -> Result<()>
+where
+    &'c mut DB::Connection: sqlx::Executor<'c, Database = DB>,
+{
+    if let Some(sql) = setup_sql {
+        sqlx::raw_sql(sql)
+            .execute(conn)
+            .await
+            .context("Failed to create the schema")?;
+    }
     Ok(())
 }
 
@@ -126,6 +155,7 @@ async fn import_postgres(
     rows: &[serde_json::Map<String, serde_json::Value>],
     table: Option<&str>,
     replace: bool,
+    setup_sql: Option<&str>,
 ) -> Result<usize> {
     let pool = sqlx::PgPool::connect(database_url)
         .await
@@ -134,6 +164,7 @@ async fn import_postgres(
     // Postgres cannot disable FK checks without superuser, so parents are inserted
     // first. One transaction, so a failed import leaves nothing behind.
     let mut tx = pool.begin().await.context("Failed to start transaction")?;
+    run_setup::<sqlx::Postgres>(&mut tx, setup_sql).await?;
     let edges = fk_edges_postgres(&mut tx).await?;
 
     // Group rows by table
@@ -194,66 +225,48 @@ async fn insert_rows_postgres(
         .map(|k| k.as_str())
         .collect();
 
+    let col_list = cols
+        .iter()
+        .map(|c| quote_ident(c))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let conflict = if replace {
+        let updates = cols
+            .iter()
+            .map(|c| format!("{} = EXCLUDED.{}", quote_ident(c), quote_ident(c)))
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("ON CONFLICT DO UPDATE SET {}", updates)
+    } else {
+        "ON CONFLICT DO NOTHING".to_string()
+    };
+    // The row travels as one JSON parameter; Postgres casts each value to the column
+    // type (uuid, timestamps, booleans, ...). Names are quoted, values are bound.
+    let sql = format!(
+        "INSERT INTO {t} ({cols}) SELECT {cols} FROM jsonb_populate_record(NULL::{t}, $1::jsonb) WHERE true {conflict}",
+        t = quote_ident(table),
+        cols = col_list,
+    );
+
     let mut count = 0;
     for row in rows {
-        let col_list = cols
+        let values: serde_json::Map<_, _> = cols
             .iter()
-            .map(|c| quote_ident(c))
-            .collect::<Vec<_>>()
-            .join(", ");
-        let placeholders = (1..=cols.len())
-            .map(|i| format!("${}", i))
-            .collect::<Vec<_>>()
-            .join(", ");
-        let conflict = if replace {
-            let updates = cols
-                .iter()
-                .map(|c| format!("{} = EXCLUDED.{}", quote_ident(c), quote_ident(c)))
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!("ON CONFLICT DO UPDATE SET {}", updates)
-        } else {
-            "ON CONFLICT DO NOTHING".to_string()
-        };
-        let sql = format!(
-            "INSERT INTO {} ({}) VALUES ({}) {}",
-            quote_ident(table),
-            col_list,
-            placeholders,
-            conflict
-        );
-
-        let mut q = sqlx::query(&sql);
-        for col in &cols {
-            q = bind_json_value_pg(q, row.get(*col).unwrap_or(&serde_json::Value::Null));
-        }
-        q.execute(&mut *conn)
+            .map(|c| {
+                (
+                    c.to_string(),
+                    row.get(*c).cloned().unwrap_or(serde_json::Value::Null),
+                )
+            })
+            .collect();
+        sqlx::query(&sql)
+            .bind(serde_json::Value::Object(values).to_string())
+            .execute(&mut *conn)
             .await
             .with_context(|| format!("Failed to insert into {}", table))?;
         count += 1;
     }
     Ok(count)
-}
-
-fn bind_json_value_pg<'q>(
-    q: sqlx::query::Query<'q, sqlx::Postgres, sqlx::postgres::PgArguments>,
-    val: &serde_json::Value,
-) -> sqlx::query::Query<'q, sqlx::Postgres, sqlx::postgres::PgArguments> {
-    match val {
-        serde_json::Value::Null => q.bind(Option::<i64>::None),
-        serde_json::Value::Bool(b) => q.bind(*b as i64),
-        serde_json::Value::Number(n) => {
-            if let Some(i) = n.as_i64() {
-                q.bind(i)
-            } else if let Some(f) = n.as_f64() {
-                q.bind(f)
-            } else {
-                q.bind(Option::<String>::None)
-            }
-        }
-        serde_json::Value::String(s) => q.bind(s.clone()),
-        serde_json::Value::Array(_) | serde_json::Value::Object(_) => q.bind(val.to_string()),
-    }
 }
 
 // ─── SQLite import ────────────────────────────────────────────────────────────
@@ -263,12 +276,14 @@ async fn import_sqlite(
     rows: &[serde_json::Map<String, serde_json::Value>],
     table: Option<&str>,
     replace: bool,
+    setup_sql: Option<&str>,
 ) -> Result<usize> {
-    let pool = sqlx::SqlitePool::connect(database_url)
+    let pool = rango_orm_sqlite::connect(database_url)
         .await
         .context("Failed to connect to SQLite")?;
 
     let mut tx = pool.begin().await.context("Failed to start transaction")?;
+    run_setup::<sqlx::Sqlite>(&mut tx, setup_sql).await?;
     // FK checks run at COMMIT, so tables can come in any order. The pragma resets
     // itself at the end of the transaction.
     sqlx::query("PRAGMA defer_foreign_keys = ON")
@@ -311,18 +326,20 @@ async fn insert_rows_sqlite(
             .collect::<Vec<_>>()
             .join(", ");
         let placeholders = cols.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
-        // SQLite: INSERT OR REPLACE replaces the whole row, INSERT OR IGNORE skips on conflict
-        let verb = if replace {
-            "INSERT OR REPLACE"
+        // INSERT OR REPLACE replaces the whole row. Skipping uses ON CONFLICT DO NOTHING,
+        // not INSERT OR IGNORE, which would also swallow NOT NULL / CHECK violations.
+        let (verb, suffix) = if replace {
+            ("INSERT OR REPLACE", "")
         } else {
-            "INSERT OR IGNORE"
+            ("INSERT", " ON CONFLICT DO NOTHING")
         };
         let sql = format!(
-            "{} INTO {} ({}) VALUES ({})",
+            "{} INTO {} ({}) VALUES ({}){}",
             verb,
             quote_ident(table),
             col_list,
-            placeholders
+            placeholders,
+            suffix
         );
 
         let mut q = sqlx::query(&sql);
@@ -365,6 +382,7 @@ async fn import_mysql(
     rows: &[serde_json::Map<String, serde_json::Value>],
     table: Option<&str>,
     replace: bool,
+    setup_sql: Option<&str>,
 ) -> Result<usize> {
     let pool = rango_orm_mysql::connect(database_url)
         .await
@@ -377,6 +395,7 @@ async fn import_mysql(
         .execute(&mut *tx)
         .await
         .context("Failed to disable foreign key checks")?;
+    run_setup::<sqlx::MySql>(&mut tx, setup_sql).await?;
 
     let groups = group_by_table(rows, table);
     let mut total = 0;
@@ -595,7 +614,10 @@ fn group_by_table<'a>(
 /// reference them. `edges` are `(child, parent)` pairs; edges touching tables not
 /// in `tables`, and self-references, are ignored. Ties are broken alphabetically so
 /// the order is deterministic.
-fn order_by_dependencies(mut tables: Vec<String>, edges: &[(String, String)]) -> Vec<String> {
+pub(crate) fn order_by_dependencies(
+    mut tables: Vec<String>,
+    edges: &[(String, String)],
+) -> Vec<String> {
     tables.sort();
     tables.dedup();
 
@@ -661,7 +683,9 @@ fn order_by_dependencies(mut tables: Vec<String>, edges: &[(String, String)]) ->
 }
 
 /// Foreign keys between tables of the current schema, as `(child, parent)` pairs.
-async fn fk_edges_postgres(conn: &mut sqlx::PgConnection) -> Result<Vec<(String, String)>> {
+pub(crate) async fn fk_edges_postgres(
+    conn: &mut sqlx::PgConnection,
+) -> Result<Vec<(String, String)>> {
     let sql = "SELECT c.relname::text, p.relname::text
 FROM pg_constraint k
 JOIN pg_class c ON c.oid = k.conrelid

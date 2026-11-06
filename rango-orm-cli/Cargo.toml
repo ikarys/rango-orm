@@ -33,10 +33,11 @@ anyhow = "1"
 toml = "0.8"
 sqlx = { version = "0.8", features = ["runtime-tokio", "mysql"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+flate2 = "1"
 
 [features]
 integration = []
 integration-mysql = []
 
 [dev-dependencies]
-sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "mysql"] }
+sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "mysql", "sqlite"] }

@@ -26,13 +26,21 @@ pub async fn run(
     output: Option<&str>,
 ) -> Result<()> {
     let cfg = crate::config::RangoConfig::load().unwrap_or_default();
-    let backend = cfg.database.backend_kind();
+    let requested: Vec<String> = table.map(str::to_string).into_iter().collect();
 
-    let data = match backend {
-        BackendKind::Sqlite => export_sqlite(database_url, table).await?,
-        BackendKind::Mysql => export_mysql(database_url, table).await?,
-        _ => export_postgres(database_url, table).await?,
-    };
+    let mut data = Vec::new();
+    for (name, rows) in fetch_tables(cfg.database.backend_kind(), database_url, &requested).await? {
+        for mut row in rows {
+            // Add table name for multi-table exports
+            if table.is_none() {
+                row.insert(
+                    "__table".to_string(),
+                    serde_json::Value::String(name.clone()),
+                );
+            }
+            data.push(row);
+        }
+    }
 
     let content = match format {
         Format::Json => serialize_json(&data)?,
@@ -50,45 +58,73 @@ pub async fn run(
     Ok(())
 }
 
+pub(crate) type Rows = Vec<serde_json::Map<String, serde_json::Value>>;
+
+/// Rows of `requested` tables (all tables when empty), in foreign-key order: parents first.
+pub(crate) async fn fetch_tables(
+    backend: BackendKind,
+    database_url: &str,
+    requested: &[String],
+) -> Result<Vec<(String, Rows)>> {
+    match backend {
+        BackendKind::Sqlite => export_sqlite(database_url, requested).await,
+        BackendKind::Mysql => export_mysql(database_url, requested).await,
+        _ => export_postgres(database_url, requested).await,
+    }
+}
+
+/// `requested` (checked against `existing`) or every table, ordered parents first.
+fn select_tables(
+    existing: Vec<String>,
+    requested: &[String],
+    edges: &[(String, String)],
+) -> Result<Vec<String>> {
+    for t in requested {
+        if !existing.contains(t) {
+            bail!("Unknown table '{}'", t);
+        }
+    }
+    let wanted = if requested.is_empty() {
+        existing
+    } else {
+        requested.to_vec()
+    };
+    Ok(super::import::order_by_dependencies(wanted, edges))
+}
+
 // ─── Postgres export ──────────────────────────────────────────────────────────
 
-async fn export_postgres(
-    database_url: &str,
-    table: Option<&str>,
-) -> Result<Vec<serde_json::Map<String, serde_json::Value>>> {
-    use sqlx::{Column, PgPool, Row};
-
-    let pool = PgPool::connect(database_url)
+async fn export_postgres(database_url: &str, requested: &[String]) -> Result<Vec<(String, Rows)>> {
+    let pool = sqlx::PgPool::connect(database_url)
         .await
         .context("Failed to connect to Postgres")?;
 
-    let tables = match table {
-        Some(t) => vec![t.to_string()],
-        None => list_tables_postgres(&pool).await?,
-    };
+    let mut conn = pool
+        .acquire()
+        .await
+        .context("Failed to acquire a connection")?;
+    let edges = super::import::fk_edges_postgres(&mut conn).await?;
+    let tables = select_tables(list_tables_postgres(&pool).await?, requested, &edges)?;
 
-    let mut all_rows = Vec::new();
-    for t in &tables {
-        let sql = format!("SELECT * FROM {}", quote_ident(t));
-        let rows = sqlx::query(&sql)
+    let mut out = Vec::new();
+    for t in tables {
+        // to_jsonb renders every column type (uuid, timestamps, numeric, ...) as JSON,
+        // and the import side casts it back with jsonb_populate_record.
+        let sql = format!("SELECT to_jsonb(t)::text FROM {} t", quote_ident(&t));
+        let texts: Vec<String> = sqlx::query_scalar(&sql)
             .fetch_all(&pool)
             .await
             .with_context(|| format!("Failed to export table {}", t))?;
-
-        for row in rows {
-            let mut map = serde_json::Map::new();
-            // Add table name for multi-table exports
-            if table.is_none() {
-                map.insert("__table".to_string(), serde_json::Value::String(t.clone()));
+        let mut rows = Vec::with_capacity(texts.len());
+        for text in texts {
+            match serde_json::from_str(&text)? {
+                serde_json::Value::Object(map) => rows.push(map),
+                _ => bail!("Unexpected row shape in table {}", t),
             }
-            for (i, col) in row.columns().iter().enumerate() {
-                let val = pg_column_to_json(&row, i);
-                map.insert(col.name().to_string(), val);
-            }
-            all_rows.push(map);
         }
+        out.push((t, rows));
     }
-    Ok(all_rows)
+    Ok(out)
 }
 
 async fn list_tables_postgres(pool: &sqlx::PgPool) -> Result<Vec<String>> {
@@ -105,109 +141,43 @@ async fn list_tables_postgres(pool: &sqlx::PgPool) -> Result<Vec<String>> {
         .collect())
 }
 
-fn pg_column_to_json(row: &sqlx::postgres::PgRow, i: usize) -> serde_json::Value {
-    use sqlx::{Column, Row, TypeInfo};
-    let type_name = row.column(i).type_info().name().to_uppercase();
-    match type_name.as_str() {
-        "BOOL" => row
-            .try_get::<Option<bool>, _>(i)
-            .ok()
-            .map(|v| {
-                v.map(serde_json::Value::Bool)
-                    .unwrap_or(serde_json::Value::Null)
-            })
-            .unwrap_or(serde_json::Value::Null),
-        "INT2" => row
-            .try_get::<Option<i16>, _>(i)
-            .ok()
-            .map(|v| {
-                v.map(|n| serde_json::Value::Number((n as i64).into()))
-                    .unwrap_or(serde_json::Value::Null)
-            })
-            .unwrap_or(serde_json::Value::Null),
-        "INT4" | "SERIAL" => row
-            .try_get::<Option<i32>, _>(i)
-            .ok()
-            .map(|v| {
-                v.map(|n| serde_json::Value::Number((n as i64).into()))
-                    .unwrap_or(serde_json::Value::Null)
-            })
-            .unwrap_or(serde_json::Value::Null),
-        "INT8" | "BIGSERIAL" => row
-            .try_get::<Option<i64>, _>(i)
-            .ok()
-            .map(|v| {
-                v.map(|n| serde_json::Value::Number(n.into()))
-                    .unwrap_or(serde_json::Value::Null)
-            })
-            .unwrap_or(serde_json::Value::Null),
-        "FLOAT4" => row
-            .try_get::<Option<f32>, _>(i)
-            .ok()
-            .map(|v| {
-                v.and_then(|n| serde_json::Number::from_f64(n as f64))
-                    .map(serde_json::Value::Number)
-                    .unwrap_or(serde_json::Value::Null)
-            })
-            .unwrap_or(serde_json::Value::Null),
-        "FLOAT8" | "NUMERIC" => row
-            .try_get::<Option<f64>, _>(i)
-            .ok()
-            .map(|v| {
-                v.and_then(serde_json::Number::from_f64)
-                    .map(serde_json::Value::Number)
-                    .unwrap_or(serde_json::Value::Null)
-            })
-            .unwrap_or(serde_json::Value::Null),
-        _ => row
-            .try_get::<Option<String>, _>(i)
-            .ok()
-            .map(|v| {
-                v.map(serde_json::Value::String)
-                    .unwrap_or(serde_json::Value::Null)
-            })
-            .unwrap_or(serde_json::Value::Null),
-    }
-}
-
 // ─── SQLite export ────────────────────────────────────────────────────────────
 
-async fn export_sqlite(
-    database_url: &str,
-    table: Option<&str>,
-) -> Result<Vec<serde_json::Map<String, serde_json::Value>>> {
+async fn export_sqlite(database_url: &str, requested: &[String]) -> Result<Vec<(String, Rows)>> {
     use sqlx::{Column, Row, SqlitePool};
 
     let pool = SqlitePool::connect(database_url)
         .await
         .context("Failed to connect to SQLite")?;
 
-    let tables = match table {
-        Some(t) => vec![t.to_string()],
-        None => list_tables_sqlite(&pool).await?,
-    };
+    let edges: Vec<(String, String)> = sqlx::query_as(
+        "SELECT m.name, f.\"table\" FROM sqlite_master m, pragma_foreign_key_list(m.name) f \
+         WHERE m.type = 'table'",
+    )
+    .fetch_all(&pool)
+    .await
+    .context("Failed to read foreign keys")?;
+    let tables = select_tables(list_tables_sqlite(&pool).await?, requested, &edges)?;
 
-    let mut all_rows = Vec::new();
-    for t in &tables {
-        let sql = format!("SELECT * FROM {}", quote_ident(t));
-        let rows = sqlx::query(&sql)
+    let mut out = Vec::new();
+    for t in tables {
+        let sql = format!("SELECT * FROM {}", quote_ident(&t));
+        let fetched = sqlx::query(&sql)
             .fetch_all(&pool)
             .await
             .with_context(|| format!("Failed to export table {}", t))?;
 
-        for row in rows {
+        let mut rows = Vec::with_capacity(fetched.len());
+        for row in fetched {
             let mut map = serde_json::Map::new();
-            if table.is_none() {
-                map.insert("__table".to_string(), serde_json::Value::String(t.clone()));
-            }
             for (i, col) in row.columns().iter().enumerate() {
-                let val = sqlite_column_to_json(&row, i);
-                map.insert(col.name().to_string(), val);
+                map.insert(col.name().to_string(), sqlite_column_to_json(&row, i));
             }
-            all_rows.push(map);
+            rows.push(map);
         }
+        out.push((t, rows));
     }
-    Ok(all_rows)
+    Ok(out)
 }
 
 async fn list_tables_sqlite(pool: &sqlx::SqlitePool) -> Result<Vec<String>> {
@@ -247,43 +217,44 @@ fn sqlite_column_to_json(row: &sqlx::sqlite::SqliteRow, i: usize) -> serde_json:
 
 // ─── MySQL export ─────────────────────────────────────────────────────────────
 
-async fn export_mysql(
-    database_url: &str,
-    table: Option<&str>,
-) -> Result<Vec<serde_json::Map<String, serde_json::Value>>> {
+async fn export_mysql(database_url: &str, requested: &[String]) -> Result<Vec<(String, Rows)>> {
     use sqlx::{Column, Row};
 
     let pool = rango_orm_mysql::connect(database_url)
         .await
         .context("Failed to connect to MySQL")?;
 
-    let tables = match table {
-        Some(t) => vec![t.to_string()],
-        None => list_tables_mysql(&pool).await?,
-    };
+    let edges: Vec<(String, String)> = sqlx::query_as(
+        "SELECT CAST(TABLE_NAME AS CHAR), CAST(REFERENCED_TABLE_NAME AS CHAR) \
+         FROM information_schema.KEY_COLUMN_USAGE \
+         WHERE TABLE_SCHEMA = DATABASE() AND REFERENCED_TABLE_NAME IS NOT NULL",
+    )
+    .fetch_all(&pool)
+    .await
+    .context("Failed to read foreign keys")?;
+    let tables = select_tables(list_tables_mysql(&pool).await?, requested, &edges)?;
 
-    let mut all_rows = Vec::new();
-    for t in &tables {
-        let sql = format!("SELECT * FROM {}", quote_ident_mysql(t));
-        let rows = sqlx::raw_sql(&sql)
+    let mut out = Vec::new();
+    for t in tables {
+        let sql = format!("SELECT * FROM {}", quote_ident_mysql(&t));
+        let fetched = sqlx::raw_sql(&sql)
             .fetch_all(&pool)
             .await
             .with_context(|| format!("Failed to export table {}", t))?;
-        let kinds = text_column_kinds_mysql(&pool, t).await?;
+        let kinds = text_column_kinds_mysql(&pool, &t).await?;
 
-        for row in rows {
+        let mut rows = Vec::with_capacity(fetched.len());
+        for row in fetched {
             let mut map = serde_json::Map::new();
-            if table.is_none() {
-                map.insert("__table".to_string(), serde_json::Value::String(t.clone()));
-            }
             for (i, col) in row.columns().iter().enumerate() {
                 let val = mysql_column_to_json(&row, i, kinds.get(col.name()).copied());
                 map.insert(col.name().to_string(), val);
             }
-            all_rows.push(map);
+            rows.push(map);
         }
+        out.push((t, rows));
     }
-    Ok(all_rows)
+    Ok(out)
 }
 
 async fn list_tables_mysql(pool: &sqlx::MySqlPool) -> Result<Vec<String>> {
