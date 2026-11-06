@@ -460,3 +460,59 @@ async fn import_does_not_inject_column_names() {
     }
     project.remove();
 }
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration"), ignore)]
+async fn import_inserts_parents_first_and_is_atomic() {
+    let pool = PgPool::connect(&database_url())
+        .await
+        .expect("connect to postgres");
+    let project = Project::new("import_fk");
+    for sql in [
+        "DROP TABLE IF EXISTS e2e_import_child",
+        "DROP TABLE IF EXISTS e2e_import_parent",
+        "CREATE TABLE e2e_import_parent (id INT PRIMARY KEY)",
+        "CREATE TABLE e2e_import_child (id INT PRIMARY KEY, parent_id INT NOT NULL REFERENCES e2e_import_parent(id))",
+    ] {
+        sqlx::query(sql).execute(&pool).await.expect(sql);
+    }
+    let count = |table: &'static str| {
+        let pool = pool.clone();
+        async move {
+            sqlx::query_scalar::<_, i64>(&format!("SELECT count(*) FROM {table}"))
+                .fetch_one(&pool)
+                .await
+                .expect("count rows")
+        }
+    };
+
+    // Child rows come first in the file.
+    let dump = serde_json::json!([
+        { "__table": "e2e_import_child", "id": 1, "parent_id": 1 },
+        { "__table": "e2e_import_parent", "id": 1 },
+    ]);
+    std::fs::write(project.dir.join("ok.json"), dump.to_string()).expect("write json");
+    let output = project.run_cli(&["import", "ok.json"]);
+    assert_success(&output, "import child before parent");
+    assert_eq!(count("e2e_import_parent").await, 1);
+    assert_eq!(count("e2e_import_child").await, 1);
+
+    // A dangling FK fails the whole import: the valid parent row is rolled back too.
+    let dump = serde_json::json!([
+        { "__table": "e2e_import_parent", "id": 2 },
+        { "__table": "e2e_import_child", "id": 2, "parent_id": 99 },
+    ]);
+    std::fs::write(project.dir.join("bad.json"), dump.to_string()).expect("write json");
+    let output = project.run_cli(&["import", "bad.json"]);
+    assert_failure(&output, "import with dangling FK");
+    assert_eq!(count("e2e_import_parent").await, 1);
+    assert_eq!(count("e2e_import_child").await, 1);
+
+    for sql in [
+        "DROP TABLE e2e_import_child",
+        "DROP TABLE e2e_import_parent",
+    ] {
+        sqlx::query(sql).execute(&pool).await.expect(sql);
+    }
+    project.remove();
+}
