@@ -179,8 +179,9 @@ where
             sql.push(' ');
             sql.push_str(&where_clause);
         }
-        if !self.order_by.is_empty() {
-            sql.push_str(&format!(" ORDER BY {}", self.order_by.join(", ")));
+        let clauses = self.order_clauses();
+        if !clauses.is_empty() {
+            sql.push_str(&format!(" ORDER BY {}", clauses.join(", ")));
         }
         if !self.explicit_limit {
             sql.push_str(&format!(" LIMIT {}", DEFAULT_QUERY_LIMIT));

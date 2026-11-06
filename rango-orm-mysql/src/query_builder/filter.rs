@@ -266,6 +266,25 @@ where
         self
     }
 
+    /// The explicit `order_by` calls, or the model's `ordering = [...]` when there are none.
+    pub(crate) fn order_clauses(&self) -> Vec<String> {
+        if !self.order_by.is_empty() {
+            return self.order_by.clone();
+        }
+        M::schema()
+            .ordering
+            .iter()
+            .map(|o| {
+                let dir = if matches!(o.dir, rango_orm_core::OrderDir::Desc) {
+                    "DESC"
+                } else {
+                    "ASC"
+                };
+                format!("{} {dir}", quote_ident(&o.column))
+            })
+            .collect()
+    }
+
     /// ORDER BY col ASC. Accepts `User::NAME`, `User::NAME.desc()`, or `"name"` / `"-name"` (DESC).
     pub fn order_by(mut self, col: impl OrderRef<M>) -> Self {
         let (name, descending) = col.order_parts();
@@ -334,10 +353,11 @@ where
             sql.push(' ');
             sql.push_str(&where_clause);
         }
-        let order_by = if self.order_by.is_empty() {
+        let clauses = self.order_clauses();
+        let order_by = if clauses.is_empty() {
             String::new()
         } else {
-            format!(" ORDER BY {}", self.order_by.join(", "))
+            format!(" ORDER BY {}", clauses.join(", "))
         };
         sql.push_str(&order_by);
         // Default row cap unless .limit() or .unlimited() was called.
