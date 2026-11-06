@@ -4,7 +4,7 @@ A Django-inspired async ORM for Rust: define a struct, Rango generates the schem
 
 [![CI](https://github.com/ikarys/rango-orm/actions/workflows/ci.yml/badge.svg)](https://github.com/ikarys/rango-orm/actions/workflows/ci.yml) [![codecov](https://codecov.io/gh/ikarys/rango-orm/graph/badge.svg)](https://codecov.io/gh/ikarys/rango-orm)
 
-> Beta (`v0.1.0-beta.1`): the API may still change between betas. Not on crates.io yet.
+> Beta (`v0.1.0-beta.2`): the API may still change between betas. Not on crates.io yet.
 
 ## Why Rango
 
@@ -71,16 +71,16 @@ Rango is in beta: pin a tag, the API may still change between betas.
 
 ```toml
 [dependencies]
-rango = { git = "https://github.com/ikarys/rango-orm", tag = "v0.1.0-beta.1" } # PostgreSQL, default
+rango = { git = "https://github.com/ikarys/rango-orm", tag = "v0.1.0-beta.2" } # PostgreSQL, default
 # SQLite variant:
-# rango = { git = "https://github.com/ikarys/rango-orm", tag = "v0.1.0-beta.1", default-features = false, features = ["sqlite"] }
-# MySQL / MariaDB variant (after the next beta):
-# rango = { git = "https://github.com/ikarys/rango-orm", branch = "develop", default-features = false, features = ["mysql"] }
+# rango = { git = "https://github.com/ikarys/rango-orm", tag = "v0.1.0-beta.2", default-features = false, features = ["sqlite"] }
+# MySQL / MariaDB variant:
+# rango = { git = "https://github.com/ikarys/rango-orm", tag = "v0.1.0-beta.2", default-features = false, features = ["mysql"] }
 tokio = { version = "1", features = ["full"] }
 ```
 
 ```bash
-cargo install --git https://github.com/ikarys/rango-orm --tag v0.1.0-beta.1 rango-cli
+cargo install --git https://github.com/ikarys/rango-orm --tag v0.1.0-beta.2 rango-cli
 ```
 
 In production, pass the URL via `DATABASE_URL`; never put credentials in `rango.toml`.

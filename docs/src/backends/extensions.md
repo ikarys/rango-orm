@@ -47,4 +47,4 @@ Both traits are automatically available via `use rango::prelude::*` — no extra
 Planned backend-specific features:
 - `PgQueryExt`: window functions, `DISTINCT ON`, advisory locks
 - `SqliteQueryExt`: `json_each()`, `json_group_array()`
-- `MySqlQueryExt` (future MySQL backend)
+- `MySqlQueryExt`: MySQL / MariaDB JSON functions

@@ -52,7 +52,7 @@ Rango targets Django-style ORM ergonomics on native async SQLx.
 | Relations loading | Manual joins | ✅ | ❌ | ✅ | ✅ `select_related` / `prefetch_related` |
 | Real `ON DELETE CASCADE` | ✅ | ✅ | n/a | ✅ | ✅ |
 | Raw SQL escape hatch | ✅ | ✅ | ✅ it's the point | ✅ | ✅ `raw*` |
-| Backends | PG, MySQL, SQLite | PG, MySQL, SQLite | PG, MySQL, SQLite | PG, SQLite | PG, SQLite (MySQL planned) |
+| Backends | PG, MySQL, SQLite | PG, MySQL, SQLite | PG, MySQL, SQLite | PG, SQLite | PG, MySQL / MariaDB, SQLite |
 | Maturity / ecosystem | Large, production at crates.io | Medium, active | Large | Small | Early, API not stable |
 
 ### Where Rango is weaker today
@@ -65,7 +65,7 @@ Comparison inspired by Shuttle's [Best Rust ORMs](https://www.shuttle.dev/blog/2
 ## Status
 
 Rango is under active development. The API is not yet stable.
-PostgreSQL and SQLite backends are functional.
+PostgreSQL, SQLite and MySQL / MariaDB backends are functional.
 
 ## License
 
