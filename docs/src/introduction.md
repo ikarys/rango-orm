@@ -41,19 +41,19 @@ That's it.
 
 Rango targets Django-style ORM ergonomics on native async SQLx.
 
-| | Diesel | SeaORM | SQLx | Butane | **Rango** |
+| | **Rango** | Diesel | SeaORM | SQLx | Butane |
 |---|---|---|---|---|---|
-| Kind | Query builder + ORM | Async ORM | Raw SQL toolkit (not an ORM) | ORM | Django-style ORM |
-| Migrations | ⚠️ Diesel CLI; SQL by hand | ⚠️ Rust files by hand; schema sync newer | ⚠️ sqlx-cli; SQL by hand | ✅ auto-generated from models | ✅ auto-generated from models (`rango makemigrations`) |
-| Model definition | `table!` macro + struct | Entity + ActiveModel, more boilerplate | None | `#[model]` struct | `#[derive(Model)]` only |
-| Async | ⚠️ via `diesel-async` | ✅ | ✅ | ⚠️ partial | ✅ native (sqlx) |
-| Compile-time column checks | ✅ strong | ❌ runtime | ✅ `query!` macros, needs a dev DB | ✅ | ✅ generated typed columns (`User::EMAIL`): name and value type checked; string names still accepted |
-| Model hooks | ❌ | ✅ ActiveModelBehavior | ❌ | ❌ | ✅ `ModelHooks` |
-| Relations loading | Manual joins | ✅ | ❌ | ✅ | ✅ `select_related` / `prefetch_related` |
-| Real `ON DELETE CASCADE` | ✅ | ✅ | n/a | ✅ | ✅ |
-| Raw SQL escape hatch | ✅ | ✅ | ✅ it's the point | ✅ | ✅ `raw*` |
-| Backends | PG, MySQL, SQLite | PG, MySQL, SQLite | PG, MySQL, SQLite | PG, SQLite | PG, MySQL / MariaDB, SQLite |
-| Maturity / ecosystem | Large, production at crates.io | Medium, active | Large | Small | Early, API not stable |
+| Kind | Django-style ORM | Query builder + ORM | Async ORM | Raw SQL toolkit (not an ORM) | ORM |
+| Migrations | ✅ auto-generated from models (`rango makemigrations`) | ⚠️ Diesel CLI; SQL by hand | ⚠️ Rust files by hand; schema sync newer | ⚠️ sqlx-cli; SQL by hand | ✅ auto-generated from models |
+| Model definition | `#[derive(Model)]` only | `table!` macro + struct | Entity + ActiveModel, more boilerplate | None | `#[model]` struct |
+| Async | ✅ native (sqlx) | ⚠️ via `diesel-async` | ✅ | ✅ | ⚠️ partial |
+| Compile-time column checks | ✅ generated typed columns (`User::EMAIL`): name and value type checked; string names still accepted | ✅ strong | ❌ runtime | ✅ `query!` macros, needs a dev DB | ✅ |
+| Model hooks | ✅ `ModelHooks` | ❌ | ✅ ActiveModelBehavior | ❌ | ❌ |
+| Relations loading | ✅ `select_related` / `prefetch_related` | Manual joins | ✅ | ❌ | ✅ |
+| Real `ON DELETE CASCADE` | ✅ | ✅ | ✅ | n/a | ✅ |
+| Raw SQL escape hatch | ✅ `raw*` | ✅ | ✅ | ✅ it's the point | ✅ |
+| Backends | PG, MySQL / MariaDB, SQLite | PG, MySQL, SQLite | PG, MySQL, SQLite | PG, MySQL, SQLite | PG, SQLite |
+| Maturity / ecosystem | Early, API not stable | Large, production at crates.io | Medium, active | Large | Small |
 
 ### Where Rango is weaker today
 
