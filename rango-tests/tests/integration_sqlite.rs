@@ -527,3 +527,37 @@ async fn test_sqlite_typed_columns() {
     let sum = TestUser::filter(&pool).sum(TestUser::SCORE).await.unwrap();
     assert_eq!(sum, Some(3.0));
 }
+
+// ── Auto-increment PK ─────────────────────────────────────────────────────────
+
+#[derive(Model, Debug, Clone)]
+#[model(table = "test_counter")]
+struct TestCounter {
+    id: FieldAutoInt,
+    label: FieldText,
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-sqlite"), ignore)]
+async fn test_sqlite_auto_pk_is_generated() {
+    let pool = pool().await;
+    sqlx::query(r#"CREATE TABLE "test_counter" ("id" INTEGER PRIMARY KEY, "label" TEXT NOT NULL)"#)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let new = |l: &str| TestCounter {
+        id: FieldAutoInt::default(),
+        label: FieldText(l.into()),
+    };
+
+    let a = insert(&pool, new("a")).await.unwrap();
+    let b = insert(&pool, new("b")).await.unwrap();
+    assert_eq!((a.id.0, b.id.0), (Some(1), Some(2)));
+
+    assert_eq!(bulk_create(&pool, &[new("c"), new("d")]).await.unwrap(), 2);
+    let d = get::<_, TestCounter>(&pool, &4i32.into())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(d.label.0, "d");
+}

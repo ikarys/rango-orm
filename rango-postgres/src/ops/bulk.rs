@@ -28,7 +28,7 @@ where
 
     let mut conn = executor.acquire().await.map_err(db_err)?;
 
-    let n_cols = 1 + models[0].field_values().len();
+    let n_cols = rango_core::insert_values(&models[0]).len();
     let chunk_size = (65535 / n_cols).max(1);
     let mut total = 0usize;
 
@@ -142,30 +142,26 @@ fn sql_type_cast(val: &SqlValue) -> &'static str {
     }
 }
 
+/// Columns come from the first model: give every model a PK, or none (auto-increment).
 fn build_bulk_create_sql<M: Model + ModelValues>(models: &[M]) -> (String, Vec<SqlValue>) {
-    let pk_col = M::pk_column();
-    let sample = models[0].field_values();
-
-    let mut cols = vec![quote_ident(pk_col)];
-    cols.extend(sample.iter().map(|(c, _)| quote_ident(c)));
+    let cols: Vec<String> = rango_core::insert_values(&models[0])
+        .into_iter()
+        .map(|(c, _)| quote_ident(c))
+        .collect();
 
     let mut all_values: Vec<SqlValue> = Vec::new();
     let mut row_placeholders: Vec<String> = Vec::new();
     let mut idx = 1usize;
 
     for model in models {
-        let fields = model.field_values();
-        let pk_val = model.pk_value();
+        let values = rango_core::insert_values(model);
 
-        let mut ph: Vec<String> = vec![format!("${}", idx)];
-        all_values.push(pk_val);
-        idx += 1;
-
-        for (_, val) in fields {
+        let mut ph: Vec<String> = Vec::new();
+        for _ in &values {
             ph.push(format!("${}", idx));
-            all_values.push(val);
             idx += 1;
         }
+        all_values.extend(values.into_iter().map(|(_, v)| v));
         row_placeholders.push(format!("({})", ph.join(", ")));
     }
 

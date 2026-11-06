@@ -38,6 +38,7 @@ Every connection uses `utf8mb4`, runs in UTC (`DATETIME` has no time zone) and i
 | `FieldUuid` | `BINARY(16)` |
 | `FieldBool` | `BOOLEAN` (`TINYINT(1)`) |
 | `FieldInt` / `FieldBigInt` / `FieldSmallInt` | `INT` / `BIGINT` / `SMALLINT` |
+| `FieldAutoInt` / `FieldAutoBigInt` | `INT` / `BIGINT AUTO_INCREMENT` (id read back with `LAST_INSERT_ID()`) |
 | `FieldDecimal<P, S>` | `DECIMAL(P, S)` |
 | `FieldVarchar<_, N>` | `VARCHAR(N)` |
 | `FieldText` | `LONGTEXT` |

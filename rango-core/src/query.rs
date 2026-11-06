@@ -1,3 +1,25 @@
+impl SqlValue {
+    /// True for every typed NULL variant.
+    pub fn is_null(&self) -> bool {
+        matches!(
+            self,
+            SqlValue::NullBool
+                | SqlValue::NullSmallInt
+                | SqlValue::NullInt
+                | SqlValue::NullBigInt
+                | SqlValue::NullFloat
+                | SqlValue::NullDouble
+                | SqlValue::NullText
+                | SqlValue::NullBytes
+                | SqlValue::NullUuid
+                | SqlValue::NullDateTime
+                | SqlValue::NullDate
+                | SqlValue::NullTime
+                | SqlValue::NullJson
+        )
+    }
+}
+
 /// A SQL-compatible value — used to bind field values to queries
 /// without requiring sqlx as a direct dependency of rango-core.
 #[derive(Debug, Clone, PartialEq)]
@@ -124,6 +146,23 @@ pub trait ModelValues {
 
     /// Returns the primary key column name.
     fn pk_column() -> &'static str;
+
+    /// Stores a database-generated primary key (auto-increment PKs only; no-op otherwise).
+    /// Used by backends without `RETURNING` (MySQL).
+    fn set_generated_pk(&mut self, _id: i64) {}
+}
+
+/// Columns and values to INSERT for `model`. A NULL primary key (an unsaved
+/// `FieldAutoInt` / `FieldAutoBigInt`) is left out so the database generates it.
+pub fn insert_values<M: ModelValues>(model: &M) -> Vec<(&'static str, SqlValue)> {
+    let pk = model.pk_value();
+    let fields = model.field_values();
+    let mut values = Vec::with_capacity(fields.len() + 1);
+    if !pk.is_null() {
+        values.push((M::pk_column(), pk));
+    }
+    values.extend(fields);
+    values
 }
 
 /// Quote a SQL identifier (table or column name), doubling embedded `"`.

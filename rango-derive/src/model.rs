@@ -75,6 +75,7 @@ pub fn expand(input: DeriveInput) -> Result<TokenStream> {
     let mut pk_value_expr = quote! { #core::SqlValue::NullUuid }; // placeholder — overwritten when PK field is found
     let mut pk_col_name = "id".to_string();
     let mut pk_found = false;
+    let mut set_pk_body = quote! { let _ = id; };
 
     for f in fields.iter() {
         if is_many_to_many(&f.ty) {
@@ -91,6 +92,17 @@ pub fn expand(input: DeriveInput) -> Result<TokenStream> {
             pk_value_expr = quote! {
                 #core::ToSqlValue::to_sql_value(&self.#fname)
             };
+            let ty = &f.ty;
+            match quote!(#ty).to_string().replace(' ', "").as_str() {
+                "FieldAutoInt" => {
+                    set_pk_body =
+                        quote! { self.#fname = #core::FieldAutoInt(i32::try_from(id).ok()); };
+                }
+                "FieldAutoBigInt" => {
+                    set_pk_body = quote! { self.#fname = #core::FieldAutoBigInt(Some(id)); };
+                }
+                _ => {}
+            }
         } else {
             field_value_entries.push(quote! {
                 (#col_name, #core::ToSqlValue::to_sql_value(&self.#fname))
@@ -197,6 +209,10 @@ pub fn expand(input: DeriveInput) -> Result<TokenStream> {
 
             fn pk_column() -> &'static str {
                 #pk_col_name
+            }
+
+            fn set_generated_pk(&mut self, id: i64) {
+                #set_pk_body
             }
         }
     })
@@ -370,6 +386,8 @@ fn field_type_to_getter(
         "FieldSmallInt" => quote! { row.get_i16(#col).map(#core::FieldSmallInt)? },
         "FieldInt" => quote! { row.get_i32(#col).map(#core::FieldInt)? },
         "FieldBigInt" => quote! { row.get_i64(#col).map(#core::FieldBigInt)? },
+        "FieldAutoInt" => quote! { #core::FieldAutoInt(Some(row.get_i32(#col)?)) },
+        "FieldAutoBigInt" => quote! { #core::FieldAutoBigInt(Some(row.get_i64(#col)?)) },
         "FieldFloat" => quote! { row.get_f32(#col).map(#core::FieldFloat)? },
         "FieldDouble" => quote! { row.get_f64(#col).map(#core::FieldDouble)? },
         "FieldText" => quote! { row.get_string(#col).map(#core::FieldText)? },
@@ -508,6 +526,8 @@ fn map_field_type(ty: &Type, core: &TokenStream) -> Result<TokenStream> {
         "FieldSmallInt" => quote! { #core::ColumnType::SmallInt },
         "FieldInt" => quote! { #core::ColumnType::Int },
         "FieldBigInt" => quote! { #core::ColumnType::BigInt },
+        "FieldAutoInt" => quote! { #core::ColumnType::AutoInt },
+        "FieldAutoBigInt" => quote! { #core::ColumnType::AutoBigInt },
         "FieldFloat" => quote! { #core::ColumnType::Float },
         "FieldDouble" => quote! { #core::ColumnType::Double },
         "FieldText" => quote! { #core::ColumnType::Text },

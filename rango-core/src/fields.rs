@@ -27,6 +27,16 @@ pub struct FieldInt(pub i32);
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FieldBigInt(pub i64);
 
+/// Auto-increment `INTEGER` primary key. `None` until the row is inserted;
+/// the database generates the value.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+pub struct FieldAutoInt(pub Option<i32>);
+
+/// Auto-increment `BIGINT` primary key. `None` until the row is inserted;
+/// the database generates the value.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+pub struct FieldAutoBigInt(pub Option<i64>);
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FieldFloat(pub f32);
 
@@ -248,6 +258,16 @@ impl ToSqlValue for FieldInt {
 impl ToSqlValue for FieldBigInt {
     fn to_sql_value(&self) -> SqlValue {
         SqlValue::BigInt(self.0)
+    }
+}
+impl ToSqlValue for FieldAutoInt {
+    fn to_sql_value(&self) -> SqlValue {
+        self.0.map_or(SqlValue::NullInt, SqlValue::Int)
+    }
+}
+impl ToSqlValue for FieldAutoBigInt {
+    fn to_sql_value(&self) -> SqlValue {
+        self.0.map_or(SqlValue::NullBigInt, SqlValue::BigInt)
     }
 }
 impl ToSqlValue for FieldFloat {
@@ -534,6 +554,16 @@ impl From<i64> for FieldBigInt {
         Self(v)
     }
 }
+impl From<i32> for FieldAutoInt {
+    fn from(v: i32) -> Self {
+        Self(Some(v))
+    }
+}
+impl From<i64> for FieldAutoBigInt {
+    fn from(v: i64) -> Self {
+        Self(Some(v))
+    }
+}
 impl From<f32> for FieldFloat {
     fn from(v: f32) -> Self {
         Self(v)
@@ -641,6 +671,8 @@ filter_values! {
     FieldSmallInt => i16;
     FieldInt => i32;
     FieldBigInt => i64;
+    FieldAutoInt => i32;
+    FieldAutoBigInt => i64;
     FieldFloat => f32;
     FieldDouble => f64;
     FieldText => String, &str;

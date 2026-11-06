@@ -9,16 +9,21 @@ use sqlx::{Executor, MySql, MySqlPool};
 use super::*;
 
 // ─── CRUD ops ─────────────────────────────────────────────────────────────────
-// MySQL has no RETURNING. Every column is bound from the model (client-side PKs, no DB-side
-// defaults on insert), so the input model is what was stored, minus DATETIME(6) sub-µs precision.
-pub async fn insert<'e, E, M>(executor: E, model: M) -> Result<M>
+// MySQL has no RETURNING. Every column is bound from the model (no DB-side defaults on insert
+// except auto-increment PKs, read back with LAST_INSERT_ID()), so the input model is what was
+// stored, minus DATETIME(6) sub-µs precision.
+pub async fn insert<'e, E, M>(executor: E, mut model: M) -> Result<M>
 where
     E: Executor<'e, Database = MySql>,
     M: Model + ModelValues + FromRow,
 {
+    let generated = model.pk_value().is_null();
     let (sql, values) = build_insert_sql::<M>(&model);
     let q = bind_sql_values(sqlx::query(&sql), values);
-    q.execute(executor).await.map_err(db_err)?;
+    let res = q.execute(executor).await.map_err(db_err)?;
+    if generated {
+        model.set_generated_pk(res.last_insert_id() as i64);
+    }
     Ok(model)
 }
 
@@ -88,15 +93,21 @@ where
 pub async fn get_or_create<M>(
     pool: &MySqlPool,
     lookup: Vec<(&'static str, SqlValue)>,
-    defaults: M,
+    mut defaults: M,
 ) -> Result<(M, bool)>
 where
     M: Model + ModelValues + FromRow,
 {
+    let generated = defaults.pk_value().is_null();
     let (insert_sql, insert_vals) = build_insert_sql::<M>(&defaults);
     let q = bind_sql_values(sqlx::query(&insert_sql), insert_vals);
     match q.execute(pool).await.map_err(db_err) {
-        Ok(_) => return Ok((defaults, true)),
+        Ok(res) => {
+            if generated {
+                defaults.set_generated_pk(res.last_insert_id() as i64);
+            }
+            return Ok((defaults, true));
+        }
         Err(Error::UniqueViolation { .. }) => {}
         Err(e) => return Err(e),
     }
@@ -112,20 +123,15 @@ where
 
 // ─── SQL builders ─────────────────────────────────────────────────────────────
 fn build_insert_sql<M: Model + ModelValues>(model: &M) -> (String, Vec<SqlValue>) {
-    let fields = model.field_values();
-    let pk_col = M::pk_column();
-    let pk_val = model.pk_value();
-    let mut cols = vec![quote_ident(pk_col)];
-    cols.extend(fields.iter().map(|(c, _)| quote_ident(c)));
-    let placeholders: Vec<String> = (0..cols.len()).map(|_| "?".to_string()).collect();
+    let (cols, values): (Vec<_>, Vec<_>) = rango_core::insert_values(model).into_iter().unzip();
+    let cols: Vec<String> = cols.into_iter().map(quote_ident).collect();
+    let placeholders: Vec<&str> = vec!["?"; cols.len()];
     let sql = format!(
         "INSERT INTO {} ({}) VALUES ({})",
         quote_ident(M::table_name()),
         cols.join(", "),
         placeholders.join(", ")
     );
-    let mut values = vec![pk_val];
-    values.extend(fields.into_iter().map(|(_, v)| v));
     (sql, values)
 }
 

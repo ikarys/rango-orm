@@ -173,11 +173,8 @@ where
 
 // ─── SQL builders ─────────────────────────────────────────────────────────────
 fn build_insert_sql<M: Model + ModelValues>(model: &M) -> (String, Vec<SqlValue>) {
-    let fields = model.field_values();
-    let pk_col = M::pk_column();
-    let pk_val = model.pk_value();
-    let mut cols = vec![quote_ident(pk_col)];
-    cols.extend(fields.iter().map(|(c, _)| quote_ident(c)));
+    let (cols, values): (Vec<_>, Vec<_>) = rango_core::insert_values(model).into_iter().unzip();
+    let cols: Vec<String> = cols.into_iter().map(quote_ident).collect();
     let placeholders: Vec<String> = (1..=cols.len()).map(|i| format!("${}", i)).collect();
     let sql = format!(
         "INSERT INTO {} ({}) VALUES ({}) RETURNING *",
@@ -185,8 +182,6 @@ fn build_insert_sql<M: Model + ModelValues>(model: &M) -> (String, Vec<SqlValue>
         cols.join(", "),
         placeholders.join(", ")
     );
-    let mut values = vec![pk_val];
-    values.extend(fields.into_iter().map(|(_, v)| v));
     (sql, values)
 }
 
@@ -226,11 +221,8 @@ fn build_get_or_create_sql<M: Model + ModelValues>(
     model: &M,
     conflict_cols: &[&str],
 ) -> (String, Vec<SqlValue>) {
-    let fields = model.field_values();
-    let pk_col = M::pk_column();
-    let pk_val = model.pk_value();
-    let mut cols = vec![quote_ident(pk_col)];
-    cols.extend(fields.iter().map(|(c, _)| quote_ident(c)));
+    let (cols, values): (Vec<_>, Vec<_>) = rango_core::insert_values(model).into_iter().unzip();
+    let cols: Vec<String> = cols.into_iter().map(quote_ident).collect();
     let placeholders: Vec<String> = (1..=cols.len()).map(|i| format!("${}", i)).collect();
     let conflict_clause = conflict_cols
         .iter()
@@ -244,8 +236,6 @@ fn build_get_or_create_sql<M: Model + ModelValues>(
         placeholders.join(", "),
         conflict_clause
     );
-    let mut values = vec![pk_val];
-    values.extend(fields.into_iter().map(|(_, v)| v));
     (sql, values)
 }
 

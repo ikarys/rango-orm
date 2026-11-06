@@ -141,12 +141,41 @@ async fn import_postgres(
     let order = order_by_dependencies(groups.keys().cloned().collect(), &edges);
     let mut total = 0;
 
-    for table in order {
-        total += insert_rows_postgres(&mut tx, &table, &groups[&table], replace).await?;
+    for table in &order {
+        total += insert_rows_postgres(&mut tx, table, &groups[table], replace).await?;
     }
+    resync_identities_postgres(&mut tx, &order).await?;
 
     tx.commit().await.context("Failed to commit import")?;
     Ok(total)
+}
+
+/// Move each identity sequence of `tables` past the largest imported id.
+async fn resync_identities_postgres(
+    conn: &mut sqlx::PgConnection,
+    tables: &[String],
+) -> Result<()> {
+    let identities: Vec<(String, String)> = sqlx::query_as(
+        "SELECT table_name::text, column_name::text FROM information_schema.columns \
+         WHERE table_schema = current_schema() AND is_identity = 'YES'",
+    )
+    .fetch_all(&mut *conn)
+    .await
+    .context("Failed to read identity columns")?;
+    for (table, column) in identities.iter().filter(|(t, _)| tables.contains(t)) {
+        let sql = format!(
+            "SELECT setval(pg_get_serial_sequence($1, $2), COALESCE((SELECT MAX({}) FROM {}), 0) + 1, false)",
+            quote_ident(column),
+            quote_ident(table)
+        );
+        sqlx::query(&sql)
+            .bind(quote_ident(table))
+            .bind(column)
+            .execute(&mut *conn)
+            .await
+            .with_context(|| format!("Failed to reset the identity sequence of {}", table))?;
+    }
+    Ok(())
 }
 
 async fn insert_rows_postgres(

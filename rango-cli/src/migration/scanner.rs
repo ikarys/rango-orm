@@ -311,6 +311,8 @@ fn map_field_type(ty: &Type) -> Result<ColumnType> {
         "FieldSmallInt" => ColumnType::SmallInt,
         "FieldInt" => ColumnType::Int,
         "FieldBigInt" => ColumnType::BigInt,
+        "FieldAutoInt" => ColumnType::AutoInt,
+        "FieldAutoBigInt" => ColumnType::AutoBigInt,
         "FieldFloat" => ColumnType::Float,
         "FieldDouble" => ColumnType::Double,
         "FieldText" => ColumnType::Text,
@@ -706,6 +708,18 @@ mod tests {
         assert_eq!(
             map_field_type(&ty("ForeignKey<User>")).unwrap(),
             ColumnType::Uuid,
+        );
+    }
+
+    #[test]
+    fn test_auto_pk_fields() {
+        assert_eq!(
+            map_field_type(&ty("FieldAutoInt")).unwrap(),
+            ColumnType::AutoInt
+        );
+        assert_eq!(
+            map_field_type(&ty("FieldAutoBigInt")).unwrap(),
+            ColumnType::AutoBigInt
         );
     }
 
