@@ -113,6 +113,15 @@ pub struct RpxEvent {
     pub kind: FieldText,
 }
 
+/// `on_delete = "restrict"`: the author cannot be deleted while a pin points at it.
+#[derive(Model, Debug, Clone)]
+#[model(table = "rpx_pins")]
+pub struct RpxPin {
+    pub id: FieldUuid,
+    #[field(on_delete = "restrict")]
+    pub author: ForeignKey<RpxAuthor>,
+}
+
 /// Not managed by migrations.
 #[derive(Model, Debug, Clone)]
 #[model(table = "rpx_legacy", managed = false)]
@@ -175,6 +184,7 @@ pub fn schemas() -> Vec<TableSchema> {
         RpxNote::schema(),
         RpxCounter::schema(),
         RpxEvent::schema(),
+        RpxPin::schema(),
         RpxLegacy::schema(),
         RpxPathTyped::schema(),
         RpxSink::schema(),

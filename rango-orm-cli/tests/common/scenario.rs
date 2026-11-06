@@ -54,6 +54,48 @@ macro_rules! scenario {
                 partial_bulk_keyset(pool).await;
                 fk_cycle(pool).await;
                 implicit_pk_and_sink(pool).await;
+                on_delete_effects(pool).await;
+            }
+
+            /// What the database does to the children of a deleted parent: `cascade` (the
+            /// default) removes them, `set_null` clears the FK, `restrict` refuses the delete.
+            async fn on_delete_effects(pool: &$Pool) {
+                let (gone, keeper, pinned) = (
+                    author("od_gone", None),
+                    author("od_keeper", None),
+                    author("od_pinned", None),
+                );
+                for a in [&gone, &keeper, &pinned] {
+                    insert(pool, a.clone()).await.unwrap();
+                }
+                let child = post(&gone, "od_child", 1);
+                let mut reviewed = post(&keeper, "od_reviewed", 1);
+                reviewed.reviewer = Some(ForeignKey::new(gone.id.0));
+                insert(pool, child.clone()).await.unwrap();
+                insert(pool, reviewed.clone()).await.unwrap();
+
+                delete(pool, &gone).await.unwrap();
+                assert!(get::<_, RpxBlogPost>(pool, &child.id.to_sql_value())
+                    .await.unwrap().is_none(), "cascade");
+                let after = get::<_, RpxBlogPost>(pool, &reviewed.id.to_sql_value())
+                    .await.unwrap().unwrap();
+                assert!(after.reviewer.is_none(), "set_null");
+                assert_eq!(after.author.0, keeper.id.0);
+
+                let pin = RpxPin {
+                    id: FieldUuid(Uuid::new_v4()),
+                    author: ForeignKey::new(pinned.id.0),
+                };
+                insert(pool, pin.clone()).await.unwrap();
+                let err = delete(pool, &pinned).await.unwrap_err();
+                assert!(
+                    matches!(err, rango::Error::ForeignKeyViolation { .. }),
+                    "restrict: {err:?}"
+                );
+                let still = get::<_, RpxAuthor>(pool, &pinned.id.to_sql_value()).await;
+                assert!(still.unwrap().is_some(), "restrict keeps the parent");
+                delete(pool, &pin).await.unwrap();
+                delete(pool, &pinned).await.unwrap();
             }
 
             async fn crud_filter_order(pool: &$Pool) {
