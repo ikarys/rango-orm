@@ -145,6 +145,49 @@ async fn test_mysql_filter_eq() {
 
 #[tokio::test]
 #[cfg_attr(not(feature = "integration-mysql"), ignore)]
+async fn test_mysql_subqueries() {
+    let pool = pool().await;
+    setup(&pool).await;
+
+    insert(&pool, user("a@mysql.com")).await.unwrap();
+    let mut inactive = user("b@mysql.com");
+    inactive.active = FieldBool(false);
+    insert(&pool, inactive).await.unwrap();
+
+    // Self-referencing EXISTS: exercises the inner-table alias and bind order.
+    let active = TestUser::filter(&pool)
+        .eq("email", "b@mysql.com".to_string())
+        .or()
+        .where_exists::<TestUser>("id", |q| q.eq("active", true))
+        .order_by("email")
+        .all()
+        .await
+        .unwrap();
+    assert_eq!(
+        active
+            .iter()
+            .map(|u| u.email.0.as_str())
+            .collect::<Vec<_>>(),
+        ["a@mysql.com", "b@mysql.com"]
+    );
+
+    let inactive = TestUser::filter(&pool)
+        .not()
+        .in_subquery(TestUser::ID, TestUser::ID, |q| q.eq("active", true))
+        .all()
+        .await
+        .unwrap();
+    assert_eq!(
+        inactive
+            .iter()
+            .map(|u| u.email.0.as_str())
+            .collect::<Vec<_>>(),
+        ["b@mysql.com"]
+    );
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-mysql"), ignore)]
 async fn test_mysql_count_and_exists() {
     let pool = pool().await;
     setup(&pool).await;

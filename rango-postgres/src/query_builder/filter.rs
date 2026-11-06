@@ -1,6 +1,7 @@
 use crate::ops::DEFAULT_QUERY_LIMIT;
 use rango_core::{
-    ColumnRef, FilterColumn, FromRow, Model, ModelValues, OrderRef, SqlValue, quote_ident,
+    ColumnRef, FilterColumn, ForeignKeyRef, FromRow, Model, ModelValues, OrderRef, SqlValue,
+    quote_ident,
 };
 use sqlx::PgPool;
 // ─── Bind helpers ─────────────────────────────────────────────────────────────
@@ -157,6 +158,89 @@ where
         self
     }
 
+    // ── Subqueries ────────────────────────────────────────────────────────────
+    /// Keep rows that have at least one `R` pointing at them through `fk_col`,
+    /// among the rows kept by the filters `sub` adds:
+    ///
+    /// ```rust,ignore
+    /// let authors = User::filter(&pool)
+    ///     .where_exists(Article::AUTHOR_ID, |q| q.eq(Article::PUBLISHED, true))
+    ///     .all().await?;
+    /// // → WHERE EXISTS (SELECT 1 FROM "article" WHERE "article"."author_id" = "user"."id"
+    /// //                 AND ("published" = $1))
+    /// ```
+    ///
+    /// Chain after `.not()` for `NOT EXISTS`. Only `sub`'s filters are used
+    /// (its ordering, limit and relations are ignored).
+    pub fn where_exists<R>(
+        self,
+        fk_col: impl ForeignKeyRef<R, M>,
+        sub: impl FnOnce(QueryBuilder<R>) -> QueryBuilder<R>,
+    ) -> Self
+    where
+        R: Model + ModelValues + FromRow,
+    {
+        let outer = quote_ident(M::table_name());
+        // Self-referencing (e.g. parent/child on one table): alias the inner table,
+        // otherwise `"t"."id"` would resolve to the inner row.
+        let (from, inner) = if R::table_name() == M::table_name() {
+            (format!("{outer} AS \"__sub\""), "\"__sub\"".to_string())
+        } else {
+            let t = quote_ident(R::table_name());
+            (t.clone(), t)
+        };
+        let head = format!(
+            "EXISTS (SELECT 1 FROM {from} WHERE {inner}.{} = {outer}.{}",
+            quote_ident(fk_col.column_name()),
+            quote_ident(M::pk_column()),
+        );
+        let sub = sub(QueryBuilder::new(&self.pool));
+        self.add_subquery(head, true, sub)
+    }
+
+    /// `col IN (SELECT sub_col FROM R WHERE <sub's filters>)`:
+    ///
+    /// ```rust,ignore
+    /// let posts = Post::filter(&pool)
+    ///     .in_subquery(Post::AUTHOR_ID, User::ID, |q| q.eq(User::ACTIVE, true))
+    ///     .all().await?;
+    /// ```
+    ///
+    /// Prefer `.not().where_exists(...)` over `.not().in_subquery(...)`: `NOT IN`
+    /// matches nothing as soon as the subquery returns a NULL.
+    pub fn in_subquery<R>(
+        self,
+        col: impl ColumnRef<M>,
+        sub_col: impl ColumnRef<R>,
+        sub: impl FnOnce(QueryBuilder<R>) -> QueryBuilder<R>,
+    ) -> Self
+    where
+        R: Model + ModelValues + FromRow,
+    {
+        let head = format!(
+            "{} IN (SELECT {} FROM {}",
+            quote_ident(col.column_name()),
+            quote_ident(sub_col.column_name()),
+            quote_ident(R::table_name()),
+        );
+        let sub = sub(QueryBuilder::new(&self.pool));
+        self.add_subquery(head, false, sub)
+    }
+
+    fn add_subquery<R>(mut self, head: String, has_where: bool, sub: QueryBuilder<R>) -> Self {
+        let connector = std::mem::replace(&mut self.next_connector, Connector::And);
+        self.conditions.push(ConditionGroup {
+            node: ConditionNode::Subquery(Box::new(Subquery {
+                head,
+                has_where,
+                conditions: sub.conditions,
+                raw_conditions: sub.raw_conditions,
+            })),
+            connector,
+        });
+        self
+    }
+
     // ── Ordering / pagination ─────────────────────────────────────────────────
     /// ORDER BY col ASC. Accepts `User::NAME`, `User::NAME.desc()`, or `"name"` / `"-name"` (DESC).
     pub fn order_by(mut self, col: impl OrderRef<M>) -> Self {
@@ -188,25 +272,60 @@ where
 
     /// Returns the SQL that would be executed by `.all()`, for debugging.
     pub fn explain(&self) -> String {
-        let table = M::table_name();
-        let (where_clause, _) = self.build_where();
-        let mut sql = format!("SELECT * FROM {}", quote_ident(table));
+        self.select_sql().0
+    }
+
+    /// The main `.all()` query: filtered rows of M, plus one LEFT JOIN per `select_related`.
+    pub(super) fn select_sql(&self) -> (String, Vec<SqlValue>) {
+        let (where_clause, binds) = self.build_where();
+        let mut sql = format!("SELECT * FROM {}", quote_ident(M::table_name()));
         if !where_clause.is_empty() {
             sql.push(' ');
             sql.push_str(&where_clause);
         }
-        if !self.order_by.is_empty() {
-            sql.push_str(&format!(" ORDER BY {}", self.order_by.join(", ")));
-        }
-        if let Some(l) = self.limit {
-            sql.push_str(&format!(" LIMIT {}", l));
-        } else if !self.explicit_limit {
+        let order_by = if self.order_by.is_empty() {
+            String::new()
+        } else {
+            format!(" ORDER BY {}", self.order_by.join(", "))
+        };
+        sql.push_str(&order_by);
+        // Default row cap unless .limit() or .unlimited() was called.
+        if !self.explicit_limit {
             sql.push_str(&format!(" LIMIT {}", DEFAULT_QUERY_LIMIT));
+        } else if let Some(l) = self.limit {
+            sql.push_str(&format!(" LIMIT {}", l));
         }
         if let Some(o) = self.offset {
             sql.push_str(&format!(" OFFSET {}", o));
         }
-        sql
+        if self.select_related.is_empty() {
+            return (sql, binds);
+        }
+
+        // Filter, order and paginate M first, then join: LIMIT applies to M rows and
+        // the filters keep their unqualified column names. R's columns get a
+        // `__r{i}_` prefix so they cannot clash with M's.
+        let mut select = String::from("SELECT \"__m\".*");
+        let mut joins = String::new();
+        for (i, spec) in self.select_related.iter().enumerate() {
+            let alias = quote_ident(&format!("__r{i}"));
+            for col in &spec.columns {
+                select.push_str(&format!(
+                    ", {alias}.{} AS {}",
+                    quote_ident(col),
+                    quote_ident(&format!("__r{i}_{col}"))
+                ));
+            }
+            joins.push_str(&format!(
+                " LEFT JOIN {} AS {alias} ON {alias}.{} = \"__m\".{}",
+                quote_ident(spec.table_name),
+                quote_ident(spec.pk_col),
+                quote_ident(&spec.fk_col),
+            ));
+        }
+        // The outer ORDER BY resolves to M's output columns (R's are prefixed).
+        let sql = format!("{select} FROM ({sql}) AS \"__m\"{joins}{order_by}");
+        (sql, binds)
     }
 
     // ── Internals ─────────────────────────────────────────────────────────────
@@ -231,33 +350,12 @@ where
     }
 
     pub(super) fn build_where(&self) -> (String, Vec<SqlValue>) {
-        let has_conditions = !self.conditions.is_empty();
-        let has_raw = !self.raw_conditions.is_empty();
-
-        if !has_conditions && !has_raw {
-            return (String::new(), Vec::new());
-        }
-
         let mut binds = Vec::new();
-        let mut idx = 1usize;
-        let mut parts: Vec<String> = Vec::new();
-
-        if has_conditions {
-            parts.push(build_conditions(&self.conditions, &mut binds, &mut idx));
+        let body = build_where_body(&self.conditions, &self.raw_conditions, &mut binds, &mut 1);
+        if body.is_empty() {
+            (body, binds)
+        } else {
+            (format!("WHERE {body}"), binds)
         }
-
-        // Append raw conditions — replace $__ with the current $N
-        for (sql, raw_binds) in &self.raw_conditions {
-            let mut fragment = sql.clone();
-            for bind in raw_binds {
-                let placeholder = format!("${}", idx);
-                fragment = fragment.replacen("$__", &placeholder, 1);
-                binds.push(bind.clone());
-                idx += 1;
-            }
-            parts.push(fragment);
-        }
-
-        (format!("WHERE {}", parts.join(" AND ")), binds)
     }
 }

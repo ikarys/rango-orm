@@ -18,8 +18,8 @@ pub type RelationCache = HashMap<TypeId, Box<dyn Any + Send + Sync>>;
 /// # Example
 /// ```rust,ignore
 /// let posts = Post::filter(&pool)
-///     .select_related::<Author>("author_id")
-///     .prefetch_related::<Comment>("post_id")
+///     .select_related(Post::AUTHOR_ID)
+///     .prefetch_related(Comment::POST_ID)
 ///     .all()
 ///     .await?;
 ///
@@ -46,7 +46,7 @@ impl<M> WithRelated<M> {
     /// Returns the FK-related instance loaded by `select_related`.
     ///
     /// # Panics
-    /// Panics with a clear message if `.select_related::<R>()` was not called
+    /// Panics with a clear message if `.select_related(..)` was not called for `R`
     /// on the query builder.
     pub fn related<R: Any + Send + Sync + 'static>(&self) -> &R {
         self.cache
@@ -55,7 +55,7 @@ impl<M> WithRelated<M> {
             .unwrap_or_else(|| {
                 panic!(
                     "select_related<{ty}> was not loaded; \
-                 add .select_related::<{ty}>(\"col\") to the QueryBuilder chain",
+                 add .select_related(..) for {ty} to the QueryBuilder chain",
                     ty = type_name::<R>()
                 )
             })
@@ -64,7 +64,7 @@ impl<M> WithRelated<M> {
     /// Returns the prefetched slice loaded by `prefetch_related`.
     ///
     /// # Panics
-    /// Panics with a clear message if `.prefetch_related::<R>()` was not called
+    /// Panics with a clear message if `.prefetch_related(..)` was not called for `R`
     /// on the query builder.
     pub fn prefetched<R: Any + Send + Sync + 'static>(&self) -> &[R] {
         self.cache
@@ -74,7 +74,7 @@ impl<M> WithRelated<M> {
             .unwrap_or_else(|| {
                 panic!(
                     "prefetch_related<{ty}> was not loaded; \
-                 add .prefetch_related::<{ty}>(\"col\") to the QueryBuilder chain",
+                 add .prefetch_related(..) for {ty} to the QueryBuilder chain",
                     ty = type_name::<R>()
                 )
             })

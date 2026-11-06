@@ -2,6 +2,7 @@
 
 use std::marker::PhantomData;
 
+use crate::fields::ForeignKey;
 use crate::query::{SqlValue, ToSqlValue};
 
 /// A typed column reference: `M` is the model, `T` the field type.
@@ -104,6 +105,15 @@ impl<M> ColumnRef<M> for &str {
         self
     }
 }
+
+/// A foreign key column on `M` pointing to `T`: `Post::AUTHOR_ID` (an `author_id: ForeignKey<User>` field)
+/// is a `ForeignKeyRef<Post, User>`, so relation methods infer the related model and reject
+/// a column that points elsewhere. `&str` is accepted too (then name the model with `::<T>`).
+pub trait ForeignKeyRef<M, T>: ColumnRef<M> {}
+
+impl<M, T> ForeignKeyRef<M, T> for Column<M, ForeignKey<T>> {}
+
+impl<M, T> ForeignKeyRef<M, T> for &str {}
 
 /// Accepted by `order_by`: `Column<M, T>` (ascending), `Ordering<M>` (from `.asc()` / `.desc()`),
 /// or `&str` where a leading `-` means descending (Django style).

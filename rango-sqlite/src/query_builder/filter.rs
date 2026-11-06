@@ -1,5 +1,6 @@
 use rango_core::{
-    quote_ident, ColumnRef, FilterColumn, FromRow, Model, ModelValues, OrderRef, SqlValue,
+    quote_ident, ColumnRef, FilterColumn, ForeignKeyRef, FromRow, Model, ModelValues, OrderRef,
+    SqlValue,
 };
 use sqlx::SqlitePool;
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -124,6 +125,93 @@ where
         self
     }
 
+    // ── Subqueries ────────────────────────────────────────────────────────────
+    /// Keep rows that have at least one `R` pointing at them through `fk_col`,
+    /// among the rows kept by the filters `sub` adds:
+    ///
+    /// ```rust,ignore
+    /// let authors = User::filter(&pool)
+    ///     .where_exists(Article::AUTHOR_ID, |q| q.eq(Article::PUBLISHED, true))
+    ///     .all().await?;
+    /// // → WHERE EXISTS (SELECT 1 FROM "article" WHERE "article"."author_id" = "user"."id"
+    /// //                 AND ("published" = ?))
+    /// ```
+    ///
+    /// Chain after `.not()` for `NOT EXISTS`. Only `sub`'s filters are used
+    /// (its ordering, limit and relations are ignored).
+    pub fn where_exists<R>(
+        self,
+        fk_col: impl ForeignKeyRef<R, M>,
+        sub: impl FnOnce(QueryBuilder<R>) -> QueryBuilder<R>,
+    ) -> Self
+    where
+        R: Model + ModelValues + FromRow,
+    {
+        let outer = quote_ident(M::table_name());
+        // Self-referencing (e.g. parent/child on one table): alias the inner table,
+        // otherwise `"t"."id"` would resolve to the inner row.
+        let sub_alias = quote_ident("__sub");
+        let (from, inner) = if R::table_name() == M::table_name() {
+            (format!("{outer} AS {sub_alias}"), sub_alias)
+        } else {
+            let t = quote_ident(R::table_name());
+            (t.clone(), t)
+        };
+        let head = format!(
+            "EXISTS (SELECT 1 FROM {from} WHERE {inner}.{} = {outer}.{}",
+            quote_ident(fk_col.column_name()),
+            quote_ident(M::pk_column()),
+        );
+        let sub = sub(QueryBuilder::new(&self.pool));
+        self.add_subquery(head, true, sub)
+    }
+
+    /// `col IN (SELECT sub_col FROM R WHERE <sub's filters>)`:
+    ///
+    /// ```rust,ignore
+    /// let posts = Post::filter(&pool)
+    ///     .in_subquery(Post::AUTHOR_ID, User::ID, |q| q.eq(User::ACTIVE, true))
+    ///     .all().await?;
+    /// ```
+    ///
+    /// Prefer `.not().where_exists(...)` over `.not().in_subquery(...)`: `NOT IN`
+    /// matches nothing as soon as the subquery returns a NULL.
+    pub fn in_subquery<R>(
+        self,
+        col: impl ColumnRef<M>,
+        sub_col: impl ColumnRef<R>,
+        sub: impl FnOnce(QueryBuilder<R>) -> QueryBuilder<R>,
+    ) -> Self
+    where
+        R: Model + ModelValues + FromRow,
+    {
+        let head = format!(
+            "{} IN (SELECT {} FROM {}",
+            quote_ident(col.column_name()),
+            quote_ident(sub_col.column_name()),
+            quote_ident(R::table_name()),
+        );
+        let sub = sub(QueryBuilder::new(&self.pool));
+        self.add_subquery(head, false, sub)
+    }
+
+    fn add_subquery<R>(mut self, head: String, has_where: bool, sub: QueryBuilder<R>) -> Self
+    where
+        R: Model + ModelValues + FromRow,
+    {
+        let connector = std::mem::replace(&mut self.next_connector, Connector::And);
+        self.conditions.push(ConditionGroup {
+            node: ConditionNode::Subquery(Box::new(Subquery {
+                head,
+                has_where,
+                conditions: sub.conditions,
+                raw_conditions: sub.raw_conditions,
+            })),
+            connector,
+        });
+        self
+    }
+
     /// ORDER BY col ASC. Accepts `User::NAME`, `User::NAME.desc()`, or `"name"` / `"-name"` (DESC).
     pub fn order_by(mut self, col: impl OrderRef<M>) -> Self {
         let (name, descending) = col.order_parts();
@@ -169,26 +257,13 @@ where
     }
 
     pub(super) fn build_where(&self) -> (String, Vec<SqlValue>) {
-        let has_conditions = !self.conditions.is_empty();
-        let has_raw = !self.raw_conditions.is_empty();
-
-        if !has_conditions && !has_raw {
-            return (String::new(), Vec::new());
-        }
-
         let mut binds = Vec::new();
-        let mut parts: Vec<String> = Vec::new();
-
-        if has_conditions {
-            parts.push(build_conditions(&self.conditions, &mut binds));
+        let body = build_where_body(&self.conditions, &self.raw_conditions, &mut binds);
+        if body.is_empty() {
+            (body, binds)
+        } else {
+            (format!("WHERE {body}"), binds)
         }
-
-        for (sql, raw_binds) in &self.raw_conditions {
-            binds.extend(raw_binds.clone());
-            parts.push(sql.clone());
-        }
-
-        (format!("WHERE {}", parts.join(" AND ")), binds)
     }
 
     pub fn explain(&self) -> String {

@@ -47,6 +47,17 @@ enum Connector {
 enum ConditionNode {
     Single(Condition),
     Group(Vec<ConditionGroup>),
+    Subquery(Box<Subquery>),
+}
+
+/// `EXISTS (...)` / `col IN (...)` built from another `QueryBuilder`'s filters.
+#[derive(Debug, Clone)]
+struct Subquery {
+    /// SQL up to the subquery's filters, e.g. `` `col` IN (SELECT `x` FROM `t` ``.
+    head: String,
+    /// True when `head` already ends with a WHERE clause (correlated EXISTS).
+    has_where: bool,
+    conditions: Vec<ConditionGroup>,
 }
 
 #[derive(Debug, Clone)]
@@ -73,6 +84,14 @@ fn build_conditions(groups: &[ConditionGroup], binds: &mut Vec<SqlValue>) -> Str
         let expr = match &cg.node {
             ConditionNode::Single(c) => build_condition(c, binds),
             ConditionNode::Group(inner) => format!("({})", build_conditions(inner, binds)),
+            ConditionNode::Subquery(sub) => {
+                let body = build_conditions(&sub.conditions, binds);
+                match (body.is_empty(), sub.has_where) {
+                    (true, _) => format!("{})", sub.head),
+                    (false, true) => format!("{} AND ({}))", sub.head, body),
+                    (false, false) => format!("{} WHERE {})", sub.head, body),
+                }
+            }
         };
         if i == 0 {
             let expr = match &cg.connector {
@@ -154,3 +173,61 @@ pub trait RangoFilterExt: Model + ModelValues + FromRow + Sized {
 }
 
 impl<M: Model + ModelValues + FromRow> RangoFilterExt for M {}
+
+#[cfg(test)]
+mod tests {
+    use super::QueryBuilder;
+    use rango_core::{FromRow, Model, ModelValues, RangoRow, RowError, SqlValue, TableSchema};
+    use sqlx::MySqlPool;
+
+    #[derive(Debug)]
+    struct TestModel;
+
+    impl Model for TestModel {
+        fn table_name() -> &'static str {
+            "test_model"
+        }
+
+        fn schema() -> TableSchema {
+            TableSchema::default()
+        }
+    }
+
+    impl ModelValues for TestModel {
+        fn field_values(&self) -> Vec<(&'static str, SqlValue)> {
+            Vec::new()
+        }
+
+        fn pk_value(&self) -> SqlValue {
+            SqlValue::BigInt(1)
+        }
+
+        fn pk_column() -> &'static str {
+            "id"
+        }
+    }
+
+    impl FromRow for TestModel {
+        fn from_row(_row: &dyn RangoRow) -> Result<Self, RowError> {
+            Ok(Self)
+        }
+    }
+
+    #[tokio::test]
+    async fn subqueries_keep_bind_order() {
+        let pool = MySqlPool::connect_lazy("mysql://localhost/x").unwrap();
+        let (sql, binds) = QueryBuilder::<TestModel>::new(&pool)
+            .eq("a", 1i32)
+            .or_not()
+            .where_exists::<TestModel>("parent_id", |q| q.eq("b", 2i32))
+            .in_subquery::<TestModel>("c", "id", |q| q)
+            .eq("d", 3i32)
+            .build_where();
+
+        assert_eq!(
+            sql,
+            r#"WHERE `a` = ? OR NOT EXISTS (SELECT 1 FROM `test_model` AS `__sub` WHERE `__sub`.`parent_id` = `test_model`.`id` AND (`b` = ?)) AND `c` IN (SELECT `id` FROM `test_model`) AND `d` = ?"#
+        );
+        assert_eq!(format!("{:?}", binds), "[Int(1), Int(2), Int(3)]");
+    }
+}
