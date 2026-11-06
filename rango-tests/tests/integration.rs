@@ -159,6 +159,55 @@ async fn test_insert_and_get() {
 
 #[tokio::test]
 #[cfg_attr(not(feature = "integration"), ignore)]
+async fn test_select_and_prefetch_related() {
+    let pool = pool().await;
+    setup(&pool).await;
+
+    let alice = insert(&pool, user("alice@test.com")).await.unwrap();
+    let bob = insert(&pool, user("bob@test.com")).await.unwrap();
+    for title in ["first", "second"] {
+        let post = TestPost {
+            id: FieldUuid(Uuid::new_v4()),
+            author_id: ForeignKey::new(alice.id.0),
+            title: FieldVarchar(title.to_string()),
+            published: FieldBool(true),
+        };
+        insert(&pool, post).await.unwrap();
+    }
+
+    let posts = TestPost::filter(&pool)
+        .select_related::<TestUser>("author_id")
+        .all()
+        .await
+        .unwrap();
+    assert_eq!(posts.len(), 2);
+    assert!(
+        posts
+            .iter()
+            .all(|p| p.related::<TestUser>().email == alice.email)
+    );
+
+    let users = TestUser::filter(&pool)
+        .prefetch_related::<TestPost>("author_id")
+        .all()
+        .await
+        .unwrap();
+    let posts_of = |u: &TestUser| {
+        users
+            .iter()
+            .find(|w| w.id == u.id)
+            .unwrap()
+            .prefetched::<TestPost>()
+            .len()
+    };
+    assert_eq!(posts_of(&alice), 2);
+    assert_eq!(posts_of(&bob), 0);
+
+    teardown(&pool).await;
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration"), ignore)]
 async fn test_update() {
     let pool = pool().await;
     setup(&pool).await;

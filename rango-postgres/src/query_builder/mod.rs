@@ -187,10 +187,17 @@ fn build_condition(c: &Condition, binds: &mut Vec<SqlValue>, idx: &mut usize) ->
     }
 }
 
-async fn bind_and_fetch_all(pool: &PgPool, sql: &str, binds: Vec<SqlValue>) -> Result<Vec<PgRow>> {
+async fn bind_and_fetch_all<'e, E>(
+    executor: E,
+    sql: &str,
+    binds: Vec<SqlValue>,
+) -> Result<Vec<PgRow>>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Postgres>,
+{
     let q = sqlx::query(sql);
     let q = bind_sql_values(q, binds);
-    q.fetch_all(pool).await.map_err(db_err)
+    q.fetch_all(executor).await.map_err(db_err)
 }
 
 async fn bind_and_fetch_one(pool: &PgPool, sql: &str, binds: Vec<SqlValue>) -> Result<PgRow> {
