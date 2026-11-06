@@ -190,7 +190,7 @@ jobs:
           MYSQL_URL: mysql://root:rango@127.0.0.1:3306/rango_test
 
       - name: cargo test (CLI e2e, mysql)
-        run: cargo test -p rango-orm-cli --test migrations_e2e_mysql --test real_project_mysql --features integration-mysql -- --test-threads=1
+        run: cargo test -p rango-orm-cli --test migrations_e2e_mysql --test real_project_mysql --bin rango --features integration-mysql -- --test-threads=1
         env:
           MYSQL_URL: mysql://root:rango@127.0.0.1:3306/rango_test
 
