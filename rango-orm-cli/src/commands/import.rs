@@ -43,7 +43,19 @@ pub async fn run(
         return Ok(());
     }
 
-    let count = insert_rows(backend, database_url, &rows, table, replace, None).await?;
+    let count = insert_rows(
+        backend,
+        database_url,
+        &rows,
+        table,
+        if replace {
+            OnConflict::Replace
+        } else {
+            OnConflict::Skip
+        },
+        None,
+    )
+    .await?;
 
     println!("✅ Imported {} row(s) from {}", count, input);
     Ok(())
@@ -51,18 +63,31 @@ pub async fn run(
 
 /// Insert `rows` in one transaction. `setup_sql` (DDL for `restore`) runs first in that
 /// same transaction; MySQL DDL auto-commits, so there it is not rolled back.
+/// What to do when a row collides with an existing one.
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) enum OnConflict {
+    /// Keep the existing row (`rango import`).
+    Skip,
+    /// Overwrite it (`rango import --replace`).
+    Replace,
+    /// Error out and roll back (`rango restore`): dropping rows would be data loss.
+    Fail,
+}
+
 pub(crate) async fn insert_rows(
     backend: BackendKind,
     database_url: &str,
     rows: &[serde_json::Map<String, serde_json::Value>],
     table: Option<&str>,
-    replace: bool,
+    on_conflict: OnConflict,
     setup_sql: Option<&str>,
 ) -> Result<usize> {
     match backend {
-        BackendKind::Sqlite => import_sqlite(database_url, rows, table, replace, setup_sql).await,
-        BackendKind::Mysql => import_mysql(database_url, rows, table, replace, setup_sql).await,
-        _ => import_postgres(database_url, rows, table, replace, setup_sql).await,
+        BackendKind::Sqlite => {
+            import_sqlite(database_url, rows, table, on_conflict, setup_sql).await
+        }
+        BackendKind::Mysql => import_mysql(database_url, rows, table, on_conflict, setup_sql).await,
+        _ => import_postgres(database_url, rows, table, on_conflict, setup_sql).await,
     }
 }
 
@@ -154,7 +179,7 @@ async fn import_postgres(
     database_url: &str,
     rows: &[serde_json::Map<String, serde_json::Value>],
     table: Option<&str>,
-    replace: bool,
+    on_conflict: OnConflict,
     setup_sql: Option<&str>,
 ) -> Result<usize> {
     let pool = sqlx::PgPool::connect(database_url)
@@ -173,7 +198,7 @@ async fn import_postgres(
     let mut total = 0;
 
     for table in &order {
-        total += insert_rows_postgres(&mut tx, table, &groups[table], replace).await?;
+        total += insert_rows_postgres(&mut tx, table, &groups[table], on_conflict).await?;
     }
     resync_identities_postgres(&mut tx, &order).await?;
 
@@ -213,7 +238,7 @@ async fn insert_rows_postgres(
     conn: &mut sqlx::PgConnection,
     table: &str,
     rows: &[&serde_json::Map<String, serde_json::Value>],
-    replace: bool,
+    on_conflict: OnConflict,
 ) -> Result<usize> {
     if rows.is_empty() {
         return Ok(0);
@@ -230,15 +255,17 @@ async fn insert_rows_postgres(
         .map(|c| quote_ident(c))
         .collect::<Vec<_>>()
         .join(", ");
-    let conflict = if replace {
-        let updates = cols
-            .iter()
-            .map(|c| format!("{} = EXCLUDED.{}", quote_ident(c), quote_ident(c)))
-            .collect::<Vec<_>>()
-            .join(", ");
-        format!("ON CONFLICT DO UPDATE SET {}", updates)
-    } else {
-        "ON CONFLICT DO NOTHING".to_string()
+    let conflict = match on_conflict {
+        OnConflict::Replace => {
+            let updates = cols
+                .iter()
+                .map(|c| format!("{} = EXCLUDED.{}", quote_ident(c), quote_ident(c)))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("ON CONFLICT DO UPDATE SET {}", updates)
+        }
+        OnConflict::Skip => "ON CONFLICT DO NOTHING".to_string(),
+        OnConflict::Fail => String::new(),
     };
     // The row travels as one JSON parameter; Postgres casts each value to the column
     // type (uuid, timestamps, booleans, ...). Names are quoted, values are bound.
@@ -275,7 +302,7 @@ async fn import_sqlite(
     database_url: &str,
     rows: &[serde_json::Map<String, serde_json::Value>],
     table: Option<&str>,
-    replace: bool,
+    on_conflict: OnConflict,
     setup_sql: Option<&str>,
 ) -> Result<usize> {
     let pool = rango_orm_sqlite::connect(database_url)
@@ -295,7 +322,7 @@ async fn import_sqlite(
     let mut total = 0;
 
     for (table, table_rows) in groups {
-        total += insert_rows_sqlite(&mut tx, &table, &table_rows, replace).await?;
+        total += insert_rows_sqlite(&mut tx, &table, &table_rows, on_conflict).await?;
     }
 
     tx.commit().await.context("Failed to commit import")?;
@@ -306,7 +333,7 @@ async fn insert_rows_sqlite(
     conn: &mut sqlx::SqliteConnection,
     table: &str,
     rows: &[&serde_json::Map<String, serde_json::Value>],
-    replace: bool,
+    on_conflict: OnConflict,
 ) -> Result<usize> {
     if rows.is_empty() {
         return Ok(0);
@@ -328,10 +355,10 @@ async fn insert_rows_sqlite(
         let placeholders = cols.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
         // INSERT OR REPLACE replaces the whole row. Skipping uses ON CONFLICT DO NOTHING,
         // not INSERT OR IGNORE, which would also swallow NOT NULL / CHECK violations.
-        let (verb, suffix) = if replace {
-            ("INSERT OR REPLACE", "")
-        } else {
-            ("INSERT", " ON CONFLICT DO NOTHING")
+        let (verb, suffix) = match on_conflict {
+            OnConflict::Replace => ("INSERT OR REPLACE", ""),
+            OnConflict::Skip => ("INSERT", " ON CONFLICT DO NOTHING"),
+            OnConflict::Fail => ("INSERT", ""),
         };
         let sql = format!(
             "{} INTO {} ({}) VALUES ({}){}",
@@ -381,26 +408,32 @@ async fn import_mysql(
     database_url: &str,
     rows: &[serde_json::Map<String, serde_json::Value>],
     table: Option<&str>,
-    replace: bool,
+    on_conflict: OnConflict,
     setup_sql: Option<&str>,
 ) -> Result<usize> {
     let pool = rango_orm_mysql::connect(database_url)
         .await
         .context("Failed to connect to MySQL")?;
 
-    // One transaction with FK checks off (session-scoped, like mysqldump): rows can
-    // arrive in any table order, and a failed import leaves nothing behind.
-    let mut tx = pool.begin().await.context("Failed to start transaction")?;
+    // FK checks off (session-scoped, like mysqldump): rows can arrive in any table
+    // order. The DDL runs first, outside the transaction: it would implicitly commit it.
+    let mut conn = pool
+        .acquire()
+        .await
+        .context("Failed to acquire a connection")?;
     sqlx::query("SET FOREIGN_KEY_CHECKS = 0")
-        .execute(&mut *tx)
+        .execute(&mut *conn)
         .await
         .context("Failed to disable foreign key checks")?;
-    run_setup::<sqlx::MySql>(&mut tx, setup_sql).await?;
+    run_setup::<sqlx::MySql>(&mut conn, setup_sql).await?;
+    let mut tx = sqlx::Connection::begin(&mut *conn)
+        .await
+        .context("Failed to start transaction")?;
 
     let groups = group_by_table(rows, table);
     let mut total = 0;
     for (table, table_rows) in groups {
-        total += insert_rows_mysql(&mut tx, &table, &table_rows, replace).await?;
+        total += insert_rows_mysql(&mut tx, &table, &table_rows, on_conflict).await?;
     }
 
     sqlx::query("SET FOREIGN_KEY_CHECKS = 1")
@@ -415,7 +448,7 @@ async fn insert_rows_mysql(
     conn: &mut sqlx::MySqlConnection,
     table: &str,
     rows: &[&serde_json::Map<String, serde_json::Value>],
-    replace: bool,
+    on_conflict: OnConflict,
 ) -> Result<usize> {
     if rows.is_empty() {
         return Ok(0);
@@ -441,25 +474,27 @@ async fn insert_rows_mysql(
             .collect::<Vec<_>>()
             .join(", ");
         let placeholders = cols.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
-        let conflict = if replace {
-            let updates = cols
-                .iter()
-                .map(|c| {
-                    format!(
-                        "{} = VALUES({})",
-                        quote_ident_mysql(c),
-                        quote_ident_mysql(c)
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!("ON DUPLICATE KEY UPDATE {}", updates)
-        } else {
-            format!(
+        let conflict = match on_conflict {
+            OnConflict::Replace => {
+                let updates = cols
+                    .iter()
+                    .map(|c| {
+                        format!(
+                            "{} = VALUES({})",
+                            quote_ident_mysql(c),
+                            quote_ident_mysql(c)
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("ON DUPLICATE KEY UPDATE {}", updates)
+            }
+            OnConflict::Skip => format!(
                 "ON DUPLICATE KEY UPDATE {} = {}",
                 quote_ident_mysql(cols[0]),
                 quote_ident_mysql(cols[0])
-            )
+            ),
+            OnConflict::Fail => String::new(),
         };
         let sql = format!(
             "INSERT INTO {} ({}) VALUES ({}) {}",

@@ -271,3 +271,14 @@ async fn restore_is_all_or_nothing() {
     assert!(!p.cli("b.db", &["restore", &f]).status.success());
     assert_eq!(p.count("b.db", "t_author").await, None);
 }
+
+#[tokio::test]
+async fn restore_fails_on_conflict_instead_of_dropping_rows() {
+    let p = Project::new("conflict").await;
+    assert_ok(&p.cli("a.db", &["dump", "-o", "d.json"]));
+    // Restoring into the database it came from collides on every primary key.
+    let err = failure_stderr(&p.cli("a.db", &["restore", "d.json"]));
+    assert!(err.contains("t_author"), "{err}");
+    assert_eq!(p.count("a.db", "t_author").await, Some(2));
+    assert_eq!(p.count("a.db", "t_book").await, Some(1));
+}

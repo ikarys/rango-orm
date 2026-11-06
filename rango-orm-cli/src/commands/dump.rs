@@ -166,7 +166,7 @@ pub async fn restore(database_url: &str, input: &str) -> Result<()> {
         database_url,
         &rows,
         None,
-        false,
+        import::OnConflict::Fail,
         setup_sql.as_deref(),
     )
     .await?;
