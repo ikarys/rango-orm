@@ -743,3 +743,42 @@ pub struct User {
     drop_named(&pool, &["users"]).await;
     project.remove();
 }
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration"), ignore)]
+async fn circular_foreign_keys_migrate() {
+    let pool = PgPool::connect(&database_url())
+        .await
+        .expect("connect to postgres");
+    let project = Project::new("cycle");
+    drop_named(&pool, &["e2e_cycle_projects", "e2e_cycle_generations"]).await;
+
+    project.write_models(
+        r#"
+#[derive(Model)]
+#[model(table = "e2e_cycle_projects")]
+pub struct Project {
+    pub id: FieldUuid,
+    pub identity: Option<ForeignKey<Generation>>,
+}
+
+#[derive(Model)]
+#[model(table = "e2e_cycle_generations")]
+pub struct Generation {
+    pub id: FieldUuid,
+    pub project: ForeignKey<Project>,
+}
+"#,
+    );
+    assert_success(&project.makemigrations(), "makemigrations");
+    assert!(project.latest_migration_sql().contains("ADD CONSTRAINT"));
+    assert_success(&project.migrate(), "migrate");
+
+    // Snapshot keeps the references: a second run sees no change.
+    let again = project.makemigrations();
+    assert_success(&again, "second makemigrations");
+    assert_eq!(project.migration_sql_files().len(), 1);
+
+    drop_named(&pool, &["e2e_cycle_projects", "e2e_cycle_generations"]).await;
+    project.remove();
+}
