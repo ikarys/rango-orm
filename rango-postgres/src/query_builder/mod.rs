@@ -89,15 +89,14 @@ struct SelectRelatedSpec {
     from_row: FromRowFn,
 }
 
-/// Spec for a `.prefetch_related(related_fk_col)` call.
-/// The FK is on R's table: `r.related_fk_col = m.pk`.
+/// Spec for a `.prefetch_related(..)` call: a reverse FK or a M2M field.
 struct PrefetchSpec {
-    /// Column on R's table pointing back to M.
-    related_fk_col: String,
+    /// SQL up to and including the key expression, without the `= ANY(..)` / `IN (..)` part.
+    select: String,
+    /// Name of the result column holding M's primary key value in each fetched row.
+    key_col: String,
     /// `TypeId::of::<Vec<R>>()` — used as the `WithRelated` cache key.
     vec_type_id: TypeId,
-    /// R's table name.
-    table_name: &'static str,
     /// Type-erased `R::from_row`.
     from_row: FromRowFn,
     /// Collects `Vec<Box<dyn Any>>` into a `Box<dyn Any>` containing `Vec<R>`.

@@ -80,24 +80,16 @@ where
 
             for chunk in unique_pks.chunks(PREFETCH_CHUNK) {
                 let placeholders = vec!["?"; chunk.len()].join(", ");
-                let prefetch_sql = format!(
-                    "SELECT * FROM {} WHERE {} IN ({})",
-                    quote_ident(spec.table_name),
-                    quote_ident(&spec.related_fk_col),
-                    placeholders
-                );
+                let prefetch_sql = format!("{} IN ({})", spec.select, placeholders);
                 let prefetch_rows =
                     bind_and_fetch_all(&mut *conn, &prefetch_sql, chunk.to_vec()).await?;
 
                 // Group boxed R items by the FK value they carry.
                 for row in &prefetch_rows {
                     let r_row = SqliteRowRef(row);
-                    if let Some(fk_key) = row_key(&r_row, &spec.related_fk_col, &like) {
+                    if let Some(fk_key) = row_key(&r_row, &spec.key_col, &like) {
                         let boxed = (spec.from_row)(&r_row).map_err(|e| {
-                            Error::Decode(format!(
-                                "prefetch_related({}): {}",
-                                spec.related_fk_col, e
-                            ))
+                            Error::Decode(format!("prefetch_related({}): {}", spec.key_col, e))
                         })?;
                         grouped.entry(fk_key).or_default().push(boxed);
                     }

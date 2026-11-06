@@ -62,6 +62,8 @@ This creates a pivot table `myapp_article_myapp_tag` with two UUID columns.
 
 ### M2M operations
 
+`M2M` is Postgres-only for now; `prefetch_related` on a M2M field works on every backend.
+
 ```rust
 // Add a relation
 M2M::<Article, Tag>::add(&pool, &article, &tag).await?;
@@ -106,6 +108,8 @@ Rango executes:
 2. `SELECT * FROM comments WHERE post_id IN (...)`
 
 Then merges in memory — no N+1, no magic.
+
+`ManyToMany` fields work the same way: `.prefetch_related(Article::TAGS)` loads every article's tags in one query through the pivot table, then `article.prefetched::<Tag>()`.
 
 ## Nullable FK
 

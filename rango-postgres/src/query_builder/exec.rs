@@ -79,11 +79,7 @@ where
             // `= ANY($1)`: one array parameter, so the statement text (and its cached
             // plan) is the same whatever the number of keys, and there is no
             // 65 535-parameter cap.
-            let prefetch_sql = format!(
-                "SELECT * FROM {} WHERE {} = ANY($1)",
-                quote_ident(spec.table_name),
-                quote_ident(&spec.related_fk_col),
-            );
+            let prefetch_sql = format!("{} = ANY($1)", spec.select);
             let like = unique_pks[0].clone();
             let prefetch_rows = fetch_by_keys(&mut *conn, &prefetch_sql, unique_pks).await?;
 
@@ -91,9 +87,9 @@ where
             let mut grouped: HashMap<String, Vec<Box<dyn Any + Send + Sync>>> = HashMap::new();
             for row in &prefetch_rows {
                 let r_row = PgRangoRow2::new(row);
-                if let Some(fk_key) = row_key(&r_row, &spec.related_fk_col, &like) {
+                if let Some(fk_key) = row_key(&r_row, &spec.key_col, &like) {
                     let boxed = (spec.from_row)(&r_row).map_err(|e| {
-                        Error::Decode(format!("prefetch_related({}): {}", spec.related_fk_col, e))
+                        Error::Decode(format!("prefetch_related({}): {}", spec.key_col, e))
                     })?;
                     grouped.entry(fk_key).or_default().push(boxed);
                 }

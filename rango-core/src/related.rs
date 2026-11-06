@@ -142,6 +142,16 @@ where
 }
 
 /// Hashable key for a primary / foreign key value (UUID, integer or text).
+/// M2M pivot naming shared by `M2M` ops, `prefetch_related` and `rango makemigrations`:
+/// `(pivot_table, from_col, to_col)` = `("{from}_{to}", "{from}_id", "{to}_id")`.
+pub fn m2m_pivot(from_table: &str, to_table: &str) -> (String, String, String) {
+    (
+        format!("{from_table}_{to_table}"),
+        format!("{from_table}_id"),
+        format!("{to_table}_id"),
+    )
+}
+
 #[doc(hidden)]
 pub fn sql_value_key(v: &SqlValue) -> Option<String> {
     match v {
