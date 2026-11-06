@@ -20,6 +20,14 @@ struct TestUser {
     score: Option<FieldInt>,
 }
 
+#[derive(Model, Debug, Clone)]
+#[model(table = "test_post")]
+struct TestPost {
+    id: FieldUuid,
+    author_id: ForeignKey<TestUser>,
+    title: FieldVarchar<1, 100>,
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 async fn pool() -> SqlitePool {
@@ -51,6 +59,60 @@ fn user(email: &str) -> TestUser {
         active: FieldBool(true),
         score: None,
     }
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-sqlite"), ignore)]
+async fn test_sqlite_select_and_prefetch_related() {
+    let pool = pool().await;
+    setup(&pool).await;
+    sqlx::query(
+        r#"CREATE TABLE "test_post" (
+            "id"        TEXT PRIMARY KEY,
+            "author_id" TEXT NOT NULL REFERENCES "test_user" ("id"),
+            "title"     TEXT NOT NULL
+        )"#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let alice = insert(&pool, user("alice@sqlite.com")).await.unwrap();
+    let bob = insert(&pool, user("bob@sqlite.com")).await.unwrap();
+    for title in ["first", "second"] {
+        let post = TestPost {
+            id: FieldUuid(Uuid::new_v4()),
+            author_id: ForeignKey::new(alice.id.0),
+            title: FieldVarchar(title.to_string()),
+        };
+        insert(&pool, post).await.unwrap();
+    }
+
+    let q = TestPost::filter(&pool)
+        .select_related(TestPost::AUTHOR_ID)
+        .order_by("-title")
+        .limit(1);
+    assert!(q.explain().contains("LEFT JOIN"), "{}", q.explain());
+    let posts = q.all().await.unwrap();
+    assert_eq!(posts.len(), 1);
+    assert_eq!(posts[0].title.0, "second");
+    assert_eq!(posts[0].related::<TestUser>().email, alice.email);
+
+    let users = TestUser::filter(&pool)
+        .prefetch_related(TestPost::AUTHOR_ID)
+        .all()
+        .await
+        .unwrap();
+    let posts_of = |u: &TestUser| {
+        users
+            .iter()
+            .find(|w| w.id == u.id)
+            .unwrap()
+            .prefetched::<TestPost>()
+            .len()
+    };
+    assert_eq!(posts_of(&alice), 2);
+    assert_eq!(posts_of(&bob), 0);
 }
 
 // ── CRUD ──────────────────────────────────────────────────────────────────────

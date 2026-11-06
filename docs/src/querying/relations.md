@@ -65,6 +65,8 @@ SELECT * FROM "myapp_post"
 SELECT * FROM "myapp_comment" WHERE "post_id" = ANY($1)  -- $1: array of post ids
 ```
 
+SQLite and MySQL have no array parameters: they send `WHERE "post_id" IN (?, ?, ...)` in batches of 900 keys. Every backend runs the main query and the prefetch queries on one connection, and `all()` returns `Vec<WithRelated<M>>` everywhere (it derefs to `M`, so `post.title` works as before).
+
 ## Combining both
 
 ```rust

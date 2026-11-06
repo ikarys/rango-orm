@@ -8,6 +8,7 @@ pub mod fields;
 pub mod hooks;
 pub mod model;
 pub mod query;
+pub mod related;
 pub mod row;
 pub mod schema;
 
@@ -25,6 +26,7 @@ pub use model::{Model, ModelMixin};
 pub use query::{
     Filterable, ModelValues, SqlValue, ToSqlValue, insert_values, quote_ident, quote_ident_mysql,
 };
+pub use related::WithRelated;
 pub use row::{FromRow, RangoRow, RowError};
 pub use schema::{
     ColumnDef, ColumnType, DefaultValue, FkReference, ReferentialAction, TableSchema,
