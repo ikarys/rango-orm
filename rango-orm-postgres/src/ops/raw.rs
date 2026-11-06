@@ -17,6 +17,7 @@ use super::*;
 /// ```rust,ignore
 /// let rows = rango::raw::<User>(&pool, "SELECT * FROM users WHERE role = $1", vec![SqlValue::Text("admin".into())]).await?;
 /// ```
+#[tracing::instrument(name = "db.query", skip_all, fields(db.system = "postgresql", db.operation = "SELECT", db.rows = tracing::field::Empty, otel.kind = "client"))]
 pub async fn raw<'e, E, M>(executor: E, sql: &str, params: Vec<SqlValue>) -> Result<Vec<M>>
 where
     E: Executor<'e, Database = Postgres>,
@@ -24,10 +25,12 @@ where
 {
     let q = bind_sql_values(sqlx::query(sql), params);
     let rows = q.fetch_all(executor).await.map_err(db_err)?;
+    tracing::Span::current().record("db.rows", rows.len());
     decode_all::<M>(rows)
 }
 
 /// Execute a raw SQL query and return a single scalar value (first column of first row).
+#[tracing::instrument(name = "db.query", skip_all, fields(db.system = "postgresql", db.operation = "SELECT", db.rows = tracing::field::Empty, otel.kind = "client"))]
 pub async fn raw_scalar<'e, E, T>(executor: E, sql: &str, params: Vec<SqlValue>) -> Result<T>
 where
     E: Executor<'e, Database = Postgres>,
@@ -40,6 +43,7 @@ where
 }
 
 /// Execute a raw SQL statement (INSERT/UPDATE/DELETE/DDL) — returns rows affected.
+#[tracing::instrument(name = "db.query", skip_all, fields(db.system = "postgresql", db.operation = "EXECUTE", db.rows = tracing::field::Empty, otel.kind = "client"))]
 pub async fn raw_execute<'e, E>(executor: E, sql: &str, params: Vec<SqlValue>) -> Result<u64>
 where
     E: Executor<'e, Database = Postgres>,

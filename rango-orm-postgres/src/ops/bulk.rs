@@ -17,6 +17,7 @@ use super::*;
 /// ```rust,ignore
 /// let n = rango::bulk_create(&pool, &users).await?;
 /// ```
+#[tracing::instrument(name = "db.query", skip_all, fields(db.system = "postgresql", db.operation = "INSERT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
 pub async fn bulk_create<'a, A, M>(executor: A, models: &[M]) -> Result<usize>
 where
     A: Acquire<'a, Database = Postgres>,
@@ -51,6 +52,7 @@ where
 /// ```rust,ignore
 /// let n = rango::bulk_update(&pool, &users, &["email", "status"]).await?;
 /// ```
+#[tracing::instrument(name = "db.query", skip_all, fields(db.system = "postgresql", db.operation = "UPDATE", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
 pub async fn bulk_update<'a, A, M>(executor: A, models: &[M], fields: &[&str]) -> Result<usize>
 where
     A: Acquire<'a, Database = Postgres>,
@@ -86,6 +88,7 @@ where
 /// ```rust,ignore
 /// let n = rango::bulk_upsert(&pool, &users, &["email"]).await?;
 /// ```
+#[tracing::instrument(name = "db.query", skip_all, fields(db.system = "postgresql", db.operation = "INSERT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
 pub async fn bulk_upsert<'a, A, M>(executor: A, models: &[M], conflict_on: &[&str]) -> Result<usize>
 where
     A: Acquire<'a, Database = Postgres>,

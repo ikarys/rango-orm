@@ -840,3 +840,50 @@ async fn test_unknown_column_is_rejected() {
             .map(|_| ()),
     );
 }
+
+/// Minimal subscriber: records `(span name, "field=value" pairs)` for every new span.
+#[derive(Clone, Default)]
+#[allow(clippy::type_complexity)]
+struct SpanLog(std::sync::Arc<std::sync::Mutex<Vec<(String, Vec<String>)>>>);
+
+impl tracing::Subscriber for SpanLog {
+    fn enabled(&self, _: &tracing::Metadata<'_>) -> bool {
+        true
+    }
+    fn new_span(&self, attrs: &tracing::span::Attributes<'_>) -> tracing::span::Id {
+        struct V(Vec<String>);
+        impl tracing::field::Visit for V {
+            fn record_debug(&mut self, f: &tracing::field::Field, v: &dyn std::fmt::Debug) {
+                self.0.push(format!("{}={:?}", f.name(), v));
+            }
+        }
+        let mut v = V(vec![]);
+        attrs.record(&mut v);
+        let mut log = self.0.lock().unwrap();
+        log.push((attrs.metadata().name().to_string(), v.0));
+        tracing::span::Id::from_u64(log.len() as u64)
+    }
+    fn record(&self, _: &tracing::span::Id, _: &tracing::span::Record<'_>) {}
+    fn record_follows_from(&self, _: &tracing::span::Id, _: &tracing::span::Id) {}
+    fn event(&self, _: &tracing::Event<'_>) {}
+    fn enter(&self, _: &tracing::span::Id) {}
+    fn exit(&self, _: &tracing::span::Id) {}
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-sqlite"), ignore)]
+async fn test_sqlite_select_emits_db_query_span() {
+    let pool = pool().await;
+    setup(&pool).await;
+    let log = SpanLog::default();
+    let _guard = tracing::subscriber::set_default(log.clone());
+    TestUser::filter(&pool).all().await.unwrap();
+    let spans = log.0.lock().unwrap();
+    let (_, fields) = spans
+        .iter()
+        .find(|(name, _)| name == "db.query")
+        .expect("no db.query span");
+    assert!(fields.contains(&"db.sql.table=\"test_user\"".to_string()));
+    assert!(fields.contains(&"db.operation=\"SELECT\"".to_string()));
+    assert!(fields.contains(&"db.system=\"sqlite\"".to_string()));
+}
