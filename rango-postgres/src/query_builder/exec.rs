@@ -5,7 +5,7 @@ use rango_core::{ColumnRef, FromRow, Model, ModelValues, SqlValue, quote_ident};
 use rango_core::{Error, Result};
 use sqlx::Postgres;
 use std::any::Any;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 // ─── Bind helpers ─────────────────────────────────────────────────────────────
 use sqlx::Row;
 
@@ -74,13 +74,12 @@ where
             }
 
             // Deduplicate FK values while preserving order.
-            let mut seen: Vec<String> = Vec::new();
+            let mut seen: HashSet<String> = HashSet::new();
             let mut unique_vals: Vec<SqlValue> = Vec::new();
             for (_, v) in &indexed_fks {
                 if let Some(k) = sql_value_key(v)
-                    && !seen.contains(&k)
+                    && seen.insert(k)
                 {
-                    seen.push(k);
                     unique_vals.push(v.clone());
                 }
             }
@@ -127,13 +126,12 @@ where
                 .map(|(i, wr)| (i, wr.inner.pk_value()))
                 .collect();
 
-            let mut seen: Vec<String> = Vec::new();
+            let mut seen: HashSet<String> = HashSet::new();
             let mut unique_pks: Vec<SqlValue> = Vec::new();
             for (_, v) in &indexed_pks {
                 if let Some(k) = sql_value_key(v)
-                    && !seen.contains(&k)
+                    && seen.insert(k)
                 {
-                    seen.push(k);
                     unique_pks.push(v.clone());
                 }
             }
