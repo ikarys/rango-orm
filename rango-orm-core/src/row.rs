@@ -18,6 +18,7 @@ pub trait RangoRow {
     fn get_i64(&self, col: &str) -> Result<i64, RowError>;
     fn get_f32(&self, col: &str) -> Result<f32, RowError>;
     fn get_f64(&self, col: &str) -> Result<f64, RowError>;
+    fn get_decimal(&self, col: &str) -> Result<rust_decimal::Decimal, RowError>;
     fn get_string(&self, col: &str) -> Result<String, RowError>;
     fn get_bytes(&self, col: &str) -> Result<Vec<u8>, RowError>;
     fn get_uuid(&self, col: &str) -> Result<uuid::Uuid, RowError>;

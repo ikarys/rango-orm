@@ -44,7 +44,16 @@ pub struct FieldFloat(pub f32);
 pub struct FieldDouble(pub f64);
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct FieldDecimal<const PRECISION: u8, const SCALE: u8>(pub f64);
+pub struct FieldDecimal<const PRECISION: u8, const SCALE: u8>(pub rust_decimal::Decimal);
+
+impl<const P: u8, const S: u8> FieldDecimal<P, S> {
+    /// Wraps `value` at the column scale (`12.5` becomes `12.50` for `FieldDecimal<10, 2>`),
+    /// so a value read back has the same digits the database stores.
+    pub fn from_decimal(mut value: rust_decimal::Decimal) -> Self {
+        value.rescale(u32::from(S));
+        Self(value)
+    }
+}
 
 // ─── String fields ───────────────────────────────────────────────────────────
 
@@ -343,7 +352,13 @@ impl<const MIN: i64, const MAX: i64> ToSqlValue for FieldRange<MIN, MAX> {
 }
 impl<const P: u8, const S: u8> ToSqlValue for FieldDecimal<P, S> {
     fn to_sql_value(&self) -> SqlValue {
-        SqlValue::Double(self.0)
+        SqlValue::Decimal(self.0)
+    }
+}
+impl<const P: u8, const S: u8> ToSqlValue for Option<FieldDecimal<P, S>> {
+    fn to_sql_value(&self) -> SqlValue {
+        self.as_ref()
+            .map_or(SqlValue::NullDecimal, |v| v.to_sql_value())
     }
 }
 
@@ -702,9 +717,9 @@ impl<const MIN: i64, const MAX: i64> FilterValue<FieldRange<MIN, MAX>> for i64 {
         SqlValue::BigInt(self)
     }
 }
-impl<const P: u8, const S: u8> FilterValue<FieldDecimal<P, S>> for f64 {
+impl<const P: u8, const S: u8> FilterValue<FieldDecimal<P, S>> for rust_decimal::Decimal {
     fn into_sql_value(self) -> SqlValue {
-        SqlValue::Double(self)
+        SqlValue::Decimal(self)
     }
 }
 impl<M> FilterValue<ForeignKey<M>> for Uuid {

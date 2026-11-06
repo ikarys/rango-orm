@@ -9,6 +9,7 @@ impl SqlValue {
                 | SqlValue::NullBigInt
                 | SqlValue::NullFloat
                 | SqlValue::NullDouble
+                | SqlValue::NullDecimal
                 | SqlValue::NullText
                 | SqlValue::NullBytes
                 | SqlValue::NullUuid
@@ -31,6 +32,7 @@ pub enum SqlValue {
     NullBigInt,
     NullFloat,
     NullDouble,
+    NullDecimal,
     NullText,
     NullBytes,
     NullUuid,
@@ -45,6 +47,7 @@ pub enum SqlValue {
     BigInt(i64),
     Float(f32),
     Double(f64),
+    Decimal(rust_decimal::Decimal),
     Text(String),
     Bytes(Vec<u8>),
     Uuid(uuid::Uuid),
@@ -99,6 +102,11 @@ impl From<f32> for SqlValue {
 impl From<f64> for SqlValue {
     fn from(v: f64) -> Self {
         SqlValue::Double(v)
+    }
+}
+impl From<rust_decimal::Decimal> for SqlValue {
+    fn from(v: rust_decimal::Decimal) -> Self {
+        SqlValue::Decimal(v)
     }
 }
 impl From<uuid::Uuid> for SqlValue {

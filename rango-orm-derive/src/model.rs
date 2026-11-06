@@ -492,7 +492,7 @@ pub(crate) fn field_type_to_getter(
             let (p, sc) = parse_two_generics(s, "FieldDecimal");
             let p_lit = proc_macro2::Literal::u8_unsuffixed(p as u8);
             let sc_lit = proc_macro2::Literal::u8_unsuffixed(sc as u8);
-            quote! { row.get_f64(#col).map(|v| #core::FieldDecimal::<#p_lit, #sc_lit>(v))? }
+            quote! { row.get_decimal(#col).map(#core::FieldDecimal::<#p_lit, #sc_lit>::from_decimal)? }
         }
         s if s.starts_with("FieldRange<") => {
             let (min, max) = parse_two_generics_i64(s, "FieldRange");

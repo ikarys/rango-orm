@@ -130,14 +130,24 @@ pub(crate) async fn binary_columns_postgres(
     conn: &mut sqlx::PgConnection,
     table: &str,
 ) -> Result<HashSet<String>> {
+    columns_of_type_postgres(conn, table, "bytea").await
+}
+
+/// Columns of a Postgres table whose `information_schema` data type is `data_type`.
+pub(crate) async fn columns_of_type_postgres(
+    conn: &mut sqlx::PgConnection,
+    table: &str,
+    data_type: &str,
+) -> Result<HashSet<String>> {
     let cols: Vec<String> = sqlx::query_scalar(
         "SELECT column_name::text FROM information_schema.columns \
-         WHERE table_schema = current_schema() AND table_name = $1 AND data_type = 'bytea'",
+         WHERE table_schema = current_schema() AND table_name = $1 AND data_type = $2",
     )
     .bind(table)
+    .bind(data_type)
     .fetch_all(conn)
     .await
-    .context("Failed to read binary columns")?;
+    .context("Failed to read column types")?;
     Ok(cols.into_iter().collect())
 }
 
