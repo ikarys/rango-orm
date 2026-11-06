@@ -4,7 +4,7 @@ A Django-inspired async ORM for Rust: define a struct, Rango generates the schem
 
 [![CI](https://github.com/ikarys/rango-orm/actions/workflows/ci.yml/badge.svg)](https://github.com/ikarys/rango-orm/actions/workflows/ci.yml) [![codecov](https://codecov.io/gh/ikarys/rango-orm/graph/badge.svg)](https://codecov.io/gh/ikarys/rango-orm)
 
-> Beta (`0.1.0-beta.3`, on crates.io as [`rango-orm`](https://crates.io/crates/rango-orm)): the API may still change between betas.
+> `0.1.0`, on crates.io as [`rango-orm`](https://crates.io/crates/rango-orm). Pre-1.0: a `0.x` minor release may still break the API.
 
 ## Why Rango
 
@@ -67,20 +67,20 @@ rango migrate                   # applies pending migrations (reads DATABASE_URL
 
 ## Installation
 
-Rango is in beta: pin the version, the API may still change between betas. The package is `rango-orm`; the crate you import is `rango` (`use rango::prelude::*`).
+Rango is pre-1.0: a `0.x` minor release may still break the API. The package is `rango-orm`; the crate you import is `rango` (`use rango::prelude::*`).
 
 ```toml
 [dependencies]
-rango-orm = "0.1.0-beta.3" # PostgreSQL, default
+rango-orm = "0.1" # PostgreSQL, default
 # SQLite variant:
-# rango-orm = { version = "0.1.0-beta.3", default-features = false, features = ["sqlite"] }
+# rango-orm = { version = "0.1", default-features = false, features = ["sqlite"] }
 # MySQL / MariaDB variant:
-# rango-orm = { version = "0.1.0-beta.3", default-features = false, features = ["mysql"] }
+# rango-orm = { version = "0.1", default-features = false, features = ["mysql"] }
 tokio = { version = "1", features = ["full"] }
 ```
 
 ```bash
-cargo install rango-orm-cli --version 0.1.0-beta.3
+cargo install rango-orm-cli --version 0.1.0
 ```
 
 In production, pass the URL via `DATABASE_URL`; never put credentials in `rango.toml`.

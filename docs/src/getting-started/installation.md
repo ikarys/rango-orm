@@ -2,20 +2,20 @@
 
 ## Add to your project
 
-Rango is in beta: pin the version, the API may still change between betas. The package is `rango-orm`; the crate you import is still `rango`.
+Rango is pre-1.0: a `0.x` minor release may still break the API. The package is `rango-orm`; the crate you import is still `rango`.
 
 ```toml
 # Cargo.toml
 
 [dependencies]
 # PostgreSQL backend (default)
-rango-orm = "0.1.0-beta.3"
+rango-orm = "0.1"
 
 # SQLite backend
-rango-orm = { version = "0.1.0-beta.3", default-features = false, features = ["sqlite"] }
+rango-orm = { version = "0.1", default-features = false, features = ["sqlite"] }
 
 # MySQL 8.0+ / MariaDB 10.6+ backend
-rango-orm = { version = "0.1.0-beta.3", default-features = false, features = ["mysql"] }
+rango-orm = { version = "0.1", default-features = false, features = ["mysql"] }
 
 tokio = { version = "1", features = ["full"] }
 ```
@@ -23,7 +23,7 @@ tokio = { version = "1", features = ["full"] }
 ## Install the CLI
 
 ```bash
-cargo install rango-orm-cli --version 0.1.0-beta.3
+cargo install rango-orm-cli --version 0.1.0
 ```
 
 This installs the `rango` binary.
