@@ -76,6 +76,99 @@ impl Drop for Project {
     }
 }
 
+pub mod scenario;
+
+/// Rows of a `rango dump --data-only` as `table -> sorted rows`, so two dumps compare
+/// regardless of row order.
+pub fn dump_rows(
+    p: &Project,
+    url: &str,
+    only: &[String],
+) -> std::collections::BTreeMap<String, Vec<String>> {
+    let mut args = vec!["dump", "--data-only", "-o", "d.json"];
+    for t in only {
+        args.extend(["-t", t]);
+    }
+    assert_ok(&p.cli(Some(url), &args));
+    let raw = std::fs::read(p.dir.join("d.json")).unwrap();
+    std::fs::remove_file(p.dir.join("d.json")).unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&raw).unwrap();
+    let mut map = std::collections::BTreeMap::new();
+    for t in v["tables"].as_array().unwrap() {
+        let mut rows: Vec<String> = t["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r.to_string())
+            .collect();
+        rows.sort();
+        map.insert(t["name"].as_str().unwrap().to_string(), rows);
+    }
+    map
+}
+
+/// The whole project flow, minus the backend specifics. `drop_all(tables)` removes the
+/// given tables (and `_rango_migrations`); `exercise` runs the compiled-model queries.
+pub async fn flow<D, DF, E, EF>(p: &Project, url: &str, drop_all: D, exercise: E)
+where
+    D: Fn(Vec<String>) -> DF,
+    DF: std::future::Future<Output = ()>,
+    E: FnOnce() -> EF,
+    EF: std::future::Future<Output = ()>,
+{
+    assert_ok(&p.cli(None, &["makemigrations", "src", "--yes"]));
+    let mut tables: Vec<String> = p.snapshot()["tables"]
+        .as_object()
+        .unwrap()
+        .keys()
+        .cloned()
+        .collect();
+    assert!(tables.iter().all(|t| t.starts_with("rpx_")), "{tables:?}");
+    tables.push("_rango_migrations".into());
+
+    drop_all(tables.clone()).await;
+    assert_ok(&p.cli(Some(url), &["migrate"]));
+
+    // Nothing changed since: no new migration.
+    let before = p.migration_files();
+    assert_ok(&p.cli(None, &["makemigrations", "src", "--yes"]));
+    assert_eq!(
+        p.migration_files(),
+        before,
+        "second makemigrations must be a no-op"
+    );
+
+    exercise().await;
+
+    // dump -> wipe -> restore: same rows.
+    // Known limitation: dump/restore does not round-trip binary (`bytea`) columns, so the
+    // tables that have one are left out (see AGENTS.md, "Known limitations").
+    let snap = p.snapshot();
+    let dumped: Vec<String> = snap["tables"]
+        .as_object()
+        .unwrap()
+        .iter()
+        .filter(|(_, t)| {
+            !t["columns"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|c| c["col_type"] == "bytea")
+        })
+        .map(|(n, _)| n.clone())
+        .collect();
+    let original = dump_rows(p, url, &dumped);
+    assert!(original.values().any(|r| !r.is_empty()));
+    let mut args = vec!["dump", "-o", "full.json"];
+    for t in &dumped {
+        args.extend(["-t", t]);
+    }
+    assert_ok(&p.cli(Some(url), &args));
+    drop_all(tables).await;
+    assert_ok(&p.cli(Some(url), &["restore", "full.json"]));
+    assert_eq!(dump_rows(p, url, &dumped), original, "rows after restore");
+}
+
 pub fn assert_ok(o: &Output) {
     assert!(
         o.status.success(),

@@ -153,7 +153,10 @@ fn scanner_matches_derive_for_every_model() {
         .chain(pivots.iter().map(|s| s.table_name.as_str()))
         .collect();
     let got: BTreeSet<&str> = tables.keys().map(String::as_str).collect();
-    assert_eq!(got, want, "tables the CLI will create vs tables the derive names");
+    assert_eq!(
+        got, want,
+        "tables the CLI will create vs tables the derive names"
+    );
 
     let mut problems = Vec::new();
     for s in managed.iter().copied().chain(pivots.iter()) {
