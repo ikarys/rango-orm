@@ -1263,7 +1263,7 @@ dependencies = [
 
 [[package]]
 name = "rango"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 dependencies = [
  "rango-core",
  "rango-derive",
@@ -1290,7 +1290,7 @@ dependencies = [
 
 [[package]]
 name = "rango-cli"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 dependencies = [
  "anyhow",
  "clap",
@@ -1310,7 +1310,7 @@ dependencies = [
 
 [[package]]
 name = "rango-core"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 dependencies = [
  "argon2",
  "chrono",
@@ -1321,7 +1321,7 @@ dependencies = [
 
 [[package]]
 name = "rango-derive"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -1332,7 +1332,7 @@ dependencies = [
 
 [[package]]
 name = "rango-mysql"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 dependencies = [
  "chrono",
  "log",
@@ -1345,7 +1345,7 @@ dependencies = [
 
 [[package]]
 name = "rango-postgres"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 dependencies = [
  "chrono",
  "log",
@@ -1358,7 +1358,7 @@ dependencies = [
 
 [[package]]
 name = "rango-sqlite"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 dependencies = [
  "chrono",
  "log",
