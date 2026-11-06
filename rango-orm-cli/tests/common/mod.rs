@@ -164,9 +164,11 @@ where
         args.extend(["-t", t]);
     }
     assert_ok(&p.cli(Some(url), &args));
-    drop_all(tables).await;
+    drop_all(tables.clone()).await;
     assert_ok(&p.cli(Some(url), &["restore", "full.json"]));
     assert_eq!(dump_rows(p, url, &dumped), original, "rows after restore");
+    // Leave the database as found: other suites list every table they see.
+    drop_all(tables).await;
 }
 
 pub fn assert_ok(o: &Output) {

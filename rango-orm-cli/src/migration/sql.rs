@@ -1266,7 +1266,7 @@ mod tests {
             sql
         );
         assert!(
-            sql.contains("INDEX `pages_slug_idx` (`slug`)"),
+            sql.contains("INDEX `pages_slug_idx` (`slug`(191))"),
             "got: {}",
             sql
         );
