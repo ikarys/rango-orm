@@ -43,7 +43,7 @@ migrations/       ← SQL migration files (generated)
 
 ## Requirements
 
-- Rust 1.85+ (edition 2024)
+- Rust 1.89+ (edition 2024)
 - For PostgreSQL: a running Postgres instance
 - For MySQL / MariaDB: a running MySQL 8.0+ or MariaDB 10.6+ instance
 - For SQLite: nothing extra needed

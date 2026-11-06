@@ -113,7 +113,7 @@ pub struct QueryBuilder<M> {
     limit: Option<i64>,
     offset: Option<i64>,
     /// True when the caller has explicitly set a limit via `.limit(n)` or `.unlimited()`.
-    /// When false, `all()` applies [`DEFAULT_QUERY_LIMIT`] automatically.
+    /// When false, `all()` applies `DEFAULT_QUERY_LIMIT` (1000 rows) automatically.
     pub explicit_limit: bool,
     next_connector: Connector,
     /// Introspection: `(fk_col, related_table, related_pk)` for each `.select_related()` call.

@@ -2097,7 +2097,7 @@ checksum = "63b8176103e19a2643978565ca18b50549f6101881c443590420e4dc998a3c69"
 
 [[package]]
 name = "rango-orm-core"
-version = "0.1.0"
+version = "0.1.0-beta.3"
 dependencies = [
  "argon2",
  "chrono",
@@ -2108,7 +2108,7 @@ dependencies = [
 
 [[package]]
 name = "rango-orm-derive"
-version = "0.1.0"
+version = "0.1.0-beta.3"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -2119,7 +2119,7 @@ dependencies = [
 
 [[package]]
 name = "rango-orm-postgres"
-version = "0.1.0"
+version = "0.1.0-beta.3"
 dependencies = [
  "chrono",
  "log",

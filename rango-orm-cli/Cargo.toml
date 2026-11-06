@@ -15,6 +15,7 @@ readme = "../README.md"
 [[bin]]
 name = "rango"
 path = "src/main.rs"
+doc = false
 
 [dependencies]
 rango-orm-core     = { workspace = true }
