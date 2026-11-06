@@ -1,3 +1,6 @@
+//! Database-free core of [Rango ORM](https://crates.io/crates/rango-orm): model traits, schema and field types.
+//!
+//! Internal crate: depend on `rango-orm`, which re-exports it.
 #![forbid(unsafe_code)]
 pub mod backend;
 pub mod column;

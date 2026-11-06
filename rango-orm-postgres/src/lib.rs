@@ -1,3 +1,6 @@
+//! PostgreSQL backend for [Rango ORM](https://crates.io/crates/rango-orm).
+//!
+//! Internal crate: depend on `rango-orm` (feature `postgres`, on by default).
 #![forbid(unsafe_code)]
 mod error;
 pub mod executor;

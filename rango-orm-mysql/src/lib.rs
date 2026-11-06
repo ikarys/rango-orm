@@ -1,3 +1,6 @@
+//! MySQL 8.0+ / MariaDB 10.6+ backend for [Rango ORM](https://crates.io/crates/rango-orm).
+//!
+//! Internal crate: depend on `rango-orm` with feature `mysql`.
 #![forbid(unsafe_code)]
 use crate::error::db_err;
 use std::str::FromStr;

@@ -1,3 +1,6 @@
+//! `#[derive(Model)]` and `#[derive(ModelMixin)]` for [Rango ORM](https://crates.io/crates/rango-orm).
+//!
+//! Internal crate: depend on `rango-orm`, which re-exports the derives.
 #![forbid(unsafe_code)]
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;

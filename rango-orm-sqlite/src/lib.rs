@@ -1,3 +1,6 @@
+//! SQLite backend for [Rango ORM](https://crates.io/crates/rango-orm).
+//!
+//! Internal crate: depend on `rango-orm` with feature `sqlite`.
 #![forbid(unsafe_code)]
 use crate::error::db_err;
 use std::str::FromStr;

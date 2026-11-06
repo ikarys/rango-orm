@@ -264,7 +264,7 @@ where
 
     /// Disable the default row cap — returns all rows with no LIMIT clause.
     ///
-    /// Use with care on large tables. The default cap is [`DEFAULT_QUERY_LIMIT`].
+    /// Use with care on large tables. The default cap is `DEFAULT_QUERY_LIMIT` (1000 rows).
     pub fn unlimited(mut self) -> Self {
         self.explicit_limit = true;
         self
