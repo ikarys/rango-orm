@@ -7,6 +7,7 @@ use sqlx::MySqlPool;
 
 use super::*;
 
+#[tracing::instrument(name = "db.query", skip_all, fields(db.system = "mysql", db.operation = "INSERT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
 pub async fn bulk_create<M>(pool: &MySqlPool, models: &[M]) -> Result<usize>
 where
     M: Model + ModelValues,

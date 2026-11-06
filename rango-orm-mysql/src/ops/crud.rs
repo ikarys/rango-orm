@@ -12,6 +12,7 @@ use super::*;
 // MySQL has no RETURNING. Every column is bound from the model (no DB-side defaults on insert
 // except auto-increment PKs, read back with LAST_INSERT_ID()), so the input model is what was
 // stored, minus DATETIME(6) sub-µs precision.
+#[tracing::instrument(name = "db.query", skip_all, fields(db.system = "mysql", db.operation = "INSERT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
 pub async fn insert<'e, E, M>(executor: E, mut model: M) -> Result<M>
 where
     E: Executor<'e, Database = MySql>,
@@ -29,6 +30,7 @@ where
 
 /// Fails with [`Error::NotFound`] when no row has the model's PK
 /// (sqlx sets `CLIENT_FOUND_ROWS`, so unchanged rows still count as matched).
+#[tracing::instrument(name = "db.query", skip_all, fields(db.system = "mysql", db.operation = "UPDATE", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
 pub async fn update<'e, E, M>(executor: E, model: M) -> Result<M>
 where
     E: Executor<'e, Database = MySql>,
@@ -43,6 +45,7 @@ where
     Ok(model)
 }
 
+#[tracing::instrument(name = "db.query", skip_all, fields(db.system = "mysql", db.operation = "DELETE", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
 pub async fn delete<'e, E, M>(executor: E, model: &M) -> Result<()>
 where
     E: Executor<'e, Database = MySql>,
@@ -57,6 +60,7 @@ where
     q.execute(executor).await.map(|_| ()).map_err(db_err)
 }
 
+#[tracing::instrument(name = "db.query", skip_all, fields(db.system = "mysql", db.operation = "SELECT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
 pub async fn get<'e, E, M>(executor: E, pk: &SqlValue) -> Result<Option<M>>
 where
     E: Executor<'e, Database = MySql>,
@@ -75,6 +79,7 @@ where
     }
 }
 
+#[tracing::instrument(name = "db.query", skip_all, fields(db.system = "mysql", db.operation = "SELECT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
 pub async fn all<'e, E, M>(executor: E) -> Result<Vec<M>>
 where
     E: Executor<'e, Database = MySql>,
@@ -90,6 +95,7 @@ where
 
 /// Plain INSERT; on a unique violation, fetch the existing row. (`INSERT IGNORE` would also
 /// swallow NOT NULL / FK / truncation errors.)
+#[tracing::instrument(name = "db.query", skip_all, fields(db.system = "mysql", db.operation = "INSERT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
 pub async fn get_or_create<M>(
     pool: &MySqlPool,
     lookup: Vec<(&'static str, SqlValue)>,

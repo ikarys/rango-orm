@@ -56,6 +56,7 @@ where
 
     /// Add a relation between from and to.
     /// Idempotent: an existing relation is left as is.
+    #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "postgresql", db.operation = "INSERT", db.sql.table = %Self::pivot_table(), db.rows = tracing::field::Empty, otel.kind = "client"))]
     pub async fn add(pool: &PgPool, from: &From, to: &To) -> Result<()> {
         let sql = Self::insert_sql();
         let q = bind_sql_values(sqlx::query(&sql), vec![from.pk_value(), to.pk_value()]);
@@ -64,6 +65,7 @@ where
     }
 
     /// Remove a relation.
+    #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "postgresql", db.operation = "DELETE", db.sql.table = %Self::pivot_table(), db.rows = tracing::field::Empty, otel.kind = "client"))]
     pub async fn remove(pool: &PgPool, from: &From, to: &To) -> Result<()> {
         let pivot = Self::pivot_table();
         let from_col = Self::from_col();
@@ -80,6 +82,7 @@ where
     }
 
     /// Clear all relations from a given model instance.
+    #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "postgresql", db.operation = "DELETE", db.sql.table = %Self::pivot_table(), db.rows = tracing::field::Empty, otel.kind = "client"))]
     pub async fn clear(pool: &PgPool, from: &From) -> Result<()> {
         let sql = Self::clear_sql();
         let q = bind_sql_values(sqlx::query(&sql), vec![from.pk_value()]);
@@ -88,6 +91,7 @@ where
     }
 
     /// Get all related `To` models for a given `from` instance.
+    #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "postgresql", db.operation = "SELECT", db.sql.table = %Self::pivot_table(), db.rows = tracing::field::Empty, otel.kind = "client"))]
     pub async fn all(pool: &PgPool, from: &From) -> Result<Vec<To>> {
         let pivot = Self::pivot_table();
         let from_col = Self::from_col();
@@ -112,6 +116,7 @@ where
     }
 
     /// Get all `From` models related to a given `to` instance (reverse).
+    #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "postgresql", db.operation = "SELECT", db.sql.table = %Self::pivot_table(), db.rows = tracing::field::Empty, otel.kind = "client"))]
     pub async fn reverse(pool: &PgPool, to: &To) -> Result<Vec<From>>
     where
         From: FromRow,
@@ -139,6 +144,7 @@ where
     }
 
     /// Set exact relations — replaces all existing with the given list, atomically.
+    #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "postgresql", db.operation = "UPDATE", db.sql.table = %Self::pivot_table(), db.rows = tracing::field::Empty, otel.kind = "client"))]
     pub async fn set(pool: &PgPool, from: &From, to_list: &[To]) -> Result<()> {
         let mut tx = pool.begin().await.map_err(db_err)?;
         let sql = Self::clear_sql();
@@ -154,6 +160,7 @@ where
     }
 
     /// Check if a relation exists.
+    #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "postgresql", db.operation = "SELECT", db.sql.table = %Self::pivot_table(), db.rows = tracing::field::Empty, otel.kind = "client"))]
     pub async fn exists(pool: &PgPool, from: &From, to: &To) -> Result<bool> {
         let pivot = Self::pivot_table();
         let from_col = Self::from_col();

@@ -9,6 +9,7 @@ use sqlx::{Executor, Sqlite, SqlitePool};
 use super::*;
 
 // ─── CRUD ops ─────────────────────────────────────────────────────────────────
+#[tracing::instrument(name = "db.query", skip_all, fields(db.system = "sqlite", db.operation = "INSERT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
 pub async fn insert<'e, E, M>(executor: E, model: M) -> Result<M>
 where
     E: Executor<'e, Database = Sqlite>,
@@ -20,6 +21,7 @@ where
     M::from_row(&SqliteRangoRow(row)).map_err(Error::from)
 }
 
+#[tracing::instrument(name = "db.query", skip_all, fields(db.system = "sqlite", db.operation = "UPDATE", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
 pub async fn update<'e, E, M>(executor: E, model: M) -> Result<M>
 where
     E: Executor<'e, Database = Sqlite>,
@@ -31,6 +33,7 @@ where
     M::from_row(&SqliteRangoRow(row)).map_err(Error::from)
 }
 
+#[tracing::instrument(name = "db.query", skip_all, fields(db.system = "sqlite", db.operation = "DELETE", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
 pub async fn delete<'e, E, M>(executor: E, model: &M) -> Result<()>
 where
     E: Executor<'e, Database = Sqlite>,
@@ -45,6 +48,7 @@ where
     q.execute(executor).await.map(|_| ()).map_err(db_err)
 }
 
+#[tracing::instrument(name = "db.query", skip_all, fields(db.system = "sqlite", db.operation = "SELECT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
 pub async fn get<'e, E, M>(executor: E, pk: &SqlValue) -> Result<Option<M>>
 where
     E: Executor<'e, Database = Sqlite>,
@@ -63,6 +67,7 @@ where
     }
 }
 
+#[tracing::instrument(name = "db.query", skip_all, fields(db.system = "sqlite", db.operation = "SELECT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
 pub async fn all<'e, E, M>(executor: E) -> Result<Vec<M>>
 where
     E: Executor<'e, Database = Sqlite>,
@@ -76,6 +81,7 @@ where
     decode_all::<M>(rows)
 }
 
+#[tracing::instrument(name = "db.query", skip_all, fields(db.system = "sqlite", db.operation = "INSERT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
 pub async fn get_or_create<M>(
     pool: &SqlitePool,
     lookup: Vec<(&'static str, SqlValue)>,

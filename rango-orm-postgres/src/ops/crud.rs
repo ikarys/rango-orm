@@ -25,6 +25,7 @@ use super::*;
 ///     Ok(user)
 /// }).await?;
 /// ```
+#[tracing::instrument(name = "db.query", skip_all, fields(db.system = "postgresql", db.operation = "INSERT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
 pub async fn insert<'e, E, M>(executor: E, model: M) -> Result<M>
 where
     E: Executor<'e, Database = Postgres>,
@@ -37,6 +38,7 @@ where
 }
 
 /// UPDATE → returns the updated model.
+#[tracing::instrument(name = "db.query", skip_all, fields(db.system = "postgresql", db.operation = "UPDATE", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
 pub async fn update<'e, E, M>(executor: E, model: M) -> Result<M>
 where
     E: Executor<'e, Database = Postgres>,
@@ -49,6 +51,7 @@ where
 }
 
 /// DELETE a model.
+#[tracing::instrument(name = "db.query", skip_all, fields(db.system = "postgresql", db.operation = "DELETE", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
 pub async fn delete<'e, E, M>(executor: E, model: &M) -> Result<()>
 where
     E: Executor<'e, Database = Postgres>,
@@ -61,6 +64,7 @@ where
 
 /// GET by primary key.
 /// Accepts `&PgPool`, `&mut Transaction<'_, Postgres>`, or any sqlx `Executor`.
+#[tracing::instrument(name = "db.query", skip_all, fields(db.system = "postgresql", db.operation = "SELECT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
 pub async fn get<'e, E, M>(executor: E, pk: &SqlValue) -> Result<Option<M>>
 where
     E: Executor<'e, Database = Postgres>,
@@ -81,6 +85,7 @@ where
 
 /// GET ALL rows.
 /// Accepts `&PgPool`, `&mut Transaction<'_, Postgres>`, or any sqlx `Executor`.
+#[tracing::instrument(name = "db.query", skip_all, fields(db.system = "postgresql", db.operation = "SELECT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
 pub async fn all<'e, E, M>(executor: E) -> Result<Vec<M>>
 where
     E: Executor<'e, Database = Postgres>,
@@ -114,6 +119,7 @@ where
 ///     rango::get_or_create(&mut *tx, lookup, defaults).await
 /// }).await?;
 /// ```
+#[tracing::instrument(name = "db.query", skip_all, fields(db.system = "postgresql", db.operation = "INSERT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
 pub async fn get_or_create<'a, A, M>(
     executor: A,
     lookup: Vec<(&'static str, SqlValue)>,
@@ -146,6 +152,7 @@ where
 ///
 /// Accepts `&mut pool` (for standalone use) or `tx` (inside `atomic()`).
 /// For atomicity, wrap in `atomic()`.
+#[tracing::instrument(name = "db.query", skip_all, fields(db.system = "postgresql", db.operation = "UPDATE", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
 pub async fn update_or_create<E, M>(
     exec: &mut E,
     lookup: Vec<(&'static str, SqlValue)>,
