@@ -53,11 +53,10 @@ rango makemigrations
 Output:
 ```
 🔍 Scanning models in src... (backend: sqlite)
-📦 Table prefix: my_app
 Found 2 model(s):
-  - my_app_user (5 columns)
-  - my_app_post (5 columns)
-✅ Migration generated: migrations/0001_my_app_post_my_app_user.sql
+  - user (5 columns)
+  - post (5 columns)
+✅ Migration generated: migrations/0001_post_user.sql
 ```
 
 ## 4. Apply migrations

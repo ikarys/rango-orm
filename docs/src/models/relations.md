@@ -58,7 +58,7 @@ pub struct Tag {
 }
 ```
 
-This creates a pivot table `myapp_article_myapp_tag` with two UUID columns.
+This creates a pivot table `article_tag` with two UUID columns.
 
 ### M2M operations
 

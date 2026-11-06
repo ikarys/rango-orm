@@ -3,7 +3,7 @@ use crate::migration::renames::detect_renames;
 use crate::migration::scanner::{generate_pivot_table, scan_models};
 use crate::migration::snapshot::Snapshot;
 use crate::migration::sql::generate_sql_from_diff;
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
 use rango_orm_core::{BackendKind, ColumnType, TableSchema};
 use std::fs;
 use std::io::{IsTerminal, Write};
@@ -39,7 +39,7 @@ fn check_mysql_identifiers(schemas: &[TableSchema]) -> Result<()> {
     for s in schemas {
         if s.table_name.len() > MAX {
             bail!(
-                "table name `{}` is {} bytes, MySQL allows {}: use a shorter prefix (-p) or model name",
+                "table name `{}` is {} bytes, MySQL allows {}: use a shorter `#[model(table = ...)]` or model name",
                 s.table_name,
                 s.table_name.len(),
                 MAX
@@ -61,7 +61,6 @@ fn check_mysql_identifiers(schemas: &[TableSchema]) -> Result<()> {
 pub fn run(
     src_dir: &str,
     output_dir: &str,
-    prefix: Option<&str>,
     dry_run: bool,
     check: bool,
     assume_yes: bool,
@@ -81,14 +80,6 @@ pub fn run(
         src_dir, backend_label
     );
 
-    let prefix = match prefix {
-        Some(p) => p.to_string(),
-        None => detect_project_name()?,
-    };
-    // Normalize prefix: hyphens → underscores (Cargo names use hyphens, SQL identifiers don't)
-    let prefix = prefix.replace('-', "_");
-    println!("📦 Table prefix: {}", prefix);
-
     let (mut schemas, m2m_relations) = scan_models(src_dir)?;
 
     // Drop unmanaged models — they are not owned by Rango migrations
@@ -99,21 +90,7 @@ pub fn run(
         return Ok(());
     }
 
-    // Apply prefix to model tables
-    for schema in &mut schemas {
-        schema.table_name = format!("{}_{}", prefix, schema.table_name);
-        for col in &mut schema.columns {
-            if let Some(fk) = &mut col.references {
-                fk.table = format!("{}_{}", prefix, fk.table);
-            }
-        }
-    }
-
-    // Generate M2M pivot tables (also prefixed)
-    let pivot_schemas: Vec<TableSchema> = m2m_relations
-        .iter()
-        .map(|rel| generate_pivot_table(rel, &prefix))
-        .collect();
+    let pivot_schemas: Vec<TableSchema> = m2m_relations.iter().map(generate_pivot_table).collect();
 
     println!("Found {} model(s):", schemas.len());
     for s in &schemas {
@@ -309,20 +286,6 @@ fn next_migration_number(dir: &str) -> Result<u32> {
     Ok(max + 1)
 }
 
-fn detect_project_name() -> Result<String> {
-    let cargo_toml = fs::read_to_string("Cargo.toml")
-        .context("Could not find Cargo.toml — run from project root or use --prefix")?;
-    for line in cargo_toml.lines() {
-        let line = line.trim();
-        if line.starts_with("name")
-            && let Some(val) = line.split_once('=').map(|x| x.1)
-        {
-            return Ok(val.trim().trim_matches('"').to_string());
-        }
-    }
-    bail!("Could not detect project name from Cargo.toml — use --prefix")
-}
-
 #[cfg(test)]
 mod tests {
     use super::{check_mysql_identifiers, check_not_null_additions, migration_label};
@@ -417,6 +380,6 @@ mod tests {
             "library_management_system_publication_library_management_system_contributor",
         );
         let err = check_mysql_identifiers(&[pivot]).unwrap_err().to_string();
-        assert!(err.contains("shorter prefix"), "{err}");
+        assert!(err.contains("shorter `#[model(table"), "{err}");
     }
 }

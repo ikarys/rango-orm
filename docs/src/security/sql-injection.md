@@ -11,7 +11,7 @@ User::filter(&pool)
     .eq("email", user_input)
     .all()
     .await?;
-// → SELECT * FROM "myapp_user" WHERE "email" = $1
+// → SELECT * FROM "user" WHERE "email" = $1
 ```
 
 The database driver handles all escaping. SQL injection via the query builder is impossible.

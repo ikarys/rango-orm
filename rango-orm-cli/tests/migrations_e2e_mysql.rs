@@ -13,7 +13,6 @@ fn database_url() -> String {
 
 struct Project {
     dir: PathBuf,
-    prefix: String,
 }
 
 impl Project {
@@ -27,10 +26,7 @@ impl Project {
         std::fs::write(dir.join("rango.toml"), "[database]\nbackend = \"mysql\"\n")
             .expect("write rango.toml");
 
-        Self {
-            dir,
-            prefix: format!("e2e_my_{name}"),
-        }
+        Self { dir }
     }
 
     fn write_models(&self, body: &str) {
@@ -39,15 +35,7 @@ impl Project {
     }
 
     fn makemigrations(&self) -> std::process::Output {
-        self.run_cli(&[
-            "makemigrations",
-            "src",
-            "-o",
-            "migrations",
-            "-p",
-            &self.prefix,
-            "--yes",
-        ])
+        self.run_cli(&["makemigrations", "src", "-o", "migrations", "--yes"])
     }
 
     fn migrate(&self) -> std::process::Output {
@@ -193,7 +181,7 @@ async fn lifecycle_create_then_alter() {
     project.write_models(
         r#"
 #[derive(Model)]
-#[model(constraints = [CheckConstraint::new("age >= 0").name("chk_age"), UniqueConstraint::on(&["name", "age"]).name("uniq_name_age")])]
+#[model(table = "e2e_my_life_author", constraints = [CheckConstraint::new("age >= 0").name("chk_age"), UniqueConstraint::on(&["name", "age"]).name("uniq_name_age")])]
 pub struct Author {
     pub id: FieldUuid,
     #[field(unique)]
@@ -205,6 +193,7 @@ pub struct Author {
 }
 
 #[derive(Model)]
+#[model(table = "e2e_my_life_book")]
 pub struct Book {
     pub id: FieldUuid,
     pub author: ForeignKey<Author>,
@@ -289,7 +278,7 @@ pub struct Book {
     project.write_models(
         r#"
 #[derive(Model)]
-#[model(constraints = [UniqueConstraint::on(&["name", "age"]).name("uniq_name_age")])]
+#[model(table = "e2e_my_life_author", constraints = [UniqueConstraint::on(&["name", "age"]).name("uniq_name_age")])]
 pub struct Author {
     pub id: FieldUuid,
     pub email: FieldVarchar<1, 200>,
@@ -301,6 +290,7 @@ pub struct Author {
 }
 
 #[derive(Model)]
+#[model(table = "e2e_my_life_book")]
 pub struct Book {
     pub id: FieldUuid,
     pub author: Option<ForeignKey<Author>>,
@@ -403,6 +393,7 @@ async fn export_import_round_trip() {
     project.write_models(
         r#"
 #[derive(Model)]
+#[model(table = "e2e_my_rt_person")]
 pub struct Person {
     pub id: FieldUuid,
     pub name: FieldVarchar<1, 100>,
@@ -411,6 +402,7 @@ pub struct Person {
 }
 
 #[derive(Model)]
+#[model(table = "e2e_my_rt_post")]
 pub struct Post {
     pub id: FieldUuid,
     pub author: ForeignKey<Person>,
@@ -592,6 +584,7 @@ async fn import_does_not_inject_column_names() {
 
 const DUMP_MODELS: &str = r#"
 #[derive(Model)]
+#[model(table = "e2e_mydump_person")]
 pub struct Person {
     pub id: FieldUuid,
     pub name: FieldVarchar<1, 100>,
@@ -605,6 +598,7 @@ pub struct Person {
 }
 
 #[derive(Model)]
+#[model(table = "e2e_mydump_post")]
 pub struct Post {
     pub id: FieldUuid,
     pub author: ForeignKey<Person>,
@@ -619,15 +613,7 @@ async fn dump_project(pool: &MySqlPool, name: &str) -> Project {
     drop_tables(pool, &DUMP_TABLES).await;
     let project = Project::new(name);
     project.write_models(DUMP_MODELS);
-    let out = project.run_cli(&[
-        "makemigrations",
-        "src",
-        "-o",
-        "migrations",
-        "-p",
-        "e2e_mydump",
-        "--yes",
-    ]);
+    let out = project.run_cli(&["makemigrations", "src", "-o", "migrations", "--yes"]);
     assert_success(&out, "makemigrations");
     assert_success(&project.migrate(), "migrate");
     for sql in [

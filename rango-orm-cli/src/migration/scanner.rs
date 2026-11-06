@@ -59,8 +59,8 @@ fn uses_rango(content: &str) -> bool {
 /// A detected M2M relation between two table names.
 #[derive(Debug, Clone)]
 pub struct M2MRelation {
-    pub from_table: String, // will be prefixed later
-    pub to_table: String,   // will be prefixed later
+    pub from_table: String,
+    pub to_table: String,
 }
 
 struct ModelVisitor<'a> {
@@ -125,7 +125,8 @@ impl<'ast> Visit<'ast> for ModelVisitor<'_> {
                         .trim_end_matches('>')
                         .to_string();
                     let to_ident = to_model.rsplit("::").next().unwrap_or(&to_model);
-                    let to_table = to_snake_case(to_ident);
+                    // Model ident here; `resolve_model_tables` maps it to the real table.
+                    let to_table = to_ident.to_string();
                     self.m2m_relations.push(M2MRelation {
                         from_table: table_name.clone(),
                         to_table,
@@ -669,16 +670,17 @@ fn to_snake_case(s: &str) -> String {
 }
 
 /// Generate a pivot table schema for a M2M relation.
-pub(crate) fn generate_pivot_table(rel: &M2MRelation, prefix: &str) -> TableSchema {
-    let from_table = format!("{}_{}", prefix, rel.from_table);
-    let to_table = format!("{}_{}", prefix, rel.to_table);
-    let pivot_name = format!("{}_{}", from_table, to_table);
+pub(crate) fn generate_pivot_table(rel: &M2MRelation) -> TableSchema {
+    let from_table = rel.from_table.clone();
+    let to_table = rel.to_table.clone();
+    // Same naming as the runtime, so the two cannot drift.
+    let (pivot_name, from_col, to_col) = rango_orm_core::related::m2m_pivot(&from_table, &to_table);
 
     TableSchema {
         table_name: pivot_name.clone(),
         columns: vec![
             rango_orm_core::ColumnDef {
-                name: format!("{}_id", from_table),
+                name: from_col,
                 col_type: rango_orm_core::ColumnType::Uuid,
                 nullable: false,
                 primary_key: false,
@@ -693,7 +695,7 @@ pub(crate) fn generate_pivot_table(rel: &M2MRelation, prefix: &str) -> TableSche
                 index: false,
             },
             rango_orm_core::ColumnDef {
-                name: format!("{}_id", to_table),
+                name: to_col,
                 col_type: rango_orm_core::ColumnType::Uuid,
                 nullable: false,
                 primary_key: false,
@@ -778,20 +780,6 @@ mod tests {
     #[test]
     fn test_unknown_type_is_error() {
         assert!(map_field_type(&ty("SomeUnknownType")).is_err());
-    }
-
-    // ── prefix normalisation (hyphens → underscores) ───────────────────────────
-
-    #[test]
-    fn test_prefix_hyphen_to_underscore() {
-        let normalised = "my-project".replace('-', "_");
-        assert_eq!(normalised, "my_project");
-    }
-
-    #[test]
-    fn test_prefix_no_hyphens_unchanged() {
-        let normalised = "myproject".replace('-', "_");
-        assert_eq!(normalised, "myproject");
     }
 
     // ── scanner ───────────────────────────────────────────────────────────────
@@ -967,6 +955,38 @@ pub struct Helper {
         assert_eq!(col("custom").0, 1);
         assert_eq!(col("helper_only").0, 1);
 
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_scanner_m2m_uses_explicit_tables_and_runtime_pivot_name() {
+        let dir = write_temp_models(
+            "m2m_explicit",
+            r#"
+use rango_orm_core::Model;
+
+#[derive(Model)]
+#[model(table = "people")]
+pub struct Person {
+    id: FieldUuid,
+}
+
+#[derive(Model)]
+#[model(table = "articles")]
+pub struct Post {
+    id: FieldUuid,
+    readers: ManyToMany<Person>,
+}
+"#,
+        );
+        let (_, m2m) = scan_models(dir.to_str().unwrap()).unwrap();
+        let pivot = super::generate_pivot_table(&m2m[0]);
+        assert_eq!(pivot.table_name, "articles_people");
+        assert_eq!(pivot.columns[0].name, "articles_id");
+        assert_eq!(
+            pivot.columns[1].references.as_ref().unwrap().table,
+            "people"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

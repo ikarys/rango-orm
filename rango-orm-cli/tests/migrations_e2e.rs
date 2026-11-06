@@ -32,20 +32,17 @@ impl Project {
     }
 
     fn write_models(&self, body: &str) {
+        // Isolate each test with its own table (no package prefix any more).
+        let body = body.replace(
+            "pub struct Item {",
+            &format!("#[model(table = \"{}\")]\npub struct Item {{", self.table()),
+        );
         let content = format!("use rango::prelude::*;\n\n{body}");
         std::fs::write(self.dir.join("src/models.rs"), content).expect("write models.rs");
     }
 
     fn makemigrations(&self) -> std::process::Output {
-        self.run_cli(&[
-            "makemigrations",
-            "src",
-            "-o",
-            "migrations",
-            "-p",
-            &self.prefix,
-            "--yes",
-        ])
+        self.run_cli(&["makemigrations", "src", "-o", "migrations", "--yes"])
     }
 
     fn migrate(&self) -> std::process::Output {
@@ -521,6 +518,7 @@ async fn import_inserts_parents_first_and_is_atomic() {
 
 const DUMP_MODELS: &str = r#"
 #[derive(Model)]
+#[model(table = "e2e_dump_person")]
 pub struct Person {
     pub id: FieldUuid,
     pub name: FieldVarchar<1, 100>,
@@ -534,6 +532,7 @@ pub struct Person {
 }
 
 #[derive(Model)]
+#[model(table = "e2e_dump_post")]
 pub struct Post {
     pub id: FieldUuid,
     pub author: ForeignKey<Person>,
@@ -561,15 +560,7 @@ async fn dump_project(pool: &PgPool, name: &str) -> Project {
     drop_dump_tables(pool).await;
     let project = Project::new(name);
     project.write_models(DUMP_MODELS);
-    let out = project.run_cli(&[
-        "makemigrations",
-        "src",
-        "-o",
-        "migrations",
-        "-p",
-        "e2e_dump",
-        "--yes",
-    ]);
+    let out = project.run_cli(&["makemigrations", "src", "-o", "migrations", "--yes"]);
     assert_success(&out, "makemigrations");
     assert_success(&project.migrate(), "migrate");
     for sql in [
@@ -710,5 +701,45 @@ async fn export_import_round_trip_typed() {
     );
     assert_eq!(dump_state(&pool).await, before);
     drop_dump_tables(&pool).await;
+    project.remove();
+}
+
+async fn drop_named(pool: &PgPool, tables: &[&str]) {
+    for t in tables {
+        sqlx::query(&format!("DROP TABLE IF EXISTS \"{t}\" CASCADE"))
+            .execute(pool)
+            .await
+            .expect("drop table");
+    }
+    sqlx::query("DROP TABLE IF EXISTS _rango_migrations")
+        .execute(pool)
+        .await
+        .expect("drop migration ledger");
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration"), ignore)]
+async fn explicit_table_name_is_used_verbatim() {
+    let pool = PgPool::connect(&database_url())
+        .await
+        .expect("connect to postgres");
+    let project = Project::new("verbatim");
+    drop_named(&pool, &["users"]).await;
+
+    project.write_models(
+        r#"
+#[derive(Model)]
+#[model(table = "users")]
+pub struct User {
+    pub id: FieldUuid,
+    pub name: FieldText,
+}
+"#,
+    );
+    assert_success(&project.makemigrations(), "makemigrations");
+    assert_success(&project.migrate(), "migrate");
+    assert!(column_type(&pool, "users", "name").await.is_some());
+
+    drop_named(&pool, &["users"]).await;
     project.remove();
 }

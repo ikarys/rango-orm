@@ -64,7 +64,7 @@ Tables are created with `ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`.
 
 `rango makemigrations` writes backtick-quoted SQL that also runs as-is in the `mysql` / `mariadb` client. Unique constraints, indexes and foreign keys are named (`{table}_{col}_unique`, `{table}_{col}_idx`, `{table}_{col}_fkey`) so later migrations can drop them. Type and nullability changes use `MODIFY COLUMN`.
 
-MySQL caps identifiers at 64 characters. Constraint and index names that would exceed it are cut and suffixed with a stable hash. Table names are not shortened: if a table or M2M pivot name (`{prefix}_{model}_{prefix}_{other}`) is too long, `makemigrations` stops with an error. Use a shorter `-p` prefix.
+MySQL caps identifiers at 64 characters. Constraint and index names that would exceed it are cut and suffixed with a stable hash. Table names are not shortened: if a table or M2M pivot name (`{table}_{other_table}`) is too long, `makemigrations` stops with an error. Use a shorter `#[model(table = "...")]` or model name.
 
 `rango migrate` takes a `GET_LOCK('rango_migrate')` advisory lock, so two deploys cannot apply migrations at the same time.
 

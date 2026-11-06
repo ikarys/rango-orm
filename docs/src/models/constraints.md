@@ -20,7 +20,7 @@ pub struct Product {
 
 Generates:
 ```sql
-CREATE TABLE "myapp_product" (
+CREATE TABLE "product" (
     "id" UUID PRIMARY KEY,
     ...
     CONSTRAINT "chk_age_positive" CHECK (age >= 0),
