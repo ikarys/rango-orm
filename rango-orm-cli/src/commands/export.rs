@@ -105,6 +105,13 @@ async fn export_postgres(database_url: &str, requested: &[String]) -> Result<Vec
         .context("Failed to acquire a connection")?;
     let edges = super::import::fk_edges_postgres(&mut conn).await?;
     let tables = select_tables(list_tables_postgres(&pool).await?, requested, &edges)?;
+    let mut binary = HashMap::new();
+    for t in &tables {
+        binary.insert(
+            t.clone(),
+            super::import::binary_columns_postgres(&mut conn, t).await?,
+        );
+    }
 
     let mut out = Vec::new();
     for t in tables {
@@ -118,7 +125,15 @@ async fn export_postgres(database_url: &str, requested: &[String]) -> Result<Vec
         let mut rows = Vec::with_capacity(texts.len());
         for text in texts {
             match serde_json::from_str(&text)? {
-                serde_json::Value::Object(map) => rows.push(map),
+                serde_json::Value::Object(mut map) => {
+                    // to_jsonb renders bytea as `\x` hex text; Rango JSON uses base64.
+                    for c in &binary[&t] {
+                        if let Some(serde_json::Value::String(s)) = map.get_mut(c) {
+                            *s = super::import::encode_binary(&super::import::decode_binary(c, s)?);
+                        }
+                    }
+                    rows.push(map);
+                }
                 _ => bail!("Unexpected row shape in table {}", t),
             }
         }
@@ -210,6 +225,11 @@ fn sqlite_column_to_json(row: &sqlx::sqlite::SqliteRow, i: usize) -> serde_json:
     if let Ok(v) = row.try_get::<Option<String>, _>(i) {
         return v
             .map(serde_json::Value::String)
+            .unwrap_or(serde_json::Value::Null);
+    }
+    if let Ok(v) = row.try_get::<Option<Vec<u8>>, _>(i) {
+        return v
+            .map(|b| serde_json::Value::String(super::import::encode_binary(&b)))
             .unwrap_or(serde_json::Value::Null);
     }
     serde_json::Value::Null
@@ -376,7 +396,7 @@ fn mysql_column_to_json(
         if matches!(type_name.as_str(), "BINARY" | "VARBINARY") && bytes.len() == 16 {
             return serde_json::Value::String(bytes_to_uuid_string(&bytes));
         }
-        return serde_json::Value::String(hex_prefixed(&bytes));
+        return serde_json::Value::String(super::import::encode_binary(&bytes));
     }
 
     serde_json::Value::String(String::from_utf8_lossy(&bytes).into_owned())
@@ -429,15 +449,6 @@ fn bytes_to_uuid_string(bytes: &[u8]) -> String {
         if i == 4 || i == 6 || i == 8 || i == 10 {
             out.push('-');
         }
-        push_hex(&mut out, *byte);
-    }
-    out
-}
-
-fn hex_prefixed(bytes: &[u8]) -> String {
-    let mut out = String::with_capacity(2 + bytes.len() * 2);
-    out.push_str("\\x");
-    for byte in bytes {
         push_hex(&mut out, *byte);
     }
     out

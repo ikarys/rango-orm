@@ -119,7 +119,7 @@ async fn dump_then_restore_round_trips_rows() {
     let dump: serde_json::Value =
         serde_json::from_slice(&std::fs::read(p.dir.join("d.json")).unwrap()).unwrap();
     assert_eq!(dump["format"], "rango-dump");
-    assert_eq!(dump["version"], 1);
+    assert_eq!(dump["version"], 2);
     assert_eq!(dump["backend"], "sqlite");
     let names: Vec<&str> = dump["tables"]
         .as_array()
