@@ -32,3 +32,11 @@ pub trait RangoRow {
 pub trait FromRow: Sized {
     fn from_row(row: &dyn RangoRow) -> Result<Self, RowError>;
 }
+
+/// Implemented by `#[derive(Partial)]` — a subset of a model's columns, read with
+/// `QueryBuilder::select_as::<P>()`.
+pub trait Partial: FromRow {
+    type Model: crate::Model;
+    /// Column names to select, taken from the model's typed column constants.
+    fn columns() -> &'static [&'static str];
+}
