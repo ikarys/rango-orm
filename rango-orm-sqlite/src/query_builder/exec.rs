@@ -391,3 +391,27 @@ where
         Ok(rows.into_iter().next())
     }
 }
+
+impl<M> QueryBuilder<M>
+where
+    M: Model + ModelValues + FromRow,
+{
+    #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "sqlite", db.operation = "EXPLAIN", db.sql.table = M::table_name(), otel.kind = "client"))]
+    /// SQLite has no profiler: returns `EXPLAIN QUERY PLAN` for the `.all()` query
+    /// (the plan without timings). The query is not executed.
+    pub async fn explain_analyze(&self) -> Result<String> {
+        use sqlx::Row;
+        self.ensure_valid()?;
+        let (sql, binds) = self.select_sql();
+        let rows =
+            bind_and_fetch_all(&self.pool, &format!("EXPLAIN QUERY PLAN {sql}"), binds).await?;
+        let lines = rows
+            .iter()
+            .map(|r| {
+                r.try_get::<String, _>("detail")
+                    .map_err(|e| Error::Decode(e.to_string()))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        Ok(lines.join("\n"))
+    }
+}

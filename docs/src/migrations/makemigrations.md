@@ -60,12 +60,21 @@ The snapshot (`migrations/snapshot.json`) tracks the current known state of your
 
 ## SQLite limitations
 
-SQLite does not support `ALTER COLUMN TYPE` or `SET/DROP NOT NULL`.
-Rango emits a comment in the migration file explaining what to do manually:
+SQLite cannot change a column's type, nullability, FK or uniqueness, nor add or drop a
+constraint, in place. For those changes Rango rebuilds the table instead:
 
 ```sql
--- SQLite does not support ALTER COLUMN TYPE on "user"."score" → recreate the table manually.
+-- SQLite cannot alter columns or constraints in place: rebuild "user".
+CREATE TABLE "_rango_new_user" (...);
+INSERT INTO "_rango_new_user" ("id", "name", ...) SELECT "id", "name", ... FROM "user";
+DROP TABLE "user";
+ALTER TABLE "_rango_new_user" RENAME TO "user";
+CREATE INDEX ...;
 ```
+
+`rango migrate` runs it with foreign keys off, so dropping the old table never cascades
+into child tables, then runs `PRAGMA foreign_key_check` before committing. A migration that
+leaves a dangling FK, or copies a `NULL` into a new `NOT NULL` column, is rolled back.
 
 ## CI guard
 

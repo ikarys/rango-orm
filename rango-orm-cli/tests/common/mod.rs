@@ -32,6 +32,7 @@ impl Project {
         let mut cmd = std::process::Command::new(env!("CARGO_BIN_EXE_rango"));
         cmd.current_dir(&self.dir)
             .env_remove("DATABASE_URL")
+            .env_remove("MIGRATE_DATABASE_URL")
             .stdin(std::process::Stdio::null())
             .args(args);
         if let Some(url) = url {

@@ -44,6 +44,25 @@ let affected = raw_execute(
 println!("{} users updated", affected);
 ```
 
+## Stored procedures and functions
+
+There is no `rango::call`: a procedure call is one line of SQL, and the `raw*` functions already bind its arguments.
+
+```rust
+// PostgreSQL procedure: CALL returns the INOUT parameters as one row
+let total: i32 = raw_scalar(&pool, "CALL compute_total($1, NULL)", vec![SqlValue::Int(order_id)]).await?;
+
+// PostgreSQL function returning a set: select from it like a table
+let users = raw::<User>(&pool, "SELECT * FROM active_users($1)", vec![SqlValue::Int(30)]).await?;
+
+// MySQL / MariaDB: the procedure's result set comes back like a SELECT
+let rows = raw::<User>(&pool, "CALL active_users(?)", vec![SqlValue::Int(30)]).await?;
+```
+
+The procedure name is part of the SQL string: write it in the code, never take it from user input. SQLite has no stored procedures.
+
+Create procedures in a migration file, not with `raw_execute`: MySQL 8.4 refuses `CREATE PROCEDURE` as a prepared statement, and `rango migrate` sends migration files as plain text.
+
 ## ⚠️ Security
 
 `raw()` does **not** escape your SQL string. Only the bound parameters are safe.
@@ -66,6 +85,7 @@ raw_execute(
 | Backend | Placeholder |
 |---|---|
 | PostgreSQL | `$1`, `$2`, `$3`... |
+| MySQL / MariaDB | `?`, `?`, `?`... |
 | SQLite | `?`, `?`, `?`... |
 
 ## When to use raw SQL

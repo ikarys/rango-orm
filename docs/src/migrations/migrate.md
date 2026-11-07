@@ -66,5 +66,8 @@ Already-applied migrations are skipped. Running `rango migrate` twice is safe.
 The database URL is resolved in this order:
 
 1. `--database-url` CLI flag
-2. `DATABASE_URL` environment variable
-3. `url` field in `rango.toml`
+2. `MIGRATE_DATABASE_URL` environment variable
+3. `DATABASE_URL` environment variable
+
+`MIGRATE_DATABASE_URL` lets migrations run as a role that owns the schema (DDL) while the
+application's `DATABASE_URL` uses a role limited to reading and writing rows (DML).

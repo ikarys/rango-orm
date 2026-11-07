@@ -24,6 +24,28 @@ export DATABASE_URL=postgres://user:password@prod-host:5432/mydb
 
 Rango reads `DATABASE_URL` automatically for `rango migrate` and other CLI commands.
 
+## Least privilege
+
+Give the application a role that can only read and write rows, and run migrations with a
+separate role that owns the schema. `rango migrate` reads `MIGRATE_DATABASE_URL` first:
+
+```sql
+-- Postgres
+CREATE ROLE app_migrate LOGIN PASSWORD '...';
+CREATE ROLE app LOGIN PASSWORD '...';
+GRANT CREATE ON SCHEMA public TO app_migrate;
+GRANT USAGE ON SCHEMA public TO app;
+ALTER DEFAULT PRIVILEGES FOR ROLE app_migrate IN SCHEMA public
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO app;
+ALTER DEFAULT PRIVILEGES FOR ROLE app_migrate IN SCHEMA public
+    GRANT USAGE, SELECT ON SEQUENCES TO app;
+```
+
+```bash
+MIGRATE_DATABASE_URL=postgres://app_migrate:...@host/db rango migrate
+DATABASE_URL=postgres://app:...@host/db ./my-app
+```
+
 ## In production
 
 Use your platform's secret management:

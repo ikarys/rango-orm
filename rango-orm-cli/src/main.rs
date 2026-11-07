@@ -138,7 +138,7 @@ enum Command {
 
     /// Apply pending migrations to the database
     Migrate {
-        /// Database URL (overrides DATABASE_URL from .env)
+        /// Database URL (overrides MIGRATE_DATABASE_URL, then DATABASE_URL)
         #[arg(short, long)]
         database_url: Option<String>,
 
@@ -255,7 +255,7 @@ fn main() -> Result<()> {
             migrations,
         } => {
             let cfg = config::RangoConfig::load()?;
-            let url = cfg.resolve_database_url(database_url.as_deref())?;
+            let url = cfg.resolve_migrate_url(database_url.as_deref())?;
             let dir = if migrations == "migrations" {
                 cfg.migrations.dir.clone()
             } else {

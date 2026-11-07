@@ -160,6 +160,7 @@ User::filter(&pool).unlimited().all().await?   // no limit
 | `.count()` | `i64` |
 | `.exists()` | `bool` |
 | `.explain()` | `String` — the SQL that would run |
+| `.explain_analyze()` | `String` — the plan with real timings (runs the query) |
 
 ## Inspecting the SQL
 
@@ -173,3 +174,14 @@ let sql = User::filter(&pool)
 println!("{}", sql);
 // SELECT * FROM "myapp_user" WHERE "active" = $1 ORDER BY "name" ASC LIMIT 10
 ```
+
+`.explain_analyze().await?` runs the query under the engine's profiler and returns the plan:
+
+| Backend | Statement | Executes the query |
+|---|---|---|
+| Postgres | `EXPLAIN ANALYZE` | yes |
+| MySQL 8.0.18+ | `EXPLAIN ANALYZE` | yes |
+| MariaDB | `ANALYZE FORMAT=JSON` | yes |
+| SQLite | `EXPLAIN QUERY PLAN` (no timings) | no |
+
+The rows are discarded, but the query does run: keep it for debugging, not hot paths.

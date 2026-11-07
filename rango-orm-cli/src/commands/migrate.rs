@@ -70,6 +70,7 @@ async fn run_postgres(
             &mut *conn,
             migrations_dir,
             "INSERT INTO _rango_migrations (name) VALUES ($1)",
+            None,
         )
         .await
     }
@@ -114,12 +115,34 @@ async fn run_sqlite(database_url: &str, migrations_dir: &str) -> Result<()> {
         .acquire()
         .await
         .context("Failed to acquire a SQLite connection")?;
-    apply_pending::<sqlx::Sqlite>(
+
+    // `PRAGMA foreign_keys` is a no-op inside a transaction, and a rebuild's DROP TABLE
+    // would otherwise fire ON DELETE CASCADE on child tables. Disable it around the
+    // migration, then re-enable it afterwards.
+    sqlx::query("PRAGMA foreign_keys = OFF")
+        .execute(&mut *conn)
+        .await
+        .context("Failed to disable foreign key checks")?;
+
+    let result = apply_pending::<sqlx::Sqlite>(
         &mut *conn,
         migrations_dir,
         "INSERT INTO _rango_migrations (name) VALUES (?)",
+        Some("PRAGMA foreign_key_check"),
     )
-    .await
+    .await;
+
+    let enable = sqlx::query("PRAGMA foreign_keys = ON")
+        .execute(&mut *conn)
+        .await;
+
+    if let Err(err) = enable
+        && result.is_ok()
+    {
+        return Err(anyhow::Error::from(err).context("Failed to re-enable foreign key checks"));
+    }
+
+    result
 }
 
 // ─── MySQL ────────────────────────────────────────────────────────────────────
@@ -162,6 +185,7 @@ async fn run_mysql(database_url: &str, migrations_dir: &str) -> Result<()> {
             &mut *conn,
             migrations_dir,
             "INSERT INTO _rango_migrations (name) VALUES (?)",
+            None,
         )
         .await
     }
@@ -187,6 +211,7 @@ async fn apply_pending<DB: sqlx::Database>(
     conn: &mut DB::Connection,
     migrations_dir: &str,
     record_sql: &str,
+    fk_check: Option<&str>,
 ) -> Result<()>
 where
     for<'c> &'c mut DB::Connection: sqlx::Executor<'c, Database = DB>,
@@ -216,6 +241,15 @@ where
             .execute(&mut *tx)
             .await
             .with_context(|| format!("Failed to apply {}", name))?;
+        if let Some(fk_check) = fk_check
+            && !sqlx::raw_sql(fk_check)
+                .fetch_all(&mut *tx)
+                .await
+                .with_context(|| format!("Failed to check foreign keys for {}", name))?
+                .is_empty()
+        {
+            bail!("{name} leaves foreign key violations; rolled back");
+        }
         sqlx::query(record_sql)
             .bind(name.clone())
             .execute(&mut *tx)

@@ -226,6 +226,8 @@ async fn test_sqlite_select_and_prefetch_related() {
         .order_by("-title")
         .limit(1);
     assert!(q.explain().contains("LEFT JOIN"), "{}", q.explain());
+    let plan = q.explain_analyze().await.unwrap();
+    assert!(plan.contains("SCAN") || plan.contains("SEARCH"), "{plan}");
     let posts = q.all().await.unwrap();
     assert_eq!(posts.len(), 1);
     assert_eq!(posts[0].title.0, "second");

@@ -58,6 +58,11 @@ pub enum SchemaDiff {
         from: String,
         to: String,
     },
+    /// SQLite only: recreate `schema.table_name` (create new → copy `copy` columns → drop → rename).
+    RebuildTable {
+        schema: TableSchema,
+        copy: Vec<String>,
+    },
 }
 
 /// Compute the diff between old snapshot and current schemas.
@@ -161,6 +166,95 @@ pub fn diff(old: &Snapshot, new_schemas: &[TableSchema]) -> Vec<SchemaDiff> {
     diffs
 }
 
+pub fn sqlite_rebuilds(diffs: Vec<SchemaDiff>, schemas: &[TableSchema]) -> Vec<SchemaDiff> {
+    let mut rebuild_tables: Vec<String> = Vec::new();
+    let mut seen: HashSet<&str> = HashSet::new();
+    for d in &diffs {
+        if let Some(table) = sqlite_rebuild_trigger(d)
+            && seen.insert(table)
+        {
+            rebuild_tables.push(table.to_string());
+        }
+    }
+
+    let rebuild_tables: Vec<String> = rebuild_tables
+        .into_iter()
+        .filter(|t| schemas.iter().any(|s| &s.table_name == t))
+        .collect();
+    let rebuild_set: HashSet<&str> = rebuild_tables.iter().map(|s| s.as_str()).collect();
+
+    let mut result = Vec::with_capacity(diffs.len());
+    for d in &diffs {
+        if let Some(table) = diff_table(d)
+            && rebuild_set.contains(table)
+            && !matches!(d, SchemaDiff::RenameColumn { .. })
+        {
+            continue;
+        }
+        result.push(d.clone());
+    }
+
+    for table in &rebuild_tables {
+        if let Some(schema) = schemas.iter().find(|s| &s.table_name == table) {
+            let added: HashSet<&str> = diffs
+                .iter()
+                .filter_map(|d| match d {
+                    SchemaDiff::AddColumn { table: t, column } if t == table => {
+                        Some(column.name.as_str())
+                    }
+                    _ => None,
+                })
+                .collect();
+            let copy = schema
+                .columns
+                .iter()
+                .map(|c| c.name.clone())
+                .filter(|name| !added.contains(name.as_str()))
+                .collect();
+            result.push(SchemaDiff::RebuildTable {
+                schema: schema.clone(),
+                copy,
+            });
+        }
+    }
+
+    result
+}
+
+fn sqlite_rebuild_trigger(d: &SchemaDiff) -> Option<&str> {
+    match d {
+        SchemaDiff::AlterColumnType { table, .. }
+        | SchemaDiff::AlterColumnNullable { table, .. }
+        | SchemaDiff::AlterColumnReference { table, .. }
+        | SchemaDiff::AlterColumnUnique { table, .. } => Some(table),
+        SchemaDiff::AddConstraint { table, constraint }
+            if !constraint.definition.contains(" WHERE ") =>
+        {
+            Some(table)
+        }
+        SchemaDiff::DropConstraint { table, partial, .. } if !*partial => Some(table),
+        _ => None,
+    }
+}
+
+fn diff_table(d: &SchemaDiff) -> Option<&str> {
+    match d {
+        SchemaDiff::CreateTable(schema) => Some(&schema.table_name),
+        SchemaDiff::DropTable(table) => Some(table),
+        SchemaDiff::AddColumn { table, .. }
+        | SchemaDiff::DropColumn { table, .. }
+        | SchemaDiff::AlterColumnType { table, .. }
+        | SchemaDiff::AlterColumnNullable { table, .. }
+        | SchemaDiff::AlterColumnUnique { table, .. }
+        | SchemaDiff::AlterColumnIndex { table, .. }
+        | SchemaDiff::AlterColumnReference { table, .. }
+        | SchemaDiff::AddConstraint { table, .. }
+        | SchemaDiff::DropConstraint { table, .. }
+        | SchemaDiff::RenameColumn { table, .. } => Some(table),
+        SchemaDiff::RebuildTable { schema, .. } => Some(&schema.table_name),
+    }
+}
+
 pub(crate) fn column_diffs(table: &str, old: &SnapshotColumn, new: &ColumnDef) -> Vec<SchemaDiff> {
     let mut diffs = Vec::new();
 
@@ -217,5 +311,107 @@ fn references_changed(old: Option<&SnapshotFk>, new: Option<&FkReference>) -> bo
                 || o.on_delete != serialize_referential_action(&n.on_delete)
         }
         _ => true,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rango_orm_core::{ColumnDef, ColumnType};
+
+    fn text_col(name: &str) -> ColumnDef {
+        ColumnDef {
+            name: name.to_string(),
+            col_type: ColumnType::Text,
+            nullable: false,
+            primary_key: false,
+            unique: false,
+            default: None,
+            references: None,
+            index: false,
+        }
+    }
+
+    fn simple_table(name: &str) -> TableSchema {
+        TableSchema {
+            table_name: name.to_string(),
+            columns: vec![text_col("id"), text_col("name")],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn sqlite_rebuilds_replaces_alter_with_rebuild() {
+        let schema = TableSchema {
+            table_name: "t".to_string(),
+            columns: vec![text_col("id"), text_col("name"), text_col("new_col")],
+            ..Default::default()
+        };
+        let diffs = vec![
+            SchemaDiff::AlterColumnNullable {
+                table: "t".to_string(),
+                column: text_col("name"),
+            },
+            SchemaDiff::AddColumn {
+                table: "t".to_string(),
+                column: text_col("new_col"),
+            },
+            SchemaDiff::DropColumn {
+                table: "t".to_string(),
+                column: "old_col".to_string(),
+            },
+            SchemaDiff::RenameColumn {
+                table: "t".to_string(),
+                from: "old_name".to_string(),
+                to: "name".to_string(),
+            },
+        ];
+        let result = sqlite_rebuilds(diffs, &[schema]);
+        assert_eq!(result.len(), 2);
+        assert!(matches!(result[0], SchemaDiff::RenameColumn { .. }));
+        match &result[1] {
+            SchemaDiff::RebuildTable { schema, copy } => {
+                assert_eq!(schema.table_name, "t");
+                assert_eq!(copy, &vec!["id".to_string(), "name".to_string()]);
+            }
+            other => panic!("expected RebuildTable, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn sqlite_rebuilds_leaves_non_rebuild_diffs_untouched() {
+        let schema = simple_table("t");
+        let diffs = vec![
+            SchemaDiff::AddColumn {
+                table: "t".to_string(),
+                column: text_col("new_col"),
+            },
+            SchemaDiff::AlterColumnIndex {
+                table: "t".to_string(),
+                column: "new_col".to_string(),
+                col_type: ColumnType::Text,
+                index: true,
+            },
+        ];
+        let result = sqlite_rebuilds(diffs, &[schema]);
+        assert_eq!(result.len(), 2);
+        assert!(matches!(result[0], SchemaDiff::AddColumn { .. }));
+        assert!(matches!(result[1], SchemaDiff::AlterColumnIndex { .. }));
+    }
+
+    #[test]
+    fn sqlite_rebuilds_partial_drop_constraint_does_not_rebuild() {
+        let schema = simple_table("t");
+        let diffs = vec![SchemaDiff::DropConstraint {
+            table: "t".to_string(),
+            name: "t_x".to_string(),
+            partial: true,
+        }];
+        let result = sqlite_rebuilds(diffs, &[schema]);
+        assert_eq!(result.len(), 1);
+        assert!(matches!(
+            result[0],
+            SchemaDiff::DropConstraint { partial: true, .. }
+        ));
     }
 }
