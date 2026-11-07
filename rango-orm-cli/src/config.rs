@@ -152,4 +152,15 @@ impl RangoConfig {
              Note: database URL should not be stored in rango.toml (use env vars for secrets)."
         )
     }
+
+    /// URL for `rango migrate`: CLI argument, then `MIGRATE_DATABASE_URL`, then `DATABASE_URL`.
+    /// Lets migrations run with a DDL role while the app's `DATABASE_URL` is DML-only.
+    pub fn resolve_migrate_url(&self, cli_url: Option<&str>) -> Result<String> {
+        if cli_url.is_none()
+            && let Ok(url) = std::env::var("MIGRATE_DATABASE_URL")
+        {
+            return Ok(url);
+        }
+        self.resolve_database_url(cli_url)
+    }
 }

@@ -156,12 +156,7 @@ Design rules:
 | **Implicit PK** ✅ | `#[rango::model]` attribute macro injects `pub id: FieldUuid` (`pk = "bigint"` / `"int"` → auto-increment) and derives `Model`. Per model, not in `rango.toml` (cargo does not track it) |
 | **CLI dump / restore / backup** ✅ | Rango JSON (schema snapshot + rows), backend-independent; restore in one transaction, input untrusted; backup = gzip + UTC timestamp, `0600` |
 | **Keyset pagination** ✅ | `.after(col, value)` / `.before(col, value)` |
-
-### To do (by priority)
-
-| Feature | Description |
-|---|---|
-| **Stored procedures** | `rango::call(&pool, "proc_name", params).await?`, MySQL/PG. To evaluate: does it belong in an ORM? |
+| **Stored procedures** ✅ | No `rango::call`: `raw_scalar` / `raw` cover `CALL` and set-returning functions (tested on PG, MySQL, MariaDB). Create procedures in a migration file (MySQL cannot prepare `CREATE PROCEDURE`) |
 
 ## Principes non-négociables
 
@@ -273,7 +268,7 @@ Goal: production-grade by default. Status as of 2026-11-01. P0 = blocks real use
 | P1 | Never log bound values by default | ✅ sqlx only logs SQL text, never bound values; no opt-in added |
 | P1 | Typed errors (`rango::Error`: `NotFound`, `UniqueViolation`, `ForeignKeyViolation`, `Timeout`, `Connection`, …) instead of `anyhow` in library crates | ✅ `rango_orm_core::Error`; each backend maps sqlx errors in `error.rs` (`db_err`); no SQL text in errors; `anyhow` only in `rango-orm-cli` |
 | P1 | `#![forbid(unsafe_code)]` in every crate; `cargo audit` + `cargo deny` in CI | ✅ `forbid(unsafe_code)` in every crate root ✅; `cargo audit` in CI + `just audit` (exceptions in `.cargo/audit.toml`) ✅; `cargo deny` (`deny.toml`: licenses, sources, advisories) in CI + `just deny` ✅ |
-| P2 | Least-privilege guide: a migration role (DDL) separate from the app role (DML only) | `rango migrate` can take its own `MIGRATE_DATABASE_URL` |
+| P2 | Least-privilege guide: a migration role (DDL) separate from the app role (DML only) | ✅ `rango migrate` reads `MIGRATE_DATABASE_URL` before `DATABASE_URL`; guide in `docs/src/security/credentials.md` |
 | P2 | `dump` / `backup` files written with `0600` permissions; `restore` refuses non-Rango dumps | ✅ |
 
 Developer-controlled strings (`CheckConstraint` SQL, partial-unique conditions, `#[field(default = "...")]`, `raw*`) are trusted SQL by design. Document them as such; never build them from user input.
@@ -296,9 +291,9 @@ Known-CVE checklist (reviewed 2026-11-01) — keep new APIs out of these classes
 |---|---|---|
 | P1 | `tracing` spans per query: `db.system`, `db.operation`, `db.sql.table`, rows, duration (OpenTelemetry semantic conventions) | ✅ `db.query` span on every operation (CRUD, query builder, bulk, M2M, raw); sqlx adds one event per statement on `sqlx::query` |
 | P1 | Slow query log: `slow_query_threshold` in config (default 500 ms) → `WARN` with SQL (no values) and duration | ✅ `slow_query_threshold_ms` (Postgres), fixed 500 ms on SQLite |
-| P1 | Pool metrics: `pool.size()`, idle, wait time on acquire | sqlx already exposes `pool.size()` / `pool.num_idle()`; acquire wait time pending |
+| P1 | Pool metrics: `pool.size()`, idle, wait time on acquire | sqlx already exposes `pool.size()` / `pool.num_idle()`; sqlx 0.8 logs a `WARN` on acquires slower than 2 s (`acquire_slow_threshold`) ✅ |
 | P2 | N+1 detector (debug builds): warn when the same query shape runs > N times within a span | Matches the "Rango detects N+1" vision |
-| P2 | `.explain_analyze()` next to `.explain()` | |
+| P2 | `.explain_analyze()` next to `.explain()` | ✅ PG/MySQL `EXPLAIN ANALYZE`, MariaDB `ANALYZE FORMAT=JSON`, SQLite `EXPLAIN QUERY PLAN` (no timings) |
 
 ### Performance
 
@@ -306,12 +301,12 @@ Known-CVE checklist (reviewed 2026-11-01) — keep new APIs out of these classes
 |---|---|---|
 | P0 | Index every FK column, index M2M pivots, real `REFERENCES … ON DELETE` | ✅ derive marks every FK `index`; CLI emits `CREATE INDEX` on create/add column and on pivots |
 | P0 | `rango-orm-core` must not depend on sqlx | ✅ core has no DB dependency; each backend crate brings its own sqlx driver |
-| P1 | Pool tuning: `test_before_acquire(false)` (sqlx pings on every acquire by default), `max_lifetime`, configurable from `rango.toml` | ✅ `max_lifetime` (1800 s), `test_before_acquire` (false) in `DatabaseConfig`; not yet in `rango.toml` |
+| P1 | Pool tuning: `test_before_acquire(false)` (sqlx pings on every acquire by default), `max_lifetime`, configurable from `rango.toml` | ✅ `max_lifetime` (1800 s), `test_before_acquire` (false) in `DatabaseConfig`; not in `rango.toml` by design (CLI-only file, apps build `DatabaseConfig`) |
 | P2 | Row decoding by column index instead of by name | Measured: ~3% on `select_all_1000` (name lookup is cheap); needs a `RangoRow` API change. Pre-sized result `Vec` ✅ (−4.5%) |
 | P1 | Postgres `bulk_create` via `UNNEST` (one statement, no 65 535-param chunking) | ✅ JSON columns fall back to chunked multi-row `VALUES` |
 | P1 | Keyset pagination helper (`.after(col, value)`) | ✅ `.after()` / `.before()` |
 | P1 | Transaction retry on serialization failure / deadlock (`40001`, `40P01`) in `atomic()`, opt-in, bounded | ✅ `atomic_retry(&pool, max_attempts, f)` (Postgres), exponential backoff without jitter |
-| P1 | SQLite table rebuild for ALTER TYPE / NULL / FK changes (create new → copy → drop → rename, in one transaction) | Same migration UX on every backend; today SQLite only gets a comment |
+| P1 | SQLite table rebuild for ALTER TYPE / NULL / FK changes (create new → copy → drop → rename, in one transaction) | ✅ `RebuildTable` diff on SQLite; `migrate` turns FKs off and runs `PRAGMA foreign_key_check` in each migration transaction |
 | P2 | Optimistic locking (`#[field(version)]` → `UPDATE … WHERE version = $n`) | Safe concurrent updates without row locks |
 | P2 | Read-replica routing (writes → primary, reads → replica) | |
 

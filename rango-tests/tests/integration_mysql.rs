@@ -260,6 +260,12 @@ async fn test_mysql_select_and_prefetch_related() {
         .order_by("-title")
         .limit(1);
     assert!(q.explain().contains("LEFT JOIN"), "{}", q.explain());
+    // MySQL: EXPLAIN ANALYZE tree; MariaDB: ANALYZE FORMAT=JSON (r_* fields).
+    let plan = q.explain_analyze().await.unwrap();
+    assert!(
+        plan.contains("actual time") || plan.contains("\"r_loops\""),
+        "{plan}"
+    );
     let posts = q.all().await.unwrap();
     assert_eq!(posts.len(), 1);
     assert_eq!(posts[0].title.0, "second");
@@ -531,6 +537,32 @@ async fn test_mysql_raw_scalar() {
     .expect("raw_scalar failed");
 
     assert_eq!(count, 1);
+}
+
+/// No `rango::call`: a procedure is plain SQL through `raw*`, values bound.
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-mysql"), ignore)]
+async fn test_mysql_stored_procedure_via_raw() {
+    let pool = pool().await;
+    // MySQL 8.4 cannot prepare procedure DDL: run it over the text protocol.
+    sqlx::raw_sql(
+        "DROP PROCEDURE IF EXISTS rango_test_double;
+         CREATE PROCEDURE rango_test_double(IN x INT) SELECT x * 2 AS doubled",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // The procedure's result set comes back like a SELECT.
+    let doubled: i64 = raw_scalar(&pool, "CALL rango_test_double(?)", vec![SqlValue::Int(21)])
+        .await
+        .unwrap();
+    assert_eq!(doubled, 42);
+
+    sqlx::raw_sql("DROP PROCEDURE rango_test_double")
+        .execute(&pool)
+        .await
+        .unwrap();
 }
 
 #[tokio::test]

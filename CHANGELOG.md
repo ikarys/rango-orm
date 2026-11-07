@@ -3,6 +3,10 @@
 ## Unreleased
 
 - License: dual-licensed under MIT OR Apache-2.0 (was MIT only).
+- Feat: SQLite migrations rebuild the table (create, copy, drop, rename) for changes SQLite cannot `ALTER`: column type, nullability, FK, unique, constraints. They emitted a comment before. `rango migrate` runs SQLite migrations with foreign keys off and checks `PRAGMA foreign_key_check` before each commit.
+- Feat: `.explain_analyze()` on the query builder: `EXPLAIN ANALYZE` on Postgres and MySQL, `ANALYZE FORMAT=JSON` on MariaDB, `EXPLAIN QUERY PLAN` on SQLite.
+- Feat: `rango migrate` reads `MIGRATE_DATABASE_URL` before `DATABASE_URL`, so migrations can use a DDL role and the app a DML-only one.
+- Docs: stored procedures and functions through `raw*` (no dedicated API).
 
 ## 0.1.1 (2026-11-06)
 

@@ -450,3 +450,25 @@ where
         Ok(rows.into_iter().next())
     }
 }
+
+impl<M> QueryBuilder<M>
+where
+    M: Model + ModelValues + FromRow,
+{
+    #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "postgresql", db.operation = "EXPLAIN", db.sql.table = M::table_name(), otel.kind = "client"))]
+    /// Runs the `.all()` query under `EXPLAIN ANALYZE` and returns the plan with timings.
+    /// The query is executed (its rows are discarded): wrap writes-in-functions in a rolled-back transaction.
+    pub async fn explain_analyze(&self) -> Result<String> {
+        self.ensure_valid()?;
+        let (sql, binds) = self.select_sql();
+        let rows = bind_and_fetch_all(&self.pool, &format!("EXPLAIN ANALYZE {sql}"), binds).await?;
+        let lines = rows
+            .iter()
+            .map(|r| {
+                r.try_get::<String, _>(0)
+                    .map_err(|e| Error::Decode(e.to_string()))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        Ok(lines.join("\n"))
+    }
+}

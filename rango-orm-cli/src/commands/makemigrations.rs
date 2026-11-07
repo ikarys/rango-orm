@@ -1,4 +1,4 @@
-use crate::migration::diff::{SchemaDiff, diff};
+use crate::migration::diff::{SchemaDiff, diff, sqlite_rebuilds};
 use crate::migration::renames::detect_renames;
 use crate::migration::scanner::{generate_pivot_table, scan_models};
 use crate::migration::snapshot::Snapshot;
@@ -142,7 +142,13 @@ pub fn run(
     if !destructive.is_empty() {
         eprintln!("⚠️  Destructive changes: {}", destructive.join(", "));
     }
-    let sql = with_destructive_warning(generate_sql_from_diff(&diffs, backend), &destructive);
+    // SQLite cannot alter columns/constraints in place: those tables are rebuilt.
+    let sql_diffs = if backend == BackendKind::Sqlite {
+        sqlite_rebuilds(diffs.clone(), &schemas)
+    } else {
+        diffs.clone()
+    };
+    let sql = with_destructive_warning(generate_sql_from_diff(&sql_diffs, backend), &destructive);
 
     // --dry-run: print SQL, do not write files
     if dry_run {
@@ -257,6 +263,7 @@ fn migration_label(diffs: &[SchemaDiff]) -> String {
             SchemaDiff::AddConstraint { table, .. } => table.clone(),
             SchemaDiff::DropConstraint { table, .. } => table.clone(),
             SchemaDiff::RenameColumn { table, .. } => table.clone(),
+            SchemaDiff::RebuildTable { schema, .. } => schema.table_name.clone(),
         })
         .collect::<std::collections::HashSet<_>>()
         .into_iter()

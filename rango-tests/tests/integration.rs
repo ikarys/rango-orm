@@ -368,6 +368,8 @@ async fn test_select_and_prefetch_related() {
         .order_by("-title")
         .limit(1);
     assert!(q.explain().contains("LEFT JOIN"), "{}", q.explain());
+    let plan = q.explain_analyze().await.unwrap();
+    assert!(plan.contains("actual time"), "{plan}");
     let posts = q.all().await.unwrap();
     assert_eq!(posts.len(), 1);
     assert_eq!(posts[0].title.0, "second");
@@ -761,6 +763,35 @@ async fn test_raw_execute() {
     assert_eq!(affected, 1);
 
     teardown(&pool).await;
+}
+
+/// No `rango::call`: a procedure or function is plain SQL through `raw*`, values bound.
+#[tokio::test]
+#[cfg_attr(not(feature = "integration"), ignore)]
+async fn test_stored_procedure_via_raw() {
+    let pool = pool().await;
+    raw_execute(
+        &pool,
+        "CREATE OR REPLACE PROCEDURE rango_test_double(IN x INT, INOUT result INT)
+         LANGUAGE plpgsql AS $$ BEGIN result := x * 2; END $$",
+        vec![],
+    )
+    .await
+    .unwrap();
+
+    // CALL returns the INOUT parameters as one row.
+    let doubled: i32 = raw_scalar(
+        &pool,
+        "CALL rango_test_double($1, NULL)",
+        vec![SqlValue::Int(21)],
+    )
+    .await
+    .unwrap();
+    assert_eq!(doubled, 42);
+
+    raw_execute(&pool, "DROP PROCEDURE rango_test_double(INT, INT)", vec![])
+        .await
+        .unwrap();
 }
 
 #[tokio::test]

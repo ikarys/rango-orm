@@ -415,6 +415,41 @@ fn diff_to_sql(d: &SchemaDiff, backend: BackendKind) -> String {
                 )
             }
         }
+        SchemaDiff::RebuildTable { schema, copy } => {
+            let (create_sql, post_stmts) = create_table_parts(schema, backend);
+            let quoted_table = backend.quote_ident(&schema.table_name);
+            let quoted_temp = backend.quote_ident(&format!("_rango_new_{}", schema.table_name));
+            let old_header = format!("CREATE TABLE IF NOT EXISTS {} (", quoted_table);
+            let new_header = format!("CREATE TABLE {} (", quoted_temp);
+            let create_sql = create_sql.replacen(&old_header, &new_header, 1);
+
+            let mut out = format!(
+                "-- SQLite cannot alter columns or constraints in place: rebuild {}.\n",
+                quoted_table
+            );
+            out.push_str(&create_sql);
+            if !copy.is_empty() {
+                let cols = copy
+                    .iter()
+                    .map(|c| backend.quote_ident(c))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                out.push_str(&format!(
+                    "INSERT INTO {} ({}) SELECT {} FROM {};\n",
+                    quoted_temp, cols, cols, quoted_table
+                ));
+            }
+            out.push_str(&format!(
+                "DROP TABLE {};\nALTER TABLE {} RENAME TO {};\n",
+                quoted_table, quoted_temp, quoted_table
+            ));
+            for stmt in post_stmts {
+                out.push('\n');
+                out.push_str(&stmt);
+            }
+            out.push('\n');
+            out
+        }
         SchemaDiff::RenameColumn { table, from, to } => {
             format!(
                 "ALTER TABLE {} RENAME COLUMN {} TO {};\n\n",
@@ -426,7 +461,7 @@ fn diff_to_sql(d: &SchemaDiff, backend: BackendKind) -> String {
     }
 }
 
-fn generate_create_table(schema: &TableSchema, backend: BackendKind) -> String {
+fn create_table_parts(schema: &TableSchema, backend: BackendKind) -> (String, Vec<String>) {
     let mut lines = Vec::new();
     let mut post_stmts: Vec<String> = Vec::new();
 
@@ -547,23 +582,17 @@ fn generate_create_table(schema: &TableSchema, backend: BackendKind) -> String {
         ");\n"
     };
 
-    let mut sql = format!(
+    let create_sql = format!(
         "CREATE TABLE IF NOT EXISTS {} (\n{}\n{}",
         backend.quote_ident(&schema.table_name),
         lines.join(",\n"),
         closing
     );
 
-    for stmt in post_stmts {
-        sql.push('\n');
-        sql.push_str(&stmt);
-    }
-
     if backend != BackendKind::Mysql {
         for col in &schema.columns {
             if col.index && !col.primary_key && !col.unique {
-                sql.push('\n');
-                sql.push_str(&format!(
+                post_stmts.push(format!(
                     "CREATE INDEX IF NOT EXISTS {} ON {} ({});\n",
                     object_name(backend, &format!("{}_{}_idx", schema.table_name, col.name)),
                     backend.quote_ident(&schema.table_name),
@@ -573,6 +602,16 @@ fn generate_create_table(schema: &TableSchema, backend: BackendKind) -> String {
         }
     }
 
+    (create_sql, post_stmts)
+}
+
+fn generate_create_table(schema: &TableSchema, backend: BackendKind) -> String {
+    let (create_sql, post_stmts) = create_table_parts(schema, backend);
+    let mut sql = create_sql;
+    for stmt in post_stmts {
+        sql.push('\n');
+        sql.push_str(&stmt);
+    }
     sql
 }
 
@@ -1537,6 +1576,43 @@ mod tests {
         assert_eq!(
             column_definition("t", &col, BackendKind::Sqlite),
             "\"id\" INTEGER PRIMARY KEY"
+        );
+    }
+
+    // ── SQLite rebuild ─────────────────────────────────────────────────────────
+    #[test]
+    fn sqlite_rebuild_table_emits_rebuild_statements() {
+        let schema = TableSchema {
+            table_name: "posts".to_string(),
+            columns: vec![
+                uuid_col("id", true),
+                fk_col("author", "app_users", ReferentialAction::Cascade),
+            ],
+            ..Default::default()
+        };
+        let diff = SchemaDiff::RebuildTable {
+            schema,
+            copy: vec!["id".to_string(), "author".to_string()],
+        };
+        let sql = generate_sql_from_diff(&[diff], BackendKind::Sqlite);
+
+        let create = sql
+            .find("CREATE TABLE \"_rango_new_posts\" (")
+            .expect("got: {sql}");
+        let insert = sql
+            .find("INSERT INTO \"_rango_new_posts\" (\"id\", \"author\") SELECT \"id\", \"author\" FROM \"posts\";")
+            .expect("got: {sql}");
+        let drop = sql.find("DROP TABLE \"posts\";").expect("got: {sql}");
+        let rename = sql
+            .find("ALTER TABLE \"_rango_new_posts\" RENAME TO \"posts\";")
+            .expect("got: {sql}");
+        let index = sql
+            .find("CREATE INDEX IF NOT EXISTS \"posts_author_idx\" ON \"posts\" (\"author\");")
+            .expect("got: {sql}");
+
+        assert!(
+            create < insert && insert < drop && drop < rename && rename < index,
+            "got: {sql}"
         );
     }
 }

@@ -373,3 +373,42 @@ where
         Ok(rows.into_iter().next())
     }
 }
+
+impl<M> QueryBuilder<M>
+where
+    M: Model + ModelValues + FromRow,
+{
+    #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "mysql", db.operation = "EXPLAIN", db.sql.table = M::table_name(), otel.kind = "client"))]
+    /// Runs the `.all()` query under the engine's profiler and returns the plan with timings:
+    /// `EXPLAIN ANALYZE` on MySQL 8.0.18+, `ANALYZE FORMAT=JSON` on MariaDB.
+    /// The query is executed (its rows are discarded).
+    pub async fn explain_analyze(&self) -> Result<String> {
+        use sqlx::Row;
+        self.ensure_valid()?;
+        let (sql, binds) = self.select_sql();
+        let mut conn = self.pool.acquire().await.map_err(db_err)?;
+        let version = bind_and_fetch_all(&mut *conn, "SELECT VERSION()", Vec::new()).await?;
+        let mariadb = version
+            .first()
+            .and_then(|r| r.try_get::<String, _>(0).ok())
+            .is_some_and(|v| v.contains("MariaDB"));
+        let prefix = if mariadb {
+            "ANALYZE FORMAT=JSON"
+        } else {
+            "EXPLAIN ANALYZE"
+        };
+        let rows = bind_and_fetch_all(&mut *conn, &format!("{prefix} {sql}"), binds).await?;
+        let lines = rows
+            .iter()
+            .map(|r| {
+                // Some servers type the plan column as a blob.
+                r.try_get::<String, _>(0).or_else(|_| {
+                    r.try_get::<Vec<u8>, _>(0)
+                        .map(|b| String::from_utf8_lossy(&b).into_owned())
+                        .map_err(|e| Error::Decode(e.to_string()))
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        Ok(lines.join("\n"))
+    }
+}
