@@ -30,7 +30,7 @@ atomic_retry(&pool, 3, |tx| Box::pin(async move {
 .await?;
 ```
 
-The closure can run several times, so keep it free of side effects outside the transaction (no emails, no HTTP calls). Postgres only.
+The closure can run several times, so keep it free of side effects outside the transaction (no emails, no HTTP calls). Postgres only (`atomic()` itself works on every backend).
 
 ## Manual transactions
 
@@ -46,19 +46,21 @@ tx.commit().await?;
 // or tx.rollback().await? to cancel
 ```
 
-## QueryBuilder.transaction()
+## Queries, M2M and bulk inside a transaction
 
-Convenience method when you already have a `QueryBuilder` in scope:
+`filter`, the `M2M` operations and the bulk operations take a pool or a transaction, on every backend. Inside `atomic()` pass `&mut **tx`:
 
 ```rust
-User::filter(&pool)
-    .transaction(|tx| Box::pin(async move {
-        insert(&mut **tx, user).await?;
-        insert(&mut **tx, profile).await?;
-        Ok(())
-    }))
-    .await?;
+atomic(&pool, |tx| Box::pin(async move {
+    bulk_create(&mut **tx, &users).await?;
+    let n = User::filter(&mut **tx).eq("active", true).count().await?; // sees the writes above
+    M2M::<Article, Tag>::add(&mut **tx, &article, &tag).await?;
+    Ok(n)
+}))
+.await?;
 ```
+
+If the closure returns `Err`, none of it is kept.
 
 ## Nesting
 
@@ -72,4 +74,4 @@ If a hook returns `Err`, the whole transaction rolls back — including any oper
 
 ## get_or_create is atomic
 
-`get_or_create` uses `INSERT ... ON CONFLICT DO NOTHING RETURNING *` — it's atomic without wrapping in `atomic()`. Safe against race conditions.
+`get_or_create` uses `INSERT ... ON CONFLICT DO NOTHING RETURNING *` (SQLite, MySQL: the equivalent for the engine) — it's atomic without wrapping in `atomic()`. Safe against race conditions. It takes a pool or a transaction.

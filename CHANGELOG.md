@@ -19,6 +19,10 @@ First beta of the 0.2 cycle. The API may still change between betas: pin the tag
 - Feat: new `Error::TableMissing { table }` (Postgres 42P01, SQLite "no such table", MySQL 1146) saying to run `rango makemigrations` and `rango migrate`. Unknown column names now suggest the closest column. SQLite `UniqueViolation` (and other constraint errors) carry the failing columns as `constraint`.
 - Fix: `rango makemigrations` without a terminal no longer fails with a bare NOT NULL error when a column may have been renamed: it says so and points to `--yes` or a terminal.
 - Fix: `ForeignKey<M>` and `ManyToMany<M>` no longer require `M: Clone` / `Default` / `Debug` / `PartialEq`. `ForeignKey<M>` is now `Copy`, `Eq` and `Hash`.
+- Feat: transactions everywhere. `Model::filter`, the `M2M` operations, `get_or_create`, `bulk_create`, `bulk_update` and `bulk_upsert` take a pool or a transaction on all three backends: `User::filter(&pool)` still works, inside `atomic()` use `User::filter(&mut **tx)`. Bulk operations run in one transaction (a savepoint inside yours).
+- Feat: `bulk_update`, `bulk_upsert` and `update_or_create` on SQLite and MySQL/MariaDB, same signatures as Postgres. `update_or_create` fires update hooks when the row existed, create hooks otherwise. SQLite and MySQL `bulk_update` run one `UPDATE` per row in a transaction.
+- Fix: Postgres `update_or_create` updated the row using the primary key carried by the new values; it now updates the row it found. Postgres `bulk_update` validates its column names like the other backends.
+- Breaking (pre-1.0): `QueryBuilder<M>` is now `QueryBuilder<'a, M>` and holds a `Conn<'a>` (new, built from `&Pool`, `&mut Connection` or `&mut Transaction`). Postgres `RangoExecutor` and `QueryBuilder::transaction` are removed: use `atomic()`. `.explain_analyze()` takes `&mut self`. `update_or_create` takes `&pool` or `&mut *tx` (was `&mut pool`); M2M operations and `get_or_create` are generic over the executor.
 
 ## 0.1.1 (2026-11-06)
 
