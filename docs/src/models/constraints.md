@@ -7,8 +7,8 @@ use rango::prelude::*;
 
 #[derive(Model)]
 #[model(constraints = [
-    CheckConstraint::raw("age >= 0").name("chk_age_positive"),
-    CheckConstraint::raw("price > 0").name("chk_price_positive"),
+    CheckConstraint::new("age >= 0").name("chk_age_positive"),
+    CheckConstraint::new("price > 0").name("chk_price_positive"),
 ])]
 pub struct Product {
     pub id: FieldUuid,
@@ -38,7 +38,7 @@ CREATE TABLE "product" (
     // Composite unique
     UniqueConstraint::on(&["room", "date"]).name("uniq_booking"),
 
-    // Partial unique (Postgres only)
+    // Partial unique (partial unique index on Postgres and SQLite; skipped with a comment on MySQL)
     UniqueConstraint::on(&["email"])
         .condition("deleted_at IS NULL")
         .name("uniq_active_email"),
