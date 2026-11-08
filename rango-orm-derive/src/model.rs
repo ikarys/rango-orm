@@ -78,6 +78,7 @@ pub fn expand(input: DeriveInput) -> Result<TokenStream> {
     let mut pk_col_name = "id".to_string();
     let mut pk_found = false;
     let mut set_pk_body = quote! { let _ = id; };
+    let mut pk_type = quote! { #core::UnsupportedPk };
 
     // ManyToMany fields are never read by generated code, so `dead_code` would flag them
     // in every model that declares one; this read silences it.
@@ -108,7 +109,14 @@ pub fn expand(input: DeriveInput) -> Result<TokenStream> {
             let ty = &f.ty;
             let ty_str = quote!(#ty).to_string().replace(' ', "");
             // Path-qualified types too (`#[rango::model]` injects `rango_core::FieldAutoBigInt`).
-            match ty_str.rsplit("::").next().unwrap_or("") {
+            let last = ty_str.rsplit("::").next().unwrap_or("");
+            if matches!(
+                last,
+                "FieldUuid" | "FieldInt" | "FieldBigInt" | "FieldAutoInt" | "FieldAutoBigInt"
+            ) {
+                pk_type = quote! { <#ty as #core::PrimaryKeyField>::Pk };
+            }
+            match last {
                 "FieldAutoInt" => {
                     set_pk_body =
                         quote! { self.#fname = #core::FieldAutoInt(i32::try_from(id).ok()); };
@@ -198,6 +206,8 @@ pub fn expand(input: DeriveInput) -> Result<TokenStream> {
         #default_hooks
 
         impl #core2::Model for #struct_name {
+            type Pk = #pk_type;
+
             fn table_name() -> &'static str {
                 #table_name
             }
@@ -482,8 +492,8 @@ pub(crate) fn field_type_to_getter(
         "FieldTime" => quote! { row.get_time(#col).map(#core::FieldTime)? },
         "FieldJson" => quote! { row.get_json(#col).map(#core::FieldJson)? },
         s if s.starts_with("ForeignKey<") => {
-            // Extract the type parameter — not used at runtime, only for type safety
-            quote! { row.get_uuid(#col).map(|id| #core::ForeignKey::new(id))? }
+            let target = fk_target(s);
+            quote! { <<#target as #core::Model>::Pk as #core::PrimaryKey>::from_row(row, #col).map(#core::ForeignKey::<#target>::new)? }
         }
         s if s.starts_with("FieldVarchar<") => {
             let (min, max) = parse_two_generics(s, "FieldVarchar");
@@ -542,7 +552,8 @@ pub(crate) fn field_type_to_getter(
                 quote! { if row.is_null(#col) { None } else { Some(row.get_json(#col).map(#core::FieldJson)?) } }
             }
             s if s.starts_with("ForeignKey<") => {
-                quote! { if row.is_null(#col) { None } else { Some(row.get_uuid(#col).map(|id| #core::ForeignKey::new(id))?) } }
+                let target = fk_target(s);
+                quote! { if row.is_null(#col) { None } else { Some(<<#target as #core::Model>::Pk as #core::PrimaryKey>::from_row(row, #col).map(#core::ForeignKey::<#target>::new)?) } }
             }
             s if s.starts_with("FieldVarchar<") => {
                 let (min, max) = parse_two_generics(s, "FieldVarchar");
@@ -595,6 +606,15 @@ fn first_generic(ty: &Type) -> Option<&Type> {
         syn::GenericArgument::Type(t) => Some(t),
         _ => None,
     })
+}
+
+/// The target model of a `ForeignKey<Target>` type text (as built by [`type_name`]).
+fn fk_target(type_str: &str) -> TokenStream {
+    let inner = type_str
+        .strip_prefix("ForeignKey<")
+        .and_then(|t| t.strip_suffix('>'))
+        .unwrap_or("");
+    inner.parse().unwrap_or_else(|_| quote! { () })
 }
 
 /// Type text without its module path: `rango::FieldVarchar<1, 100>` → `FieldVarchar<1,100>`,
@@ -651,7 +671,11 @@ fn map_field_type(ty: &Type, core: &TokenStream) -> Result<TokenStream> {
         "FieldTime" => quote! { #core::ColumnType::Time },
         "FieldDateTime" => quote! { #core::ColumnType::DateTime },
         "FieldJson" => quote! { #core::ColumnType::Jsonb },
-        s if s.starts_with("ForeignKey<") => quote! { #core::ColumnType::Uuid },
+        s if s.starts_with("ForeignKey<") => {
+            let target = first_generic(ty)
+                .ok_or_else(|| syn::Error::new_spanned(ty, "expected ForeignKey<Model>"))?;
+            quote! { <<#target as #core::Model>::Pk as #core::PrimaryKey>::COLUMN_TYPE }
+        }
         s if s.starts_with("FieldVarchar<") => parse_varchar(s, core)?,
         s if s.starts_with("FieldDecimal<") => parse_decimal(s, core)?,
         s if s.starts_with("FieldPassword<") => parse_password(s, core)?,

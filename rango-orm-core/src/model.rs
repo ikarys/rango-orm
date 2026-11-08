@@ -9,11 +9,115 @@ use crate::schema::TableSchema;
     note = "add `#[derive(Model)]` (or `#[rango::model]`) to `{Self}`"
 )]
 pub trait Model: crate::ModelHooks {
+    /// The Rust type of the primary key value (`Uuid`, `i32`, `i64`).
+    /// `ForeignKey<Self>` and `ManyToMany<Self>` columns follow it.
+    type Pk: PrimaryKey;
+
     /// The table name in the database.
     fn table_name() -> &'static str;
 
     /// The full schema description for this model.
     fn schema() -> TableSchema;
+}
+
+/// A primary key value type that a `ForeignKey<M>` column can hold: `Uuid` (the default),
+/// `i32` (`FieldAutoInt` / `FieldInt`) or `i64` (`FieldAutoBigInt` / `FieldBigInt`).
+pub trait PrimaryKey:
+    Copy
+    + Eq
+    + std::hash::Hash
+    + std::fmt::Debug
+    + Send
+    + Sync
+    + 'static
+    + crate::ToSqlValue
+    + serde::Serialize
+    + serde::de::DeserializeOwned
+{
+    /// Type of a foreign key column pointing at this key.
+    const COLUMN_TYPE: crate::ColumnType;
+
+    /// The SQL NULL of this type (for `Option<ForeignKey<M>>`).
+    fn null_value() -> crate::SqlValue;
+
+    /// Reads the key from `col`.
+    fn from_row(row: &dyn crate::RangoRow, col: &str) -> Result<Self, crate::RowError>;
+}
+
+impl PrimaryKey for uuid::Uuid {
+    const COLUMN_TYPE: crate::ColumnType = crate::ColumnType::Uuid;
+    fn null_value() -> crate::SqlValue {
+        crate::SqlValue::NullUuid
+    }
+    fn from_row(row: &dyn crate::RangoRow, col: &str) -> Result<Self, crate::RowError> {
+        row.get_uuid(col)
+    }
+}
+
+impl PrimaryKey for i32 {
+    const COLUMN_TYPE: crate::ColumnType = crate::ColumnType::Int;
+    fn null_value() -> crate::SqlValue {
+        crate::SqlValue::NullInt
+    }
+    fn from_row(row: &dyn crate::RangoRow, col: &str) -> Result<Self, crate::RowError> {
+        row.get_i32(col)
+    }
+}
+
+impl PrimaryKey for i64 {
+    const COLUMN_TYPE: crate::ColumnType = crate::ColumnType::BigInt;
+    fn null_value() -> crate::SqlValue {
+        crate::SqlValue::NullBigInt
+    }
+    fn from_row(row: &dyn crate::RangoRow, col: &str) -> Result<Self, crate::RowError> {
+        row.get_i64(col)
+    }
+}
+
+/// The key type of a primary key field type: `FieldUuid` -> `Uuid`, `FieldAutoInt` and
+/// `FieldInt` -> `i32`, `FieldAutoBigInt` and `FieldBigInt` -> `i64`.
+/// Used by `#[derive(Model)]` to set `Model::Pk`.
+pub trait PrimaryKeyField {
+    type Pk: PrimaryKey;
+}
+
+impl PrimaryKeyField for crate::FieldUuid {
+    type Pk = uuid::Uuid;
+}
+impl PrimaryKeyField for crate::FieldInt {
+    type Pk = i32;
+}
+impl PrimaryKeyField for crate::FieldAutoInt {
+    type Pk = i32;
+}
+impl PrimaryKeyField for crate::FieldBigInt {
+    type Pk = i64;
+}
+impl PrimaryKeyField for crate::FieldAutoBigInt {
+    type Pk = i64;
+}
+
+/// `Model::Pk` of a model whose primary key is none of the types above (a text key, say).
+/// Nothing can build one, so `ForeignKey<Model>` is unusable for it. Set by the derive.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum UnsupportedPk {}
+
+impl crate::ToSqlValue for UnsupportedPk {
+    fn to_sql_value(&self) -> crate::SqlValue {
+        match *self {}
+    }
+}
+
+impl PrimaryKey for UnsupportedPk {
+    const COLUMN_TYPE: crate::ColumnType = crate::ColumnType::Uuid;
+    fn null_value() -> crate::SqlValue {
+        crate::SqlValue::NullUuid
+    }
+    fn from_row(_: &dyn crate::RangoRow, col: &str) -> Result<Self, crate::RowError> {
+        Err(crate::RowError::new(format!(
+            "{col}: the target model has no UUID, integer or bigint primary key"
+        )))
+    }
 }
 
 /// Marker trait for abstract model mixins (`#[derive(ModelMixin)]`).
@@ -125,6 +229,8 @@ mod fuzz_tests {
     impl crate::ModelHooks for TestModel {}
 
     impl Model for TestModel {
+        type Pk = uuid::Uuid;
+
         fn table_name() -> &'static str {
             "test_models"
         }

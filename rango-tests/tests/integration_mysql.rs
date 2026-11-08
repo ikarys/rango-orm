@@ -1600,3 +1600,205 @@ async fn test_mysql_atomic_future_is_send() {
     .unwrap();
     assert_eq!(n, 1);
 }
+
+// ── Foreign keys and M2M follow the target's primary key type ─────────────────
+
+#[derive(Model, Debug, Clone)]
+#[model(table = "pk_author")]
+struct PkAuthor {
+    id: FieldAutoBigInt,
+    name: FieldVarchar<1, 100>,
+}
+
+#[derive(Model, Debug, Clone)]
+#[model(table = "pk_label")]
+struct PkLabel {
+    id: FieldAutoInt,
+    name: FieldVarchar<1, 100>,
+}
+
+#[derive(Model, Debug, Clone)]
+#[model(table = "pk_book")]
+struct PkBook {
+    id: FieldUuid,
+    author_id: ForeignKey<PkAuthor>,
+    editor_id: Option<ForeignKey<PkLabel>>,
+    title: FieldVarchar<1, 100>,
+    labels: ManyToMany<PkLabel>,
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-mysql"), ignore)]
+async fn mysql_test_fk_and_m2m_follow_the_target_pk_type() {
+    let pool = pool().await;
+    for ddl in [
+        "DROP TABLE IF EXISTS `pk_book_pk_label`",
+        "DROP TABLE IF EXISTS `pk_book`",
+        "DROP TABLE IF EXISTS `pk_label`",
+        "DROP TABLE IF EXISTS `pk_author`",
+        "CREATE TABLE `pk_author` (`id` BIGINT AUTO_INCREMENT PRIMARY KEY, `name` VARCHAR(100) NOT NULL)",
+        "CREATE TABLE `pk_label` (`id` INT AUTO_INCREMENT PRIMARY KEY, `name` VARCHAR(100) NOT NULL)",
+        "CREATE TABLE `pk_book` (`id` BINARY(16) PRIMARY KEY, `author_id` BIGINT NOT NULL, `editor_id` INT NULL, `title` VARCHAR(100) NOT NULL, FOREIGN KEY (`author_id`) REFERENCES `pk_author` (`id`), FOREIGN KEY (`editor_id`) REFERENCES `pk_label` (`id`))",
+        "CREATE TABLE `pk_book_pk_label` (`pk_book_id` BINARY(16) NOT NULL, `pk_label_id` INT NOT NULL, PRIMARY KEY (`pk_book_id`, `pk_label_id`), FOREIGN KEY (`pk_book_id`) REFERENCES `pk_book` (`id`) ON DELETE CASCADE, FOREIGN KEY (`pk_label_id`) REFERENCES `pk_label` (`id`) ON DELETE CASCADE)",
+    ] {
+        sqlx::query(ddl).execute(&pool).await.unwrap();
+    }
+
+    // The schema derived from the models: FK columns take the target's key type.
+    let col = |name: &str| {
+        PkBook::schema()
+            .columns
+            .into_iter()
+            .find(|c| c.name == name)
+            .unwrap()
+    };
+    assert_eq!(col("author_id").col_type, ColumnType::BigInt);
+    assert_eq!(col("editor_id").col_type, ColumnType::Int);
+    assert_eq!(col("author_id").references.unwrap().table, "pk_author");
+
+    let name = |s: &str| FieldVarchar::<1, 100>::new(s.to_string()).unwrap();
+    let ann = insert(
+        &pool,
+        PkAuthor {
+            id: FieldAutoBigInt(None),
+            name: name("ann"),
+        },
+    )
+    .await
+    .unwrap();
+    let bob = insert(
+        &pool,
+        PkAuthor {
+            id: FieldAutoBigInt(None),
+            name: name("bob"),
+        },
+    )
+    .await
+    .unwrap();
+    let mut labels = Vec::new();
+    for n in ["rust", "orm"] {
+        let label = insert(
+            &pool,
+            PkLabel {
+                id: FieldAutoInt(None),
+                name: name(n),
+            },
+        )
+        .await
+        .unwrap();
+        labels.push(label);
+    }
+    let (ann_id, bob_id) = (ann.id.0.unwrap(), bob.id.0.unwrap());
+    let rust_id: i32 = labels[0].id.0.unwrap();
+
+    // Insert and read back: bigint FK, nullable int FK (Some and None).
+    let book = |title: &str, author: i64, editor: Option<i32>| PkBook {
+        id: FieldUuid(Uuid::new_v4()),
+        author_id: ForeignKey::new(author),
+        editor_id: editor.map(ForeignKey::new),
+        title: name(title),
+        labels: ManyToMany::empty(),
+    };
+    let b1 = insert(&pool, book("one", ann_id, Some(rust_id)))
+        .await
+        .unwrap();
+    let b2 = insert(&pool, book("two", ann_id, None)).await.unwrap();
+    insert(&pool, book("three", bob_id, None)).await.unwrap();
+    let got = get::<_, PkBook>(&pool, &b1.id.to_sql_value())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(got.author_id.id(), ann_id);
+    assert_eq!(got.editor_id.map(|e| e.id()), Some(rust_id));
+    let got2 = get::<_, PkBook>(&pool, &b2.id.to_sql_value())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(got2.editor_id.is_none());
+
+    // Filter by the raw key value.
+    let anns = PkBook::filter(&pool)
+        .eq(PkBook::AUTHOR_ID, ann_id)
+        .all()
+        .await
+        .unwrap();
+    assert_eq!(anns.len(), 2);
+
+    // select_related: one JOIN, the author's bigint key decodes.
+    let joined = PkBook::filter(&pool)
+        .select_related(PkBook::AUTHOR_ID)
+        .order_by("title")
+        .all()
+        .await
+        .unwrap();
+    assert_eq!(joined.len(), 3);
+    // titles sorted: one, three, two
+    assert_eq!(joined[0].related::<PkAuthor>().name.as_str(), "ann");
+    assert_eq!(joined[1].related::<PkAuthor>().id.0, Some(bob_id));
+
+    // prefetch_related over the reverse bigint FK.
+    let authors = PkAuthor::filter(&pool)
+        .prefetch_related(PkBook::AUTHOR_ID)
+        .all()
+        .await
+        .unwrap();
+    let books_of = |id: i64| {
+        authors
+            .iter()
+            .find(|a| a.id.0 == Some(id))
+            .unwrap()
+            .prefetched::<PkBook>()
+            .len()
+    };
+    assert_eq!((books_of(ann_id), books_of(bob_id)), (2, 1));
+
+    // ManyToMany to an int key: add / all / reverse / exists / prefetch / remove.
+    for l in &labels {
+        M2M::<PkBook, PkLabel>::add(&pool, &b1, l).await.unwrap();
+    }
+    M2M::<PkBook, PkLabel>::add(&pool, &b2, &labels[0])
+        .await
+        .unwrap();
+    assert_eq!(
+        M2M::<PkBook, PkLabel>::all(&pool, &b1).await.unwrap().len(),
+        2
+    );
+    assert_eq!(
+        M2M::<PkBook, PkLabel>::reverse(&pool, &labels[0])
+            .await
+            .unwrap()
+            .len(),
+        2
+    );
+    assert!(
+        M2M::<PkBook, PkLabel>::exists(&pool, &b2, &labels[0])
+            .await
+            .unwrap()
+    );
+    assert!(
+        !M2M::<PkBook, PkLabel>::exists(&pool, &b2, &labels[1])
+            .await
+            .unwrap()
+    );
+    let with_labels = PkBook::filter(&pool)
+        .prefetch_related(PkBook::LABELS)
+        .all()
+        .await
+        .unwrap();
+    let labels_of = |b: &PkBook| {
+        with_labels
+            .iter()
+            .find(|w| w.id == b.id)
+            .unwrap()
+            .prefetched::<PkLabel>()
+            .len()
+    };
+    assert_eq!((labels_of(&b1), labels_of(&b2)), (2, 1));
+    M2M::<PkBook, PkLabel>::remove(&pool, &b1, &labels[1])
+        .await
+        .unwrap();
+    assert_eq!(
+        M2M::<PkBook, PkLabel>::all(&pool, &b1).await.unwrap().len(),
+        1
+    );
+}

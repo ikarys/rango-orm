@@ -130,8 +130,8 @@ Design rules:
 | Feature | Notes |
 |---|---|
 | **Query builder** ✅ | `eq/ne/gt/gte/lt/lte/like/in_values/is_null`, `or()` / `not()` / `xor()` / `group()`, `order_by`, `limit`/`offset`, default cap of 1000 rows (`unlimited()`), `.explain()`. Typed columns (`User::EMAIL`) checked at compile time; string names checked against `M::schema()` at run time (`Error::Invalid`) |
-| **Relations FK** ✅ | `ForeignKey<User>` → real `REFERENCES … ON DELETE` in SQL, FK columns indexed |
-| **ManyToMany** ✅ | Auto-generated pivot table; `add` / `remove` / `set` / `all` / `reverse` / `clear` / `exists` |
+| **Relations FK** ✅ | `ForeignKey<User>` → real `REFERENCES … ON DELETE` in SQL, FK columns indexed; the column follows the target's PK type (UUID default, INT, BIGINT) |
+| **ManyToMany** ✅ | Auto-generated pivot table (key columns follow the target PK types); `add` / `remove` / `set` / `all` / `reverse` / `clear` / `exists` |
 | **Constraints** ✅ | `#[model(constraints = [CheckConstraint::new("age >= 18").name("chk_age"), UniqueConstraint::on(&["room", "date"]).name("uniq_booking")])]`: `CHECK` and `UNIQUE` inline in `CREATE TABLE`; `UNIQUE … WHERE cond` → partial unique index (Postgres, SQLite; skipped with a comment on MySQL). `managed = false` → ignored by migrations. `ordering = [asc("col"), desc("other")]` → default order |
 | **Subqueries** ✅ | `where_exists(Article::AUTHOR_ID, \|q\| ..)` (correlated `EXISTS`, `.not()` → `NOT EXISTS`) and `in_subquery(col, sub_col, \|q\| ..)`; decision rules for subquery vs `JOIN` vs `prefetch` documented in `docs/src/querying/filter.md`. Left (P2): Rango auto-picks the cheapest shape from a cost model |
 | **select_related** ✅ | One `LEFT JOIN` (filtered/paginated M in a subquery, R's columns prefixed `__r{i}_`); `all()` returns `Vec<WithRelated<M>>` |
@@ -302,6 +302,7 @@ Known-CVE checklist (reviewed 2026-11-01) — keep new APIs out of these classes
 
 ## Known limitations
 
+- `ForeignKey<M>` and `ManyToMany<M>` need `M` to have a UUID, integer or bigint primary key (`FieldUuid`, `FieldInt`, `FieldAutoInt`, `FieldBigInt`, `FieldAutoBigInt`). Text or composite keys cannot be relation targets; `rango makemigrations` refuses a ManyToMany to one.
 - SQLite has no decimal type: `FieldDecimal` is stored in a `NUMERIC` column, so a value with more than 15 significant digits is kept exactly as text, and one with up to 15 digits is a number again once read (scale restored from the column). Postgres and MySQL are exact.
 - A Postgres FK cycle is restorable because the FKs that close it are `DEFERRABLE`; databases created by an older `rango migrate` have them non-deferrable, so a NOT NULL cycle there still needs the constraints recreated (`ALTER TABLE ... ALTER CONSTRAINT ... DEFERRABLE`).
 

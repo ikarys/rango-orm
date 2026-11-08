@@ -1,17 +1,18 @@
 use crate::migration::diff::{SchemaDiff, diff, sqlite_rebuilds};
 use crate::migration::renames::detect_renames;
-use crate::migration::scanner::{generate_pivot_table, scan_models};
+use crate::migration::scanner::{fk_type, generate_pivot_table, scan_models};
 use crate::migration::snapshot::Snapshot;
 use crate::migration::sql::generate_sql_from_diff;
 use anyhow::{Result, bail};
-use rango_orm_core::{BackendKind, ColumnType, TableSchema};
+use rango_orm_core::{BackendKind, TableSchema};
 use std::fs;
 use std::io::{IsTerminal, Write};
 
 /// MySQL rejects table/column names over 64 bytes. Constraint and index names are
 /// shortened by the SQL generator, but table names are also derived at runtime
 /// (M2M pivots), so they must fit as-is.
-/// Pivot columns are UUIDs, so both sides of a ManyToMany need a UUID primary key.
+/// Pivot columns follow the primary keys they reference, so both sides of a ManyToMany
+/// need a UUID, integer or bigint primary key.
 fn check_pivot_targets(schemas: &[TableSchema], pivots: &[TableSchema]) -> Result<()> {
     for pivot in pivots {
         for fk in pivot.columns.iter().filter_map(|c| c.references.as_ref()) {
@@ -20,10 +21,10 @@ fn check_pivot_targets(schemas: &[TableSchema], pivots: &[TableSchema]) -> Resul
                 .find(|s| s.table_name == fk.table)
                 .and_then(|s| s.columns.iter().find(|c| c.primary_key))
                 .map(|c| &c.col_type);
-            if let Some(t) = pk_type.filter(|t| **t != ColumnType::Uuid) {
+            if let Some(t) = pk_type.filter(|t| fk_type(t).is_none()) {
                 bail!(
                     "ManyToMany pivot \"{}\" references \"{}\", whose primary key is {:?}; \
-                     ManyToMany needs UUID primary keys on both models",
+                     ManyToMany needs a UUID, integer or bigint primary key on both models",
                     pivot.table_name,
                     fk.table,
                     t
@@ -90,7 +91,10 @@ pub fn run(
         return Ok(());
     }
 
-    let pivot_schemas: Vec<TableSchema> = m2m_relations.iter().map(generate_pivot_table).collect();
+    let pivot_schemas: Vec<TableSchema> = m2m_relations
+        .iter()
+        .map(|rel| generate_pivot_table(rel, &schemas))
+        .collect();
 
     println!("Found {} model(s):", schemas.len());
     for s in &schemas {

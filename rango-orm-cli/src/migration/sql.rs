@@ -472,10 +472,11 @@ fn create_table_parts(schema: &TableSchema, backend: BackendKind) -> (String, Ve
         ));
     }
 
-    // Detect pivot table: 2 UUID NOT NULL non-PK columns → composite PK
+    // Detect pivot table: 2 NOT NULL non-PK key columns (UUID, INT or BIGINT) → composite PK
     let is_pivot = schema.columns.len() == 2
         && schema.columns.iter().all(|c| {
-            !c.primary_key && !c.nullable && c.col_type == rango_orm_core::ColumnType::Uuid
+            use rango_orm_core::ColumnType::{BigInt, Int, Uuid};
+            !c.primary_key && !c.nullable && matches!(c.col_type, Uuid | Int | BigInt)
         });
 
     if is_pivot {
@@ -1102,7 +1103,7 @@ mod tests {
             from_table: "posts".to_string(),
             to_table: "tags".to_string(),
         };
-        let schema = generate_pivot_table(&rel);
+        let schema = generate_pivot_table(&rel, &[]);
         let sql = generate_sql_from_diff(
             &[SchemaDiff::CreateTable(schema)],
             rango_orm_core::BackendKind::Postgres,
@@ -1614,5 +1615,105 @@ mod tests {
             create < insert && insert < drop && drop < rename && rename < index,
             "got: {sql}"
         );
+    }
+
+    // ── foreign keys and pivots follow the target's primary key type ─────────
+    fn int_key(name: &str, ty: ColumnType) -> ColumnDef {
+        ColumnDef {
+            name: name.to_string(),
+            col_type: ty,
+            nullable: false,
+            primary_key: true,
+            unique: true,
+            default: None,
+            references: None,
+            index: false,
+        }
+    }
+
+    #[test]
+    fn test_fk_to_bigint_pk_is_bigint_with_references_on_each_dialect() {
+        use rango_orm_core::BackendKind::{Mysql, Postgres, Sqlite};
+        let authors = TableSchema {
+            table_name: "authors".to_string(),
+            columns: vec![int_key("id", ColumnType::AutoBigInt)],
+            ..Default::default()
+        };
+        let mut fk = fk_col("author_id", "authors", ReferentialAction::Cascade);
+        fk.col_type = ColumnType::BigInt;
+        let posts = TableSchema {
+            table_name: "posts".to_string(),
+            columns: vec![uuid_col("id", true), fk],
+            ..Default::default()
+        };
+        for (backend, ty) in [(Postgres, "BIGINT"), (Mysql, "BIGINT"), (Sqlite, "INTEGER")] {
+            let sql = generate_sql_from_diff(
+                &[
+                    SchemaDiff::CreateTable(authors.clone()),
+                    SchemaDiff::CreateTable(posts.clone()),
+                ],
+                backend,
+            );
+            let q = |n: &str| backend.quote_ident(n);
+            let col = format!("{} {ty} NOT NULL", q("author_id"));
+            assert!(sql.contains(&col), "{backend:?}: missing `{col}` in {sql}");
+            let refs = format!("REFERENCES {} ({})", q("authors"), q("id"));
+            assert!(
+                sql.contains(&refs),
+                "{backend:?}: missing `{refs}` in {sql}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_pivot_with_int_and_bigint_keys_has_composite_pk_on_each_dialect() {
+        use rango_orm_core::BackendKind::{Mysql, Postgres, Sqlite};
+        let schemas = [
+            TableSchema {
+                table_name: "posts".to_string(),
+                columns: vec![int_key("id", ColumnType::AutoInt)],
+                ..Default::default()
+            },
+            TableSchema {
+                table_name: "tags".to_string(),
+                columns: vec![int_key("id", ColumnType::AutoBigInt)],
+                ..Default::default()
+            },
+        ];
+        let rel = M2MRelation {
+            from_table: "posts".to_string(),
+            to_table: "tags".to_string(),
+        };
+        let pivot = generate_pivot_table(&rel, &schemas);
+        assert_eq!(pivot.columns[0].col_type, ColumnType::Int);
+        assert_eq!(pivot.columns[1].col_type, ColumnType::BigInt);
+        for (backend, int, big) in [
+            (Postgres, "INTEGER", "BIGINT"),
+            (Mysql, "INT", "BIGINT"),
+            (Sqlite, "INTEGER", "INTEGER"),
+        ] {
+            let sql = generate_sql_from_diff(&[SchemaDiff::CreateTable(pivot.clone())], backend);
+            let q = |n: &str| backend.quote_ident(n);
+            assert!(
+                sql.contains(&format!("{} {int} NOT NULL", q("posts_id"))),
+                "{backend:?}: {sql}"
+            );
+            assert!(
+                sql.contains(&format!("{} {big} NOT NULL", q("tags_id"))),
+                "{backend:?}: {sql}"
+            );
+            assert!(
+                sql.contains(&format!(
+                    "PRIMARY KEY ({}, {})",
+                    q("posts_id"),
+                    q("tags_id")
+                )),
+                "{backend:?}: {sql}"
+            );
+            assert!(
+                sql.contains(&format!("REFERENCES {} ({})", q("tags"), q("id"))),
+                "{backend:?}: {sql}"
+            );
+        }
     }
 }
