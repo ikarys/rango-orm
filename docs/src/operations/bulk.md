@@ -37,7 +37,7 @@ let updated = bulk_update(&pool, &users, &["active"]).await?;
 println!("Updated {} rows", updated);
 ```
 
-Uses `UPDATE ... FROM (VALUES ...) AS v WHERE id = v.id`.
+On PostgreSQL this is `UPDATE ... FROM (VALUES ...) AS v WHERE id = v.id`. SQLite and MySQL run one prepared `UPDATE` per row inside one transaction. Unknown columns and the primary key are rejected with `Error::Invalid` before any SQL runs.
 
 ## bulk_upsert
 
@@ -48,7 +48,7 @@ let updated = bulk_upsert(&pool, &users, &["email"]).await?;
 // conflict_on: columns used to detect duplicates (must have a UNIQUE constraint)
 ```
 
-Uses `INSERT ... ON CONFLICT (email) DO UPDATE SET ...`.
+Uses `INSERT ... ON CONFLICT (email) DO UPDATE SET ...` on PostgreSQL and SQLite, and `INSERT ... ON DUPLICATE KEY UPDATE` on MySQL. MySQL fires on a duplicate of any unique index, whatever `conflict_on` lists: there the argument only names columns that are not overwritten.
 
 ## Chunking
 
@@ -61,12 +61,13 @@ Every bulk operation is all-or-nothing. When it needs several statements (chunke
 
 ## Inside transactions
 
-`bulk_create` takes a pool or a transaction on all three backends (`&mut **tx` is the connection behind the transaction). `bulk_update` and `bulk_upsert` exist on PostgreSQL only.
+`bulk_create`, `bulk_update` and `bulk_upsert` take a pool or a transaction on all three backends (`&mut **tx` is the connection behind the transaction).
 
 ```rust
 atomic(&pool, |tx| Box::pin(async move {
     bulk_create(&mut **tx, &users).await?;
     bulk_create(&mut **tx, &posts).await?;
+    bulk_update(&mut **tx, &users, &["active"]).await?;
     Ok(())
 })).await?;
 ```

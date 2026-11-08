@@ -91,7 +91,7 @@ This creates a pivot table `article_tag` with two UUID columns.
 
 ### M2M operations
 
-`M2M` works on every backend. `add` is idempotent (adding an existing link is a no-op).
+`M2M` works on every backend and takes a pool or a transaction (`&mut **tx` inside `atomic()`). `add` is idempotent (adding an existing link is a no-op).
 
 ```rust
 // Add a relation

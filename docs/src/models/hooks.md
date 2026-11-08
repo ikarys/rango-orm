@@ -59,7 +59,7 @@ impl ModelHooks for User {
 | `update` | `before_save`, `before_update`, SQL, `after_update`, `after_save` |
 | `delete` | `before_delete`, SQL, `after_delete` |
 | `get_or_create` | create hooks on `defaults`: `before_*` always run before the statement, `after_*` only if a row was inserted |
-| `update_or_create` (Postgres) | create hooks or update hooks, depending on whether the row existed |
+| `update_or_create` | create hooks or update hooks, depending on whether the row existed |
 
 Not fired (same as Django): `bulk_create` / `bulk_update` / `bulk_upsert`, query-builder
 `update` / `delete`, and `raw*`.

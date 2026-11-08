@@ -67,8 +67,10 @@ Uses `INSERT ... ON CONFLICT DO NOTHING RETURNING *` in a single round-trip.
 let lookup = vec![("email", SqlValue::Text("alice@example.com".into()))];
 let values = User { /* ... */ };
 
-let user = update_or_create(&mut pool, lookup, values).await?;
+let user = update_or_create(&pool, lookup, values).await?;
 ```
+
+Updates the row matching `lookup` (update hooks fire) or inserts `values` (create hooks fire). It takes a pool or a transaction (`&mut **tx`) on every backend. The lookup and the write are two statements: wrap the call in `atomic()` to make them one unit.
 
 ## all()
 
