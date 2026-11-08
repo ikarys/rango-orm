@@ -3,13 +3,14 @@
 use crate::error::db_err;
 use rango_orm_core::Result;
 use rango_orm_core::{quote_ident_mysql as quote_ident, Model, ModelValues, SqlValue};
-use sqlx::MySqlPool;
+use sqlx::{Acquire, MySql};
 
 use super::*;
 
 #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "mysql", db.operation = "INSERT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
-pub async fn bulk_create<M>(pool: &MySqlPool, models: &[M]) -> Result<usize>
+pub async fn bulk_create<'a, A, M>(executor: A, models: &[M]) -> Result<usize>
 where
+    A: Acquire<'a, Database = MySql>,
     M: Model + ModelValues,
 {
     if models.is_empty() {
@@ -18,12 +19,16 @@ where
     let n_cols = rango_orm_core::insert_values(&models[0]).len();
     let chunk_size = (65_535 / n_cols).max(1); // MySQL limit: 65 535 placeholders per statement
     let mut total = 0usize;
+    // One transaction for all chunks (a savepoint when `executor` is already a transaction):
+    // a failure in a later chunk must not leave the earlier rows behind.
+    let mut tx = executor.begin().await.map_err(db_err)?;
     for chunk in models.chunks(chunk_size) {
         let (sql, values) = build_bulk_create_sql::<M>(chunk);
         let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*sql)), values);
-        let result = q.execute(pool).await.map_err(db_err)?;
+        let result = q.execute(&mut *tx).await.map_err(db_err)?;
         total += result.rows_affected() as usize;
     }
+    tx.commit().await.map_err(db_err)?;
     Ok(total)
 }
 

@@ -1138,3 +1138,20 @@ async fn test_keyset_pagination_after_and_before() {
     ids.reverse();
     assert_eq!(seen, ids);
 }
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-mysql"), ignore)]
+async fn test_mysql_bulk_create_is_atomic_across_chunks() {
+    let pool = pool().await;
+    setup(&pool).await;
+
+    // Enough rows for several chunks; the last row duplicates the first email.
+    let mut users: Vec<TestUser> = (0..14000)
+        .map(|i| user(&format!("atomic{}@t.com", i)))
+        .collect();
+    users.push(user("atomic0@t.com"));
+
+    let err = bulk_create(&pool, &users).await;
+    assert!(err.is_err());
+    assert_eq!(TestUser::filter(&pool).count().await.unwrap(), 0);
+}

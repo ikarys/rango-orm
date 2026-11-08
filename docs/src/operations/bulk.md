@@ -52,12 +52,16 @@ Uses `INSERT ... ON CONFLICT (email) DO UPDATE SET ...`.
 
 ## Chunking
 
-PostgreSQL has a limit of 65,535 bind parameters per query. SQLite has a limit of 999.
+PostgreSQL and MySQL have a limit of 65,535 bind parameters per query. SQLite has a limit of 999.
 Rango automatically splits large batches into chunks — transparent to the caller. Postgres `bulk_create` needs no chunking: UNNEST binds one array per column.
+
+## Atomicity
+
+Every bulk operation is all-or-nothing. When it needs several statements (chunked `VALUES`, `bulk_update`, `bulk_upsert`), Rango runs them in one transaction, so a failure in a later chunk (a duplicate, a constraint violation) leaves no earlier rows behind. Called inside your own transaction, it uses a savepoint.
 
 ## Inside transactions
 
-All bulk ops accept a transaction executor:
+`bulk_create` takes a pool or a transaction on all three backends (`&mut **tx` is the connection behind the transaction). `bulk_update` and `bulk_upsert` exist on PostgreSQL only.
 
 ```rust
 atomic(&pool, |tx| Box::pin(async move {
