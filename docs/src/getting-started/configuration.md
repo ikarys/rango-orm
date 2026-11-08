@@ -10,7 +10,7 @@ backend = "sqlite"   # "sqlite" or "postgres"
 # url is optional here — prefer DATABASE_URL env var for credentials
 
 [models]
-src = "src"          # directory to scan for #[derive(Model)]
+src = "src"          # directory to scan for #[derive(Model)] (a path given to `rango makemigrations` overrides it)
 
 [migrations]
 dir = "migrations"   # directory for generated SQL files
@@ -38,6 +38,8 @@ DATABASE_URL=sqlite://db.sqlite3 rango migrate
 |---|---|---|
 | `sqlite` | `sqlite://path/to/db.sqlite3` | In-memory: `sqlite::memory:` |
 | `postgres` | `postgres://user:pass@host:5432/db` | Also accepts `postgresql://` |
+
+When a command gets a database URL (`-d` or `DATABASE_URL`), the backend is taken from its scheme (`postgres` / `postgresql`, `mysql` / `mariadb`, `sqlite`), whatever `backend` says. `backend` is the fallback for a URL with another form, and decides which SQL `makemigrations` writes.
 
 ## Table names
 

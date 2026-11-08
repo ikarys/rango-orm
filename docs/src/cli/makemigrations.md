@@ -9,5 +9,5 @@ rango makemigrations                  # generate migrations
 rango makemigrations --dry-run        # preview SQL without writing
 rango makemigrations --check          # CI guard: exit 1 if pending
 rango makemigrations --yes            # non-interactive: confirm renames and drops
-rango makemigrations src/models       # custom source directory
+rango makemigrations src/models       # custom source directory (default: [models] src in rango.toml)
 ```

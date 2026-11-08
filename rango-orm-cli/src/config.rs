@@ -63,6 +63,17 @@ impl DatabaseConfig {
     }
 }
 
+/// Backend named by a database URL scheme, if it is one Rango knows.
+pub fn backend_from_url(url: &str) -> Option<rango_orm_core::BackendKind> {
+    use rango_orm_core::BackendKind::*;
+    match url.split_once(':')?.0.to_ascii_lowercase().as_str() {
+        "postgres" | "postgresql" => Some(Postgres),
+        "mysql" | "mariadb" => Some(Mysql),
+        "sqlite" => Some(Sqlite),
+        _ => None,
+    }
+}
+
 fn default_max_connections() -> u32 {
     20
 }
@@ -125,6 +136,11 @@ fn default_src_dir() -> String {
 }
 
 impl RangoConfig {
+    /// Backend for a command that talks to `url`: the URL scheme wins over `rango.toml`.
+    pub fn backend_for(&self, url: &str) -> rango_orm_core::BackendKind {
+        backend_from_url(url).unwrap_or_else(|| self.database.backend_kind())
+    }
+
     /// Load from rango.toml if it exists, otherwise return defaults.
     pub fn load() -> Result<Self> {
         let path = "rango.toml";
@@ -162,5 +178,32 @@ impl RangoConfig {
             return Ok(url);
         }
         self.resolve_database_url(cli_url)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rango_orm_core::BackendKind::*;
+
+    #[test]
+    fn url_scheme_overrides_configured_backend() {
+        let cfg = RangoConfig {
+            database: DatabaseConfig {
+                backend: "sqlite".into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert_eq!(cfg.backend_for("postgres://u@h/db"), Postgres);
+        assert_eq!(cfg.backend_for("postgresql://u@h/db"), Postgres);
+        assert_eq!(cfg.backend_for("mariadb://u@h/db"), Mysql);
+        assert_eq!(cfg.backend_for("MySQL://u@h/db"), Mysql);
+        assert_eq!(cfg.backend_for("sqlite://a.db"), Sqlite);
+        assert_eq!(
+            cfg.backend_for("a.db"),
+            Sqlite,
+            "unknown scheme: rango.toml"
+        );
     }
 }

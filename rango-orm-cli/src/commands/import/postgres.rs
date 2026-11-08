@@ -101,7 +101,8 @@ pub(super) async fn import_postgres(
             }
         }
         let refs: Vec<&serde_json::Map<String, serde_json::Value>> = rows_here.iter().collect();
-        total += insert_rows_postgres(&mut tx, table, &refs, on_conflict).await?;
+        total +=
+            insert_rows_postgres(&mut tx, table, &refs, conflict_for(table, on_conflict)).await?;
     }
     for (table, pk, fix) in &fixups {
         let rec = format!(
