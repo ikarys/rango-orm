@@ -60,3 +60,9 @@
 
 - [SQL Injection](./security/sql-injection.md)
 - [Credentials](./security/credentials.md)
+
+# Trust & verification
+
+- [How Rango is built and verified](./trust/how-rango-is-built.md)
+- [Security requirements](./trust/security-requirements.md)
+- [Blind usability tests](./trust/blind-tests.md)

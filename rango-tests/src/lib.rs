@@ -1,3 +1,4 @@
+#![forbid(unsafe_code)]
 #![allow(dead_code)]
 
 use rango_orm_core::*;

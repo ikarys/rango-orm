@@ -696,23 +696,7 @@ fn column_type_tokens(ct: &ColumnType, core: &TokenStream) -> TokenStream {
 
 /// Error on the field type itself, naming the Rango replacement for common Rust types.
 fn unsupported_type(ty: &Type, type_str: &str) -> syn::Error {
-    let hint = match type_str {
-        "String" | "&str" => "use `FieldText` or `FieldVarchar<MIN, MAX>`",
-        "Vec<u8>" => "use `FieldBytes`",
-        "bool" => "use `FieldBool`",
-        "i16" => "use `FieldSmallInt`",
-        "i32" => "use `FieldInt` (or `FieldAutoInt` for a database-assigned id)",
-        "i64" => "use `FieldBigInt` (or `FieldAutoBigInt` for a database-assigned id)",
-        "f32" => "use `FieldFloat`",
-        "f64" => "use `FieldDouble`",
-        "Uuid" | "uuid::Uuid" => "use `FieldUuid` (or `ForeignKey<Model>` for a reference)",
-        "DateTime<Utc>" | "DateTime" => "use `FieldDateTime`",
-        "NaiveDate" => "use `FieldDate`",
-        "NaiveTime" => "use `FieldTime`",
-        "Decimal" => "use `FieldDecimal<PRECISION, SCALE>`",
-        "Value" => "use `FieldJson`",
-        _ => "use one of the `Field*` types, `ForeignKey<Model>` or `ManyToMany<Model>`",
-    };
+    let hint = type_map::rango_type_hint(type_str);
     syn::Error::new_spanned(
         ty,
         format!("`{type_str}` is not a Rango field type: {hint}."),

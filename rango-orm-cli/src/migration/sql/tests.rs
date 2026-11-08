@@ -833,3 +833,53 @@ fn test_pivot_with_int_and_bigint_keys_has_composite_pk_on_each_dialect() {
         );
     }
 }
+
+// ── hostile names ─────────────────────────────────────────────────────────
+
+/// Table and column names from a snapshot are untrusted: every DDL statement quotes them.
+#[test]
+fn hostile_names_are_always_quoted_in_ddl() {
+    for backend in [
+        BackendKind::Postgres,
+        BackendKind::Mysql,
+        BackendKind::Sqlite,
+    ] {
+        let table = "t\"`; DROP TABLE x; --";
+        let col = "c\"`); DROP TABLE y; --";
+        let mut indexed = text_col(col);
+        indexed.index = true;
+        let diffs = vec![
+            SchemaDiff::CreateTable(TableSchema {
+                table_name: table.to_string(),
+                columns: vec![uuid_col("id", true), indexed],
+                ..Default::default()
+            }),
+            SchemaDiff::AddColumn {
+                table: table.to_string(),
+                column: text_col(col),
+            },
+            SchemaDiff::DropColumn {
+                table: table.to_string(),
+                column: col.to_string(),
+            },
+            SchemaDiff::DropTable(table.to_string()),
+        ];
+        let sql = generate_sql_from_diff(&diffs, backend);
+        // Drop every quoted identifier (a doubled quote is an escaped one); nothing hostile may remain.
+        let q = if backend == BackendKind::Mysql {
+            '`'
+        } else {
+            '"'
+        };
+        let (mut bare, mut inside) = (String::new(), false);
+        for ch in sql.chars() {
+            if ch == q {
+                inside = !inside;
+            } else if !inside {
+                bare.push(ch);
+            }
+        }
+        assert!(!bare.contains("DROP TABLE x"), "{backend:?}: {sql}");
+        assert!(!bare.contains("DROP TABLE y"), "{backend:?}: {sql}");
+    }
+}

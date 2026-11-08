@@ -10,7 +10,7 @@ const MIGRATION_LOCK_KEY: i64 = 0x72616e676f;
 pub async fn run(database_url: &str, migrations_dir: &str, after_connect: &[String]) -> Result<()> {
     // Detect backend from rango.toml
     let cfg = crate::config::RangoConfig::load().unwrap_or_default();
-    let backend = cfg.database.backend_kind();
+    let backend = cfg.backend_for(database_url);
 
     println!(
         "🔌 Connecting to database ({})...",

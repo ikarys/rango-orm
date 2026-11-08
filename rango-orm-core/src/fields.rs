@@ -178,6 +178,20 @@ impl std::fmt::Display for FieldEmail {
 ///     password: FieldPassword<8, 128>,
 /// }
 /// ```
+///
+/// Serializing the field is a compile error:
+///
+/// ```compile_fail,E0277
+/// fn needs_serialize<T: serde::Serialize>() {}
+/// needs_serialize::<rango_orm_core::FieldPassword<8, 128>>();
+/// ```
+///
+/// So is deserializing it:
+///
+/// ```compile_fail,E0277
+/// fn needs_deserialize<T: serde::de::DeserializeOwned>() {}
+/// needs_deserialize::<rango_orm_core::FieldPassword<8, 128>>();
+/// ```
 #[derive(Clone, PartialEq)]
 pub struct FieldPassword<const MIN: usize, const MAX: usize> {
     hash: String,

@@ -30,6 +30,8 @@ atomic_retry(&pool, 3, async |tx| {
 .await?;
 ```
 
+The future of `atomic_retry` is `Send` too, so `tokio::spawn(async move { atomic_retry(&pool, 3, async |tx| { ... }).await })` works. For that, the closure must be `Clone` (it is cloned for each attempt): an async closure is `Clone` when everything it captures is, so capture shared state by reference (`&AtomicU32`, `&Arc<..>`), not as a `&mut` or by moving a non-`Clone` value.
+
 The closure can run several times, so keep it free of side effects outside the transaction (no emails, no HTTP calls). Postgres and MySQL/MariaDB (`atomic()` works on every backend, SQLite has no equivalent). On MySQL a lock wait timeout is a `Conflict` (so it is retried), while on Postgres `lock_timeout` stays `Error::Timeout`.
 
 ## Manual transactions

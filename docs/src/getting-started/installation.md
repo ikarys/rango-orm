@@ -23,6 +23,9 @@ tokio = { version = "1", features = ["full"] }
 # FieldUuid / FieldDateTime values (uuid::Uuid, chrono::Utc::now()).
 uuid = { version = "1", features = ["v4"] }
 chrono = "0.4"
+
+# Needed for `FieldJson` values and for reading JSON columns from raw results.
+serde_json = "1"
 ```
 
 Rango 0.2 is in beta (`0.2.0-beta.1`). Until `0.2.0` is out, Cargo does not pick a pre-release for `"0.2"`: write `version = "0.2.0-beta.1"` in `Cargo.toml` (the snippets above show the final form).

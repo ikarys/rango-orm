@@ -136,6 +136,28 @@ M2M::<Article, Tag>::clear(&pool, &article).await?;
 let exists = M2M::<Article, Tag>::exists(&pool, &article, &tag).await?;
 ```
 
+### Adding many links at once
+
+`M2M::add` links one pair per call, and there is no bulk `add`: the pivot is not a model, so `bulk_create` does not apply. The pivot is a plain table, so write one multi-row `INSERT` with `raw_execute`. The table is `<table_a>_<table_b>` and the columns are `<table_a>_id` and `<table_b>_id` (table names, here `article_tag`, `article_id`, `tag_id`; `from_` / `to_` prefixes for a self-reference). The pair is the primary key, so `ON CONFLICT DO NOTHING` keeps it idempotent like `add`.
+
+```rust
+// PostgreSQL: `$n` placeholders. On SQLite and MySQL write `?` instead.
+let mut sql = String::from(r#"INSERT INTO "article_tag" ("article_id", "tag_id") VALUES "#);
+let mut params = Vec::new();
+for (i, tag) in tags.iter().enumerate() {
+    if i > 0 {
+        sql.push_str(", ");
+    }
+    sql.push_str(&format!("(${}, ${})", 2 * i + 1, 2 * i + 2));
+    params.push(SqlValue::Uuid(article.id.0));
+    params.push(SqlValue::Uuid(tag.id.0));
+}
+sql.push_str(" ON CONFLICT DO NOTHING");
+raw_execute(&pool, &sql, params).await?;
+```
+
+On MySQL quote the names with backticks and end the statement with `ON DUPLICATE KEY UPDATE article_id = article_id`. Only placeholders are built into the SQL string: the ids are bound. Keep each statement under the bind limit (see [Bulk operations](../operations/bulk.md#chunking)) and wrap several statements in `atomic()`. `M2M::set` is the better tool when you want to replace all links of one row.
+
 ### Self-referencing ManyToMany
 
 A model can point a `ManyToMany` at itself:

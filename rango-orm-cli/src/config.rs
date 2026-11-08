@@ -63,6 +63,17 @@ impl DatabaseConfig {
     }
 }
 
+/// Backend named by a database URL scheme, if it is one Rango knows.
+pub fn backend_from_url(url: &str) -> Option<rango_orm_core::BackendKind> {
+    use rango_orm_core::BackendKind::*;
+    match url.split_once(':')?.0.to_ascii_lowercase().as_str() {
+        "postgres" | "postgresql" => Some(Postgres),
+        "mysql" | "mariadb" => Some(Mysql),
+        "sqlite" => Some(Sqlite),
+        _ => None,
+    }
+}
+
 fn default_max_connections() -> u32 {
     20
 }
@@ -125,6 +136,11 @@ fn default_src_dir() -> String {
 }
 
 impl RangoConfig {
+    /// Backend for a command that talks to `url`: the URL scheme wins over `rango.toml`.
+    pub fn backend_for(&self, url: &str) -> rango_orm_core::BackendKind {
+        backend_from_url(url).unwrap_or_else(|| self.database.backend_kind())
+    }
+
     /// Load from rango.toml if it exists, otherwise return defaults.
     pub fn load() -> Result<Self> {
         let path = "rango.toml";
@@ -139,6 +155,7 @@ impl RangoConfig {
     /// Resolve the database URL with priority:
     /// 1. CLI argument --database-url
     /// 2. DATABASE_URL env var
+    /// 3. `url` in rango.toml (local dev only)
     pub fn resolve_database_url(&self, cli_url: Option<&str>) -> Result<String> {
         if let Some(url) = cli_url {
             return Ok(url.to_string());
@@ -146,10 +163,13 @@ impl RangoConfig {
         if let Ok(url) = std::env::var("DATABASE_URL") {
             return Ok(url);
         }
+        if let Some(url) = &self.database.url {
+            return Ok(url.clone());
+        }
         anyhow::bail!(
             "No database URL found.\n\
              Set DATABASE_URL env var or use --database-url.\n\
-             Note: database URL should not be stored in rango.toml (use env vars for secrets)."
+             (`url` in rango.toml also works for local dev; never store credentials there.)"
         )
     }
 
@@ -162,5 +182,50 @@ impl RangoConfig {
             return Ok(url);
         }
         self.resolve_database_url(cli_url)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rango_orm_core::BackendKind::*;
+
+    #[test]
+    fn toml_url_is_the_last_fallback() {
+        let cfg = RangoConfig {
+            database: DatabaseConfig {
+                url: Some("sqlite://dev.db".into()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert_eq!(
+            cfg.resolve_database_url(Some("sqlite://cli.db")).unwrap(),
+            "sqlite://cli.db"
+        );
+        if std::env::var("DATABASE_URL").is_err() {
+            assert_eq!(cfg.resolve_database_url(None).unwrap(), "sqlite://dev.db");
+        }
+    }
+
+    #[test]
+    fn url_scheme_overrides_configured_backend() {
+        let cfg = RangoConfig {
+            database: DatabaseConfig {
+                backend: "sqlite".into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert_eq!(cfg.backend_for("postgres://u@h/db"), Postgres);
+        assert_eq!(cfg.backend_for("postgresql://u@h/db"), Postgres);
+        assert_eq!(cfg.backend_for("mariadb://u@h/db"), Mysql);
+        assert_eq!(cfg.backend_for("MySQL://u@h/db"), Mysql);
+        assert_eq!(cfg.backend_for("sqlite://a.db"), Sqlite);
+        assert_eq!(
+            cfg.backend_for("a.db"),
+            Sqlite,
+            "unknown scheme: rango.toml"
+        );
     }
 }

@@ -11,7 +11,7 @@ pub async fn run(
     replace: bool,
 ) -> Result<()> {
     let cfg = crate::config::RangoConfig::load().unwrap_or_default();
-    let backend = cfg.database.backend_kind();
+    let backend = cfg.backend_for(database_url);
 
     let content = fs::read_to_string(input).with_context(|| format!("Failed to read {}", input))?;
 
@@ -43,6 +43,13 @@ pub async fn run(
         return Ok(());
     }
 
+    if table.is_none() && rows.iter().any(|r| !r.contains_key("__table")) {
+        bail!(
+            "Rows have no `__table` field (a single-table export, or a CSV, does not record \
+             its table): pass the target table with --table <name>"
+        );
+    }
+
     let count = insert_rows(
         backend,
         database_url,
@@ -72,6 +79,16 @@ pub(crate) enum OnConflict {
     Replace,
     /// Error out and roll back (`rango restore`): dropping rows would be data loss.
     Fail,
+}
+
+/// A restore may run on a database `rango migrate` already prepared: ledger rows that exist
+/// are skipped, every other conflict still fails.
+fn conflict_for(table: &str, on_conflict: OnConflict) -> OnConflict {
+    if table == crate::commands::dump::MIGRATIONS_TABLE && on_conflict == OnConflict::Fail {
+        OnConflict::Skip
+    } else {
+        on_conflict
+    }
 }
 
 pub(crate) async fn insert_rows(

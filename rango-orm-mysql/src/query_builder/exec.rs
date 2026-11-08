@@ -167,11 +167,36 @@ where
         let rows = self.conn.fetch_all(&sql, binds).await?;
         self.warn_if_capped(rows.len());
 
+        // DECIMAL columns are decoded by schema type: the driver type is ambiguous (SQLite
+        // NUMERIC may come back as an integer, MySQL's is not an i64/f64/String).
+        let schema = M::schema();
+        let scale_of = |col: &str| {
+            schema
+                .columns
+                .iter()
+                .find(|c| c.name == col)
+                .and_then(|c| match c.col_type {
+                    rango_orm_core::ColumnType::Decimal { scale, .. } => Some(scale),
+                    _ => None,
+                })
+        };
         rows.into_iter()
             .map(|row| {
                 let mut map = std::collections::HashMap::new();
                 for &col in cols {
-                    let val: SqlValue = if let Ok(Some(v)) = row.try_get::<Option<i64>, _>(col) {
+                    let val: SqlValue = if let Some(scale) = scale_of(col) {
+                        if row
+                            .try_get_raw(col)
+                            .map(|v| sqlx::ValueRef::is_null(&v))
+                            .unwrap_or(true)
+                        {
+                            SqlValue::NullDecimal
+                        } else {
+                            let mut d = crate::row::MySqlRowRef(&row).get_decimal(col)?;
+                            d.rescale(u32::from(scale));
+                            SqlValue::Decimal(d)
+                        }
+                    } else if let Ok(Some(v)) = row.try_get::<Option<i64>, _>(col) {
                         SqlValue::BigInt(v)
                     } else if let Ok(Some(v)) = row.try_get::<Option<f64>, _>(col) {
                         SqlValue::Double(v)
@@ -283,6 +308,7 @@ where
     P: Partial<Model = M>,
 {
     /// Fetch all matching rows as `P`.
+    #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "mysql", db.operation = "SELECT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
     pub async fn all(mut self) -> Result<Vec<P>> {
         self.qb.f.ensure_valid()?;
         if !self.qb.f.select_related_specs().is_empty() || !self.qb.f.prefetch_specs().is_empty() {
@@ -297,6 +323,7 @@ where
         let (sql, binds) = self.qb.f.select_sql_cols(&cols.join(", "));
         let rows = self.qb.conn.fetch_all(&sql, binds).await?;
         self.qb.warn_if_capped(rows.len());
+        tracing::Span::current().record("db.rows", rows.len());
         decode_all::<P>(rows)
     }
 

@@ -26,7 +26,13 @@ pub(super) async fn import_sqlite(
     let mut total = 0;
 
     for (table, table_rows) in groups {
-        total += insert_rows_sqlite(&mut tx, &table, &table_rows, on_conflict).await?;
+        total += insert_rows_sqlite(
+            &mut tx,
+            &table,
+            &table_rows,
+            conflict_for(&table, on_conflict),
+        )
+        .await?;
     }
 
     tx.commit().await.context("Failed to commit import")?;
