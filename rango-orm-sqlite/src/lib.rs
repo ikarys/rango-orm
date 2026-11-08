@@ -20,7 +20,7 @@ pub use ops::{
 pub use query_builder::{Conn, QueryBuilder, RangoFilterExt, SelectAs};
 pub use rango_orm_core::WithRelated;
 pub use sqlite_ext::SqliteQueryExt;
-pub use transaction::{atomic, SqliteTransaction};
+pub use transaction::{atomic, transaction, SqliteTransaction};
 
 mod error;
 pub mod m2m;

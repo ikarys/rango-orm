@@ -7,6 +7,7 @@ pub mod config;
 pub mod constraints;
 pub mod error;
 pub mod fields;
+#[doc(hidden)]
 pub mod filter;
 pub mod hooks;
 pub mod model;
