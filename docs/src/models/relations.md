@@ -2,7 +2,7 @@
 
 ## ForeignKey
 
-A `ForeignKey<M>` stores the UUID of a related model.
+A `ForeignKey<M>` stores the primary key of a related model. The column type follows the target's key: `UUID` for `FieldUuid` (the default), `INT` for `FieldInt` / `FieldAutoInt`, `BIGINT` for `FieldBigInt` / `FieldAutoBigInt`.
 
 ```rust
 use rango::prelude::*;
@@ -22,6 +22,26 @@ pub struct Post {
 ```
 
 The column is stored as `UUID` (Postgres) or `TEXT` (SQLite). Every FK column is indexed.
+
+Pointing at an integer key works the same way; the FK holds an `i32` / `i64`:
+
+```rust
+#[derive(Model)]
+pub struct Author {
+    pub id: FieldAutoBigInt,
+    pub name: FieldVarchar<1, 100>,
+}
+
+#[derive(Model)]
+pub struct Book {
+    pub id: FieldUuid,
+    pub author_id: ForeignKey<Author>,  // → BIGINT NOT NULL REFERENCES author(id)
+}
+
+let book_author = ForeignKey::<Author>::new(42_i64);
+```
+
+Only UUID, integer and bigint primary keys can be the target of a `ForeignKey` or `ManyToMany`.
 
 ### On delete
 
@@ -87,7 +107,7 @@ pub struct Tag {
 }
 ```
 
-This creates a pivot table `article_tag` with two UUID columns.
+This creates a pivot table `article_tag` with two key columns, each typed like the primary key it references (UUID here, INT or BIGINT for integer keys).
 
 ### M2M operations
 

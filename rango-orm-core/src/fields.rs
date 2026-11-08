@@ -435,6 +435,22 @@ impl ToSqlValue for FieldBytes {
         SqlValue::Bytes(self.0.clone())
     }
 }
+// Raw key values: what `ForeignKey<M>` holds (`Model::Pk`).
+impl ToSqlValue for Uuid {
+    fn to_sql_value(&self) -> SqlValue {
+        SqlValue::Uuid(*self)
+    }
+}
+impl ToSqlValue for i32 {
+    fn to_sql_value(&self) -> SqlValue {
+        SqlValue::Int(*self)
+    }
+}
+impl ToSqlValue for i64 {
+    fn to_sql_value(&self) -> SqlValue {
+        SqlValue::BigInt(*self)
+    }
+}
 impl ToSqlValue for FieldUuid {
     fn to_sql_value(&self) -> SqlValue {
         SqlValue::Uuid(self.0)
@@ -599,10 +615,12 @@ impl<const MIN: i64, const MAX: i64> ToSqlValue for Option<FieldRange<MIN, MAX>>
             .map_or(SqlValue::NullBigInt, |v| v.to_sql_value())
     }
 }
-impl<M> ToSqlValue for Option<ForeignKey<M>> {
+impl<M: crate::Model> ToSqlValue for Option<ForeignKey<M>> {
     fn to_sql_value(&self) -> SqlValue {
         self.as_ref()
-            .map_or(SqlValue::NullUuid, |v| v.to_sql_value())
+            .map_or_else(<M::Pk as crate::PrimaryKey>::null_value, |v| {
+                v.to_sql_value()
+            })
     }
 }
 
@@ -623,34 +641,37 @@ impl<M> ToSqlValue for Option<ForeignKey<M>> {
 /// }
 /// ```
 #[derive(Serialize, Deserialize)]
-#[serde(bound = "")]
-pub struct ManyToMany<M>(
+#[serde(bound(
+    serialize = "<M as crate::Model>::Pk: Serialize",
+    deserialize = "<M as crate::Model>::Pk: serde::de::DeserializeOwned"
+))]
+pub struct ManyToMany<M: crate::Model>(
     /// Always empty when loaded from the database: use `.prefetch_related(Model::FIELD)`
     /// and `.prefetched::<M>()` to load the related rows.
-    pub Vec<uuid::Uuid>,
+    pub Vec<<M as crate::Model>::Pk>,
     std::marker::PhantomData<M>,
 );
 
 // Manual impls: derives would require `M: Clone + Default + Debug`, but `M` is only a marker.
-impl<M> Clone for ManyToMany<M> {
+impl<M: crate::Model> Clone for ManyToMany<M> {
     fn clone(&self) -> Self {
         Self(self.0.clone(), std::marker::PhantomData)
     }
 }
 
-impl<M> Default for ManyToMany<M> {
+impl<M: crate::Model> Default for ManyToMany<M> {
     fn default() -> Self {
         Self::empty()
     }
 }
 
-impl<M> std::fmt::Debug for ManyToMany<M> {
+impl<M: crate::Model> std::fmt::Debug for ManyToMany<M> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("ManyToMany").field(&self.0).finish()
     }
 }
 
-impl<M> ManyToMany<M> {
+impl<M: crate::Model> ManyToMany<M> {
     pub fn empty() -> Self {
         Self(Vec::new(), std::marker::PhantomData)
     }
@@ -658,8 +679,10 @@ impl<M> ManyToMany<M> {
 
 // ─── Foreign Key ─────────────────────────────────────────────────────────────
 
-/// A foreign key reference — stores the PK value of the related model.
-/// The related model type `M` is used for type safety and select_related.
+/// A foreign key reference: stores the primary key value of the related model.
+/// The value type follows the target's primary key (`Model::Pk`): `Uuid` for `FieldUuid`,
+/// `i32` for `FieldAutoInt`, `i64` for `FieldAutoBigInt`. The column type in the schema
+/// and migrations follows it too.
 ///
 /// # Example
 /// ```rust,ignore
@@ -670,57 +693,54 @@ impl<M> ManyToMany<M> {
 /// }
 /// ```
 #[derive(Serialize, Deserialize)]
-#[serde(bound = "")]
-pub struct ForeignKey<M>(pub uuid::Uuid, std::marker::PhantomData<M>);
+#[serde(bound(
+    serialize = "<M as crate::Model>::Pk: Serialize",
+    deserialize = "<M as crate::Model>::Pk: serde::de::DeserializeOwned"
+))]
+pub struct ForeignKey<M: crate::Model>(pub <M as crate::Model>::Pk, std::marker::PhantomData<M>);
 
 // Manual impls: derives would require `M: Clone + Debug + PartialEq`, but `M` is only a marker.
-impl<M> Clone for ForeignKey<M> {
+impl<M: crate::Model> Clone for ForeignKey<M> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<M> Copy for ForeignKey<M> {}
+impl<M: crate::Model> Copy for ForeignKey<M> {}
 
-impl<M> PartialEq for ForeignKey<M> {
+impl<M: crate::Model> PartialEq for ForeignKey<M> {
     fn eq(&self, other: &Self) -> bool {
         self.0 == other.0
     }
 }
 
-impl<M> Eq for ForeignKey<M> {}
+impl<M: crate::Model> Eq for ForeignKey<M> {}
 
-impl<M> std::hash::Hash for ForeignKey<M> {
+impl<M: crate::Model> std::hash::Hash for ForeignKey<M> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.0.hash(state);
     }
 }
 
-impl<M> std::fmt::Debug for ForeignKey<M> {
+impl<M: crate::Model> std::fmt::Debug for ForeignKey<M> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("ForeignKey").field(&self.0).finish()
     }
 }
 
-impl<M> ForeignKey<M> {
-    pub fn new(id: uuid::Uuid) -> Self {
+impl<M: crate::Model> ForeignKey<M> {
+    pub fn new(id: <M as crate::Model>::Pk) -> Self {
         Self(id, std::marker::PhantomData)
     }
 
-    pub fn id(&self) -> uuid::Uuid {
+    pub fn id(&self) -> <M as crate::Model>::Pk {
         self.0
     }
 }
 
-impl<M> From<uuid::Uuid> for ForeignKey<M> {
-    fn from(id: uuid::Uuid) -> Self {
-        Self::new(id)
-    }
-}
-
-impl<M> ToSqlValue for ForeignKey<M> {
+impl<M: crate::Model> ToSqlValue for ForeignKey<M> {
     fn to_sql_value(&self) -> SqlValue {
-        SqlValue::Uuid(self.0)
+        self.0.to_sql_value()
     }
 }
 
@@ -928,12 +948,22 @@ impl<const P: u8, const S: u8> FilterValue<FieldDecimal<P, S>> for rust_decimal:
         SqlValue::Decimal(self)
     }
 }
-impl<M> FilterValue<ForeignKey<M>> for Uuid {
+impl<M: crate::Model<Pk = Uuid>> FilterValue<ForeignKey<M>> for Uuid {
     fn into_sql_value(self) -> SqlValue {
         SqlValue::Uuid(self)
     }
 }
-impl<M> FilterValue<ForeignKey<M>> for FieldUuid {
+impl<M: crate::Model<Pk = i32>> FilterValue<ForeignKey<M>> for i32 {
+    fn into_sql_value(self) -> SqlValue {
+        SqlValue::Int(self)
+    }
+}
+impl<M: crate::Model<Pk = i64>> FilterValue<ForeignKey<M>> for i64 {
+    fn into_sql_value(self) -> SqlValue {
+        SqlValue::BigInt(self)
+    }
+}
+impl<M: crate::Model<Pk = Uuid>> FilterValue<ForeignKey<M>> for FieldUuid {
     fn into_sql_value(self) -> SqlValue {
         SqlValue::Uuid(self.0)
     }

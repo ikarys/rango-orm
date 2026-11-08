@@ -34,7 +34,7 @@ pub use hooks::{BoxFuture, HookResult, ModelHooks};
 pub use hooks::{
     after_delete, after_insert, after_update, before_delete, before_insert, before_update,
 };
-pub use model::{Model, ModelMixin, unknown_column};
+pub use model::{Model, ModelMixin, PrimaryKey, PrimaryKeyField, UnsupportedPk, unknown_column};
 #[doc(hidden)]
 pub use query::insert_values;
 pub use query::{Filterable, ModelValues, SqlValue, ToSqlValue, quote_ident, quote_ident_mysql};

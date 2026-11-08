@@ -260,6 +260,8 @@ mod tests {
     impl rango_orm_core::ModelHooks for TestModel {}
 
     impl Model for TestModel {
+        type Pk = uuid::Uuid;
+
         fn table_name() -> &'static str {
             "test_model"
         }

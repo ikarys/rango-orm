@@ -2,6 +2,7 @@
 
 use std::marker::PhantomData;
 
+use crate::Model;
 use crate::fields::ForeignKey;
 use crate::query::{SqlValue, ToSqlValue};
 
@@ -111,7 +112,7 @@ impl<M> ColumnRef<M> for &str {
 /// a column that points elsewhere. `&str` is accepted too (then name the model with `::<T>`).
 pub trait ForeignKeyRef<M, T>: ColumnRef<M> {}
 
-impl<M, T> ForeignKeyRef<M, T> for Column<M, ForeignKey<T>> {}
+impl<M, T: Model> ForeignKeyRef<M, T> for Column<M, ForeignKey<T>> {}
 
 impl<M, T> ForeignKeyRef<M, T> for &str {}
 
@@ -148,7 +149,7 @@ pub trait PrefetchRef<M, R> {
     fn prefetch_kind(&self) -> PrefetchKind<'_>;
 }
 
-impl<M, R> PrefetchRef<M, R> for Column<R, ForeignKey<M>> {
+impl<M: Model, R> PrefetchRef<M, R> for Column<R, ForeignKey<M>> {
     fn prefetch_kind(&self) -> PrefetchKind<'_> {
         PrefetchKind::ReverseFk(self.name)
     }
