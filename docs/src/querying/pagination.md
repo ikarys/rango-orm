@@ -26,7 +26,7 @@ loop {
 ```
 
 ## Default limit
-When no limit is set, the default cap is 1000 rows. Use `.unlimited()` to remove it.
+When no limit is set, the default cap is 1000 rows, and a `WARN` is logged if exactly 1000 rows come back. Use `.unlimited()` to remove it.
 
 ```rust,ignore
 let all = User::filter(&pool).unlimited().all().await?;
