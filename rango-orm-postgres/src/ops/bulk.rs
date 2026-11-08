@@ -398,19 +398,6 @@ fn build_bulk_upsert_sql<M: Model + ModelValues>(
     (sql, all_values)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::unnest_sql;
-
-    #[test]
-    fn unnest_sql_one_array_per_column() {
-        assert_eq!(
-            unnest_sql("user", &[("id", "uuid[]"), ("sc\"ore", "int4[]")]),
-            r#"INSERT INTO "user" ("id", "sc""ore") SELECT * FROM UNNEST($1::uuid[], $2::int4[])"#
-        );
-    }
-}
-
 /// Runs one statement per chunk. A single chunk is one statement, already atomic: no
 /// transaction. Several chunks share one transaction (a savepoint when `executor` is already
 /// a transaction), so a later failure does not leave the earlier rows behind.
@@ -439,4 +426,17 @@ where
     }
     tx.commit().await.map_err(db_err)?;
     Ok(total)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::unnest_sql;
+
+    #[test]
+    fn unnest_sql_one_array_per_column() {
+        assert_eq!(
+            unnest_sql("user", &[("id", "uuid[]"), ("sc\"ore", "int4[]")]),
+            r#"INSERT INTO "user" ("id", "sc""ore") SELECT * FROM UNNEST($1::uuid[], $2::int4[])"#
+        );
+    }
 }
