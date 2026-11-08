@@ -46,7 +46,7 @@ Rango targets Django-style ORM ergonomics on native async SQLx.
 | Kind | Django-style ORM | Query builder + ORM | Async ORM | Raw SQL toolkit (not an ORM) | ORM |
 | Migrations | ✅ auto-generated from models (`rango makemigrations`) | ⚠️ Diesel CLI; SQL by hand | ⚠️ Rust files by hand; schema sync newer | ⚠️ sqlx-cli; SQL by hand | ✅ auto-generated from models |
 | Model definition | `#[derive(Model)]` only | `table!` macro + struct | Entity + ActiveModel, more boilerplate | None | `#[model]` struct |
-| Async | ✅ native (sqlx) | ⚠️ via `diesel-async` | ✅ | ✅ | ⚠️ partial |
+| Async | ✅ native (sqlx) | ⚠️ via `diesel-async` | ✅ | ✅ | ✅ since 0.8 |
 | Compile-time column checks | ✅ generated typed columns (`User::EMAIL`): name and value type checked; string names still accepted | ✅ strong | ❌ runtime | ✅ `query!` macros, needs a dev DB | ✅ |
 | Model hooks | ✅ `ModelHooks` | ❌ | ✅ ActiveModelBehavior | ❌ | ❌ |
 | Relations loading | ✅ `select_related` / `prefetch_related` | Manual joins | ✅ | ❌ | ✅ |
