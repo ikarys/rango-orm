@@ -1,3 +1,4 @@
+use crate::commands::migrate::tracking_table_ddl;
 use crate::commands::{export, import};
 use crate::migration::{diff::SchemaDiff, snapshot::Snapshot, sql::generate_sql_from_diff};
 use anyhow::{Context, Result, bail};
@@ -24,6 +25,9 @@ struct Dump {
     backend: String,
     created_at: String,
     schema: Option<Snapshot>,
+    /// Applied migration names. Absent in dumps made before this field existed.
+    #[serde(default)]
+    migrations: Option<Vec<String>>,
     tables: Vec<DumpTable>,
 }
 
@@ -31,6 +35,13 @@ struct Dump {
 struct DumpTable {
     name: String,
     rows: export::Rows,
+}
+
+/// Applied migration names. Ids and timestamps are regenerated on restore.
+fn migration_names(rows: &export::Rows) -> Vec<String> {
+    rows.iter()
+        .filter_map(|r| r.get("name")?.as_str().map(String::from))
+        .collect()
 }
 
 /// Build a dump of the database (data) and the latest migration snapshot (schema).
@@ -55,10 +66,21 @@ async fn build_dump(
     }
 
     let mut tables = Vec::new();
+    let mut migrations = None;
     if with_data {
         for (name, rows) in export::fetch_tables(backend, database_url, requested).await? {
             if name != MIGRATIONS_TABLE || requested.contains(&name) {
                 tables.push(DumpTable { name, rows });
+            } else {
+                migrations = Some(migration_names(&rows));
+            }
+        }
+        // A `--table` dump still restores the whole schema, so it carries the ledger too.
+        // The table is absent on a database `rango migrate` never ran against: no ledger then.
+        if migrations.is_none() && !requested.is_empty() {
+            let ledger = [MIGRATIONS_TABLE.to_string()];
+            if let Ok(found) = export::fetch_tables(backend, database_url, &ledger).await {
+                migrations = found.first().map(|(_, rows)| migration_names(rows));
             }
         }
     }
@@ -75,6 +97,7 @@ async fn build_dump(
         .to_string(),
         created_at: utc_now().0,
         schema,
+        migrations,
         tables,
     })
 }
@@ -139,7 +162,7 @@ pub async fn restore(database_url: &str, input: &str) -> Result<()> {
     // then quoted and values bound at insert time.
     validate(&dump)?;
 
-    let setup_sql = match &dump.schema {
+    let mut setup_sql = match &dump.schema {
         Some(snapshot) if !snapshot.tables.is_empty() => {
             let diffs: Vec<SchemaDiff> = snapshot
                 .to_schemas()?
@@ -152,6 +175,30 @@ pub async fn restore(database_url: &str, input: &str) -> Result<()> {
     };
 
     let mut rows = Vec::new();
+    // Mark the restored migrations as applied, in the same transaction as the schema, so
+    // `rango migrate` does not replay them. Only when the schema is created here: a data-only
+    // restore into a migrated database must not touch the tracking table.
+    if let Some(sql) = &mut setup_sql {
+        match &dump.migrations {
+            Some(names) => {
+                sql.push('\n');
+                sql.push_str(tracking_table_ddl(backend));
+                sql.push(';');
+                for name in names {
+                    // Bound at insert time like every other value.
+                    rows.push(serde_json::Map::from_iter([
+                        ("__table".to_string(), MIGRATIONS_TABLE.into()),
+                        ("name".to_string(), name.clone().into()),
+                    ]));
+                }
+            }
+            None => eprintln!(
+                "warning: this dump does not list applied migrations (made by an older rango), \
+                 so none were recorded. Check `rango migrate` before running it: it may replay \
+                 migrations already contained in the restored schema."
+            ),
+        }
+    }
     for table in dump.tables {
         for mut row in table.rows {
             row.insert(
