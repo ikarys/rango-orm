@@ -25,7 +25,7 @@ On PostgreSQL, generates one `INSERT INTO ... SELECT * FROM UNNEST($1::type[], $
 
 ## bulk_update
 
-Update specific fields on multiple rows using a single query.
+Update specific fields on multiple rows with one statement per chunk.
 
 ```rust
 // Deactivate all users in the list
@@ -37,7 +37,7 @@ let updated = bulk_update(&pool, &users, &["active"]).await?;
 println!("Updated {} rows", updated);
 ```
 
-On PostgreSQL this is `UPDATE ... FROM (VALUES ...) AS v WHERE id = v.id`. SQLite and MySQL run one prepared `UPDATE` per row inside one transaction. Unknown columns and the primary key are rejected with `Error::Invalid` before any SQL runs.
+On PostgreSQL this is `UPDATE ... FROM (VALUES ...) AS v WHERE id = v.id`. SQLite uses `WITH v(id, ..) AS (VALUES ..) UPDATE ... FROM v WHERE t.id = v.id`, and MySQL / MariaDB use `UPDATE ... SET col = CASE id WHEN ? THEN ? ... END WHERE id IN (...)` (a derived table is typed differently by the two engines). That is one statement per chunk on every backend; several chunks run in one transaction. MySQL chunks are capped at 100 rows because a `CASE` is scanned linearly for each row. Unknown columns and the primary key are rejected with `Error::Invalid` before any SQL runs.
 
 ## bulk_upsert
 
