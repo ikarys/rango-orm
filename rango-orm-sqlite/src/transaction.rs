@@ -21,3 +21,11 @@ where
         }
     }
 }
+
+/// Alias for [`atomic`] — same semantics, alternative name.
+pub async fn transaction<F, T>(pool: &SqlitePool, f: F) -> Result<T>
+where
+    F: AsyncFnOnce(&mut SqliteTransaction<'_>) -> Result<T>,
+{
+    atomic(pool, f).await
+}

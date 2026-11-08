@@ -63,9 +63,9 @@ This is by design — Rango should be portable.
 
 | Crate | Role |
 |---|---|
-| `rango-orm-core` | DB-free: traits (`Model`, `FromRow`, `ModelValues`), schema types (`TableSchema`, `ColumnDef`, constraints), field types, `quote_ident` |
+| `rango-orm-core` | DB-free: traits (`Model`, `FromRow`, `ModelValues`), schema types (`TableSchema`, `ColumnDef`, constraints), field types, `quote_ident`, the shared query builder (`Filter` + `Dialect`: filter state and every generated SELECT/aggregate/relation/M2M statement), Rust type → column type table (`type_map`) |
 | `rango-orm-derive` | `#[derive(Model)]` proc-macro — generates `TableSchema` from struct fields |
-| `rango-orm-postgres` | PostgreSQL backend (sqlx): `ops/` (crud, bulk, raw), `query_builder/` (filter, exec, relations), M2M, `PgQueryExt` |
+| `rango-orm-postgres` | PostgreSQL backend (sqlx): `ops/` (crud, bulk, raw), `query_builder/` (wraps core `Filter`: connection, binding, execution, row decoding), M2M, `PgQueryExt` |
 | `rango-orm-sqlite` | SQLite backend (sqlx), same layout as `rango-orm-postgres` |
 | `rango-orm-mysql` | MySQL 8.0+ / MariaDB 10.6+ backend (sqlx), common subset, no `RETURNING`, UUID as `BINARY(16)` |
 | `rango-orm` | Facade crate (lib name `rango`): re-exports core + derive + backends, selected by features (`postgres` default, `sqlite`, `mysql`) |

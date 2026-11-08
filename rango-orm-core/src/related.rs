@@ -200,6 +200,7 @@ mod pivot_tests {
 ///
 /// Every statement binds the from id first, then the to id.
 #[doc(hidden)]
+#[doc(hidden)]
 pub struct M2mSql {
     dialect: crate::Dialect,
     pivot: String,

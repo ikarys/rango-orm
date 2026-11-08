@@ -21,3 +21,11 @@ where
         }
     }
 }
+
+/// Alias for [`atomic`] — same semantics, alternative name.
+pub async fn transaction<F, T>(pool: &MySqlPool, f: F) -> Result<T>
+where
+    F: AsyncFnOnce(&mut MySqlTransaction<'_>) -> Result<T>,
+{
+    atomic(pool, f).await
+}

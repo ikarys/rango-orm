@@ -144,7 +144,8 @@ pub mod sqlite {
     pub use rango_orm_sqlite::{
         Conn, M2M, QueryBuilder, RangoFilterExt, SelectAs, SqlitePool, SqliteQueryExt,
         SqliteTransaction, WithRelated, all, atomic, bulk_create, bulk_update, bulk_upsert, delete,
-        get, get_or_create, insert, raw, raw_execute, raw_scalar, update, update_or_create,
+        get, get_or_create, insert, raw, raw_execute, raw_scalar, transaction, update,
+        update_or_create,
     };
 }
 
@@ -164,7 +165,7 @@ pub mod mysql {
     pub use rango_orm_mysql::{
         Conn, M2M, MySqlPool, MySqlTransaction, QueryBuilder, RangoFilterExt, SelectAs,
         WithRelated, all, atomic, bulk_create, bulk_update, bulk_upsert, delete, get,
-        get_or_create, insert, raw, raw_execute, raw_scalar, update, update_or_create,
+        get_or_create, insert, raw, raw_execute, raw_scalar, transaction, update, update_or_create,
     };
 }
 
