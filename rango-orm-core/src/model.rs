@@ -3,6 +3,11 @@ use crate::schema::TableSchema;
 /// Core trait implemented by `#[derive(Model)]`.
 /// Every model must be able to describe its own schema.
 /// `ModelHooks` is a supertrait: the derive emits an empty impl unless `#[model(hooks)]` is set.
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` is not a Rango model",
+    label = "this type does not implement `Model`",
+    note = "add `#[derive(Model)]` (or `#[rango::model]`) to `{Self}`"
+)]
 pub trait Model: crate::ModelHooks {
     /// The table name in the database.
     fn table_name() -> &'static str;
@@ -23,14 +28,38 @@ pub trait ModelMixin {
 #[doc(hidden)]
 pub fn unknown_column<M: Model>(name: &str) -> Option<String> {
     // ponytail: builds M::schema() per call; cache the column list if it shows up in profiles.
-    if M::schema().columns.iter().any(|c| c.name == name) {
-        None
-    } else {
-        Some(format!(
-            "unknown column `{name}` on table `{}`",
-            M::table_name()
-        ))
+    let schema = M::schema();
+    if schema.columns.iter().any(|c| c.name == name) {
+        return None;
     }
+    let hint = schema
+        .columns
+        .iter()
+        .map(|c| (edit_distance(name, &c.name), &c.name))
+        .min()
+        // Close enough to be a typo: at most a third of the name.
+        .filter(|(d, c)| *d <= c.len().max(name.len()).div_ceil(3))
+        .map(|(_, c)| format!(", did you mean `{c}`?"))
+        .unwrap_or_default();
+    Some(format!(
+        "unknown column `{name}` on table `{}`{hint}",
+        M::table_name()
+    ))
+}
+
+/// Levenshtein distance, two rows.
+fn edit_distance(a: &str, b: &str) -> usize {
+    let b: Vec<char> = b.chars().collect();
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    for (i, ca) in a.chars().enumerate() {
+        let mut cur = vec![i + 1];
+        for (j, cb) in b.iter().enumerate() {
+            let sub = prev[j] + usize::from(ca != *cb);
+            cur.push(sub.min(prev[j + 1] + 1).min(cur[j] + 1));
+        }
+        prev = cur;
+    }
+    prev[b.len()]
 }
 
 #[cfg(test)]
@@ -144,6 +173,14 @@ mod fuzz_tests {
                 s
             );
         }
+    }
+
+    #[test]
+    fn unknown_column_suggests_close_names() {
+        let msg = unknown_column::<TestModel>("emial").unwrap();
+        assert!(msg.ends_with("did you mean `email`?"), "{msg}");
+        let msg = unknown_column::<TestModel>("zzzzzz").unwrap();
+        assert!(!msg.contains("did you mean"), "{msg}");
     }
 
     #[test]

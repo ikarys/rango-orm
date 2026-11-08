@@ -16,6 +16,17 @@ pub(crate) fn db_err(e: sqlx::Error) -> Error {
                 _ => {}
             }
             let code = db.code().map(|c| c.into_owned());
+            // ER_NO_SUCH_TABLE: "Table 'db.name' doesn't exist"
+            let missing = db
+                .try_downcast_ref::<sqlx::mysql::MySqlDatabaseError>()
+                .filter(|m| m.number() == 1146)
+                .and_then(|m| m.message().strip_prefix("Table '"))
+                .and_then(|r| r.split_once('\''));
+            if let Some((qualified, _)) = missing {
+                return Error::TableMissing {
+                    table: qualified.rsplit('.').next().unwrap_or(qualified).to_owned(),
+                };
+            }
             match code.as_deref() {
                 // ER_LOCK_WAIT_TIMEOUT, ER_LOCK_DEADLOCK, max_execution_time exceeded (MySQL / MariaDB)
                 Some("HY000") if is_timeout(db.as_ref()) => Error::Timeout,
