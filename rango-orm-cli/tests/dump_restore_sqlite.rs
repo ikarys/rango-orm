@@ -356,3 +356,80 @@ async fn hostile_table_and_column_names_stay_identifiers() {
     assert_eq!(p.count("b.db", "t_book").await, Some(1));
     assert_eq!(p.count("b.db", &table.replace('"', "\"\"")).await, Some(1));
 }
+
+fn stdout(o: &Output) -> String {
+    String::from_utf8_lossy(&o.stdout).into_owned()
+}
+
+#[tokio::test]
+async fn restore_works_on_a_database_migrate_already_prepared() {
+    let p = Project::new("migrated_first").await;
+    assert_ok(&p.cli("a.db", &["dump", "-o", "d.json"]));
+    // `migrate` first writes the ledger row; restore must skip it, not collide on it.
+    assert_ok(&p.cli("b.db", &["migrate"]));
+    let out = p.cli("b.db", &["restore", "d.json"]);
+    assert_ok(&out);
+    assert_eq!(p.count("b.db", "t_author").await, Some(2));
+    assert_eq!(p.count("b.db", "_rango_migrations").await, Some(1));
+    // The warning names the migrations that were recorded without being run.
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains("0001_") && err.contains("NOT reproduced"),
+        "{err}"
+    );
+}
+
+#[tokio::test]
+async fn database_url_scheme_overrides_the_configured_backend() {
+    let p = Project::new("scheme").await;
+    assert_ok(&p.cli("a.db", &["dump", "-o", "d.json"]));
+    // rango.toml says sqlite; the URL says postgres (nothing listens there).
+    let err = failure_stderr(&p.cli(
+        "a.db",
+        &["restore", "d.json", "-d", "postgres://u:p@127.0.0.1:1/x"],
+    ));
+    assert!(err.contains("Postgres"), "{err}");
+}
+
+#[tokio::test]
+async fn import_of_a_single_table_export_asks_for_table() {
+    let p = Project::new("import_table").await;
+    assert_ok(&p.cli("a.db", &["export", "-t", "t_author", "-o", "a.json"]));
+    let err = failure_stderr(&p.cli("b.db", &["import", "a.json"]));
+    assert!(err.contains("--table"), "{err}");
+    assert_ok(&p.cli("a.db", &["import", "a.json", "-t", "t_author"]));
+}
+
+#[tokio::test]
+async fn schema_only_dump_reports_the_schema_tables() {
+    let p = Project::new("schema_count").await;
+    let out = p.cli("a.db", &["dump", "--schema-only", "-o", "s.json"]);
+    assert_ok(&out);
+    assert!(
+        stdout(&out).contains("Dumped 2 table(s)"),
+        "{}",
+        stdout(&out)
+    );
+}
+
+#[tokio::test]
+async fn makemigrations_honors_models_src_from_rango_toml() {
+    let p = Project::new("models_src").await;
+    std::fs::rename(p.dir.join("src"), p.dir.join("app")).unwrap();
+    std::fs::remove_dir_all(p.dir.join("migrations")).unwrap();
+    std::fs::write(
+        p.dir.join("rango.toml"),
+        "[database]\nbackend = \"sqlite\"\n[models]\nsrc = \"app\"\n",
+    )
+    .unwrap();
+    let out = p.cli("a.db", &["makemigrations", "--yes"]);
+    assert_ok(&out);
+    assert!(
+        stdout(&out).contains("Found 2 model(s)"),
+        "{}",
+        stdout(&out)
+    );
+    // A positional directory still wins.
+    let out = p.cli("a.db", &["makemigrations", "nowhere", "--yes"]);
+    assert!(!stdout(&out).contains("Found 2 model(s)"));
+}

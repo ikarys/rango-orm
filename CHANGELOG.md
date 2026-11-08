@@ -3,6 +3,12 @@
 ## Unreleased
 
 - Fix: `rango makemigrations` detects a `CheckConstraint` (or partial unique condition) whose SQL changed while its name stayed the same: it emits a drop then an add (SQLite: table rebuild) instead of "Nothing to migrate".
+- Fix: `[models] src` in `rango.toml` is honored by `rango makemigrations` (a positional directory still overrides it).
+- Fix: `rango restore` skips migration names already in `_rango_migrations`, so it works on a database `rango migrate` already prepared (any backend). Every other conflict still fails.
+- Feat: `rango restore` warns, listing the migrations it recorded as applied without running them: custom SQL in them (stored procedures, views, triggers) is not reproduced and must be re-run by hand.
+- Fix: commands taking a database URL (`restore`, `dump`, `backup`, `export`, `import`, `migrate`) infer the backend from its scheme (`postgres`, `postgresql`, `mysql`, `mariadb`, `sqlite`) instead of always trusting `rango.toml`.
+- Fix: `rango import` without `--table` on rows that carry no `__table` (single-table export, CSV) fails with a message asking for `--table`, instead of `relation "default" does not exist`.
+- Fix: `rango dump --schema-only` reports the number of tables of the schema instead of 0.
 - Docs: `makemigrations` migration file naming rule (`NNNN_<tables>.sql`, or `NNNN_auto.sql` above 40 characters).
 - Perf: SQLite bulk operations chunk at 32,000 bound parameters instead of 999 (the bundled SQLite 3.46 allows 32,766): `bulk_create` of 1,000 rows is one statement.
 - Docs: `makemigrations` detection table lists renames, constraint, index and FK changes and the SQLite rebuild; `CheckConstraint::new` (not `raw`); partial unique indexes on Postgres and SQLite; typed columns first in the quick start with PostgreSQL / MySQL connect examples; `FieldPassword` hashing cost.

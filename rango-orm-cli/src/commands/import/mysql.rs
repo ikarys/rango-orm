@@ -32,7 +32,13 @@ pub(super) async fn import_mysql(
     let groups = group_by_table(rows, table);
     let mut total = 0;
     for (table, table_rows) in groups {
-        total += insert_rows_mysql(&mut tx, &table, &table_rows, on_conflict).await?;
+        total += insert_rows_mysql(
+            &mut tx,
+            &table,
+            &table_rows,
+            conflict_for(&table, on_conflict),
+        )
+        .await?;
     }
 
     sqlx::query("SET FOREIGN_KEY_CHECKS = 1")

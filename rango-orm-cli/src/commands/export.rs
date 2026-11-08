@@ -29,7 +29,9 @@ pub async fn run(
     let requested: Vec<String> = table.map(str::to_string).into_iter().collect();
 
     let mut data = Vec::new();
-    for (name, rows) in fetch_tables(cfg.database.backend_kind(), database_url, &requested).await? {
+    for (name, rows) in
+        fetch_tables(cfg.backend_for(database_url), database_url, &requested).await?
+    {
         for mut row in rows {
             // Add table name for multi-table exports
             if table.is_none() {
