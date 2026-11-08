@@ -7,6 +7,7 @@ pub mod config;
 pub mod constraints;
 pub mod error;
 pub mod fields;
+pub mod filter;
 pub mod hooks;
 pub mod model;
 pub mod query;
@@ -31,6 +32,8 @@ pub use constraints::{
 };
 pub use error::{Error, Result};
 pub use fields::*;
+#[doc(hidden)]
+pub use filter::{DEFAULT_QUERY_LIMIT, Dialect, Filter, PrefetchSpec, SelectRelatedSpec};
 pub use hooks::{BoxFuture, HookResult, ModelHooks};
 #[doc(hidden)]
 pub use hooks::{
