@@ -1,8 +1,9 @@
 //! Keeps the Quick Start (docs/src/getting-started/quick-start.md) compiling and running.
-// The prelude exports one backend's ops: build with `--no-default-features --features sqlite`.
-#![cfg(all(feature = "sqlite", not(feature = "postgres"), not(feature = "mysql")))]
+// The prelude exports one backend's ops (postgres first): SQLite ops are imported by path.
+#![cfg(feature = "sqlite")]
 
 use rango::prelude::*;
+use rango::sqlite::{RangoFilterExt, insert, raw_execute};
 
 #[derive(Model)]
 pub struct User {
