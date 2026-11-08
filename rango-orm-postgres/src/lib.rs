@@ -45,6 +45,45 @@ impl<M> RangoFilterExt for M where M: Model + ModelValues + FromRow + Filterable
 
 pub use self::RangoFilterExt as FilterExt;
 
+/// Parse the URL; remote hosts get `sslmode=require` unless the URL or `PGSSLMODE` sets one.
+fn tls_default(url: &str, env_sslmode: bool) -> rango_orm_core::Result<PgConnectOptions> {
+    let mut opts: PgConnectOptions = url.parse().map_err(error::db_err)?;
+    if !(url.contains("sslmode=") || env_sslmode) && !is_local_host(opts.get_host()) {
+        opts = opts.ssl_mode(PgSslMode::Require);
+    }
+    Ok(opts)
+}
+
+#[cfg(test)]
+mod tls_tests {
+    use super::*;
+
+    #[test]
+    fn remote_hosts_require_tls_unless_the_url_says_otherwise() {
+        let mode = |url, env| tls_default(url, env).unwrap().get_ssl_mode();
+        assert!(matches!(
+            mode("postgres://u:p@db.example.com/d", false),
+            PgSslMode::Require
+        ));
+        assert!(matches!(
+            mode("postgres://u:p@localhost/d", false),
+            PgSslMode::Prefer
+        ));
+        assert!(matches!(
+            mode("postgres://u:p@127.0.0.1/d", false),
+            PgSslMode::Prefer
+        ));
+        assert!(matches!(
+            mode("postgres://u:p@db.example.com/d?sslmode=disable", false),
+            PgSslMode::Disable
+        ));
+        assert!(matches!(
+            mode("postgres://u:p@db.example.com/d", true),
+            PgSslMode::Prefer
+        ));
+    }
+}
+
 /// Connect to a PostgreSQL database and return a connection pool.
 /// Applies `after_connect` SQL statements on every new connection if configured.
 ///
@@ -75,11 +114,7 @@ pub async fn connect(config: &DatabaseConfig) -> rango_orm_core::Result<PgPool> 
         });
     }
 
-    let mut connect_opts: PgConnectOptions = config.url.parse().map_err(error::db_err)?;
-    let explicit_ssl = config.url.contains("sslmode=") || std::env::var_os("PGSSLMODE").is_some();
-    if !explicit_ssl && !is_local_host(connect_opts.get_host()) {
-        connect_opts = connect_opts.ssl_mode(PgSslMode::Require);
-    }
+    let mut connect_opts = tls_default(&config.url, std::env::var_os("PGSSLMODE").is_some())?;
 
     connect_opts = connect_opts.log_slow_statements(
         log::LevelFilter::Warn,
