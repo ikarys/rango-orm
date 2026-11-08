@@ -5,6 +5,8 @@ Raw SQL is an escape hatch for queries the builder can't express.
 
 Table names in the examples are `app_user` (a model with `#[model(table = "app_user")]`). Quote reserved names such as `user` or `order`: `"user"` on PostgreSQL and SQLite, `` `user` `` on MySQL. On PostgreSQL an unquoted `user` is the `current_user` function, so `SELECT * FROM user` does not read your table.
 
+> **Imports.** The examples call `raw`, `raw_scalar`, `raw_execute` (and elsewhere `insert`, `bulk_create`, ...) as plain functions. With `use rango::prelude::*;` they are in scope on any backend. At the crate root (`rango::raw_execute`, `rango::bulk_create`) they exist only with the `postgres` feature. With only `sqlite` or `mysql`, write `rango::sqlite::raw_execute` / `rango::mysql::raw_execute`, or use the prelude.
+
 ## raw() — returns model rows
 
 `raw` takes the executor and the row type: `raw::<_, User>(...)`, or let the binding infer it with `let users: Vec<User> = raw(...)`.

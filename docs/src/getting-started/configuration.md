@@ -6,7 +6,7 @@ Rango is configured via `rango.toml` at the root of your project.
 
 ```toml
 [database]
-backend = "sqlite"   # "sqlite" or "postgres"
+backend = "sqlite"   # "sqlite", "postgres", "mysql" or "mariadb"
 # url is optional here — prefer DATABASE_URL env var for credentials
 
 [models]
@@ -24,6 +24,8 @@ The database URL is read from (in priority order):
 2. `DATABASE_URL` environment variable
 3. `url` field in `rango.toml` (local dev only — do not commit credentials)
 
+`rango migrate` also reads `MIGRATE_DATABASE_URL` before all of these: see [migrate](../migrations/migrate.md).
+
 ```bash
 # Recommended for production
 export DATABASE_URL=postgres://user:password@host:5432/mydb
@@ -38,6 +40,8 @@ DATABASE_URL=sqlite://db.sqlite3 rango migrate
 |---|---|---|
 | `sqlite` | `sqlite://path/to/db.sqlite3` | In-memory: `sqlite::memory:` |
 | `postgres` | `postgres://user:pass@host:5432/db` | Also accepts `postgresql://` |
+| `mysql` | `mysql://user:pass@host:3306/db` | MySQL 8.0+ |
+| `mariadb` | `mariadb://user:pass@host:3306/db` | MariaDB 10.6+; same driver as `mysql` |
 
 When a command gets a database URL (`-d` or `DATABASE_URL`), the backend is taken from its scheme (`postgres` / `postgresql`, `mysql` / `mariadb`, `sqlite`), whatever `backend` says. `backend` is the fallback for a URL with another form, and decides which SQL `makemigrations` writes.
 
