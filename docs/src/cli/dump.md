@@ -27,7 +27,7 @@ rango dump
 | `-m, --migrations <dir>` | `migrations` / `[migrations] dir` from `rango.toml` | Where the schema snapshot is read. |
 | `-d, --database-url` | `DATABASE_URL` | Database URL. |
 
-The `_rango_migrations` bookkeeping table is excluded unless named with `--table`. The schema part needs a snapshot; run `rango makemigrations` first.
+The `_rango_migrations` bookkeeping table is not dumped as a table (unless named with `--table`); its migration names go in a separate `migrations` field. The schema part needs a snapshot; run `rango makemigrations` first.
 
 ## restore
 ```bash
@@ -40,7 +40,7 @@ File contents are treated as untrusted:
 - Values are bound parameters.
 - Decompressed size is capped at 8 GiB against gzip bombs.
 
-Restore creates missing tables from the schema, then inserts rows, in one transaction. On any error, such as a constraint violation or a row conflicting with existing data, nothing is restored. On MySQL/MariaDB, DDL auto-commits, so tables created before a failure stay empty.
+Restore creates missing tables from the schema, then inserts rows, in one transaction. When it creates the schema it also recreates `_rango_migrations` with the dumped migration names, so `rango migrate` on the restored database has nothing to replay. A dump made by an older rango has no `migrations` field: restore warns and records nothing, so check `rango migrate` before running it. On any error, such as a constraint violation or a row conflicting with existing data, nothing is restored. On MySQL/MariaDB, DDL auto-commits, so tables created before a failure stay empty.
 
 Foreign keys are checked at the end of the transaction, so rows can come in any order, including self-references and FK cycles. On Postgres, a cycle where every FK is `NOT NULL` needs the cycle's constraints to be `DEFERRABLE`; `rango makemigrations` creates them that way, but databases migrated before 0.1.1 keep non-deferrable constraints.
 

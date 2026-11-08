@@ -2,7 +2,7 @@
 
 ## sum / avg
 
-Return `Option<f64>` — `None` if the table is empty or all values are NULL.
+Return `Result<Option<f64>>`: `None` if the table is empty or all values are NULL. The database casts the result to a float (`float8` / `DOUBLE` / `REAL`), so a `FieldDecimal` column loses its exactness here.
 
 ```rust
 let total = Order::filter(&pool).sum("amount").await?;

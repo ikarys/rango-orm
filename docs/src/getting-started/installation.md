@@ -9,13 +9,13 @@ Rango is pre-1.0: a `0.x` minor release may still break the API. The package is 
 
 [dependencies]
 # PostgreSQL backend (default)
-rango-orm = "0.1"
+rango-orm = "0.2"
 
 # SQLite backend
-rango-orm = { version = "0.1", default-features = false, features = ["sqlite"] }
+rango-orm = { version = "0.2", default-features = false, features = ["sqlite"] }
 
 # MySQL 8.0+ / MariaDB 10.6+ backend
-rango-orm = { version = "0.1", default-features = false, features = ["mysql"] }
+rango-orm = { version = "0.2", default-features = false, features = ["mysql"] }
 
 tokio = { version = "1", features = ["full"] }
 
@@ -24,6 +24,8 @@ tokio = { version = "1", features = ["full"] }
 uuid = { version = "1", features = ["v4"] }
 chrono = "0.4"
 ```
+
+Rango 0.2 is in beta (`0.2.0-beta.1`). Until `0.2.0` is out, Cargo does not pick a pre-release for `"0.2"`: write `version = "0.2.0-beta.1"` in `Cargo.toml` (the snippets above show the final form).
 
 ### Several backends at once
 
@@ -42,7 +44,7 @@ let q = <Item as rango::sqlite::RangoFilterExt>::filter(&sqlite_pool);
 ## Install the CLI
 
 ```bash
-cargo install rango-orm-cli --version 0.1.1
+cargo install rango-orm-cli --version 0.2.0-beta.1
 ```
 
 This installs the `rango` binary.
