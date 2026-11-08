@@ -22,14 +22,14 @@ impl ModelHooks for User {
     fn before_save(&mut self) -> BoxFuture<'_> {
         Box::pin(async move {
             // Runs before every INSERT or UPDATE; the mutation is what gets written.
-            self.slug = FieldVarchar(self.email.0.replace('@', "-at-"));
+            self.slug = FieldVarchar::new(self.email.replace('@', "-at-"))?;
             Ok(())
         })
     }
 
     fn after_create(&self) -> BoxFuture<'_> {
         Box::pin(async move {
-            println!("Welcome {}!", self.email.0);
+            println!("Welcome {}!", self.email);
             Ok(())
         })
     }
@@ -81,7 +81,7 @@ returned by the database.
 impl ModelHooks for User {
     fn before_save(&mut self) -> BoxFuture<'_> {
         Box::pin(async move {
-            if self.email.0.is_empty() {
+            if self.email.is_empty() {
                 return Err("email cannot be empty".into());
             }
             Ok(())

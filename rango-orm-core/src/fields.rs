@@ -109,6 +109,12 @@ impl<const MIN: usize, const MAX: usize> std::ops::Deref for FieldVarchar<MIN, M
     }
 }
 
+impl<const MIN: usize, const MAX: usize> std::fmt::Display for FieldVarchar<MIN, MAX> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
 /// Email field — validated on construction (inner value is private, see [`FieldVarchar`]).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(try_from = "String")]
@@ -149,6 +155,12 @@ impl std::ops::Deref for FieldEmail {
     type Target = str;
     fn deref(&self) -> &str {
         &self.0
+    }
+}
+
+impl std::fmt::Display for FieldEmail {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
     }
 }
 
@@ -256,6 +268,12 @@ impl std::ops::Deref for FieldUrl {
     type Target = str;
     fn deref(&self) -> &str {
         &self.0
+    }
+}
+
+impl std::fmt::Display for FieldUrl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
     }
 }
 
@@ -742,6 +760,13 @@ impl From<serde_json::Value> for FieldJson {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn validated_fields_display_their_value() {
+        let name = FieldVarchar::<1, 10>::new("ada").unwrap();
+        let email = FieldEmail::new("ada@x.io").unwrap();
+        assert_eq!(format!("{name} <{email}>"), "ada <ada@x.io>");
+    }
 
     #[test]
     fn varchar_counts_chars_not_bytes() {

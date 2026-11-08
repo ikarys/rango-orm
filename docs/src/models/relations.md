@@ -64,7 +64,7 @@ let results = Post::filter(&pool)
 
 for post in &results {
     let author = post.related::<User>();
-    println!("{} by {}", post.title.0, author.name.0);
+    println!("{} by {}", post.title, author.name);
 }
 ```
 
@@ -149,7 +149,7 @@ let posts = Post::filter(&pool)
 
 for post in &posts {
     let comments = post.prefetched::<Comment>(); // &[Comment], zero SQL
-    println!("{} has {} comments", post.title.0, comments.len());
+    println!("{} has {} comments", post.title, comments.len());
 }
 ```
 

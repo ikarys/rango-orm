@@ -1176,15 +1176,15 @@ struct Hooked {
 impl ModelHooks for Hooked {
     fn before_save(&mut self) -> BoxFuture<'_> {
         Box::pin(async move {
-            self.slug = FieldVarchar(self.name.0.to_lowercase());
-            hook_log("before_save", &self.name.0);
+            self.slug = FieldVarchar::new(self.name.as_str().to_lowercase()).unwrap();
+            hook_log("before_save", self.name.as_str());
             Ok(())
         })
     }
     fn after_save(&self) -> BoxFuture<'_> {
         Box::pin(async move {
-            hook_log("after_save", &self.name.0);
-            if self.name.0.starts_with("fail_after") {
+            hook_log("after_save", self.name.as_str());
+            if self.name.as_str().starts_with("fail_after") {
                 return Err("after_save refused".into());
             }
             Ok(())
@@ -1192,8 +1192,8 @@ impl ModelHooks for Hooked {
     }
     fn before_create(&mut self) -> BoxFuture<'_> {
         Box::pin(async move {
-            hook_log("before_create", &self.name.0);
-            if self.name.0.starts_with("fail_create") {
+            hook_log("before_create", self.name.as_str());
+            if self.name.as_str().starts_with("fail_create") {
                 return Err("before_create refused".into());
             }
             Ok(())
@@ -1201,31 +1201,31 @@ impl ModelHooks for Hooked {
     }
     fn after_create(&self) -> BoxFuture<'_> {
         Box::pin(async move {
-            hook_log("after_create", &self.name.0);
+            hook_log("after_create", self.name.as_str());
             Ok(())
         })
     }
     fn before_update(&mut self) -> BoxFuture<'_> {
         Box::pin(async move {
-            hook_log("before_update", &self.name.0);
+            hook_log("before_update", self.name.as_str());
             Ok(())
         })
     }
     fn after_update(&self) -> BoxFuture<'_> {
         Box::pin(async move {
-            hook_log("after_update", &self.name.0);
+            hook_log("after_update", self.name.as_str());
             Ok(())
         })
     }
     fn before_delete(&self) -> BoxFuture<'_> {
         Box::pin(async move {
-            hook_log("before_delete", &self.name.0);
+            hook_log("before_delete", self.name.as_str());
             Ok(())
         })
     }
     fn after_delete(&self) -> BoxFuture<'_> {
         Box::pin(async move {
-            hook_log("after_delete", &self.name.0);
+            hook_log("after_delete", self.name.as_str());
             Ok(())
         })
     }
@@ -1234,8 +1234,8 @@ impl ModelHooks for Hooked {
 fn hooked(name: &str) -> Hooked {
     Hooked {
         id: FieldUuid(Uuid::new_v4()),
-        name: FieldVarchar(name.to_string()),
-        slug: FieldVarchar(String::new()),
+        name: FieldVarchar::new(name.to_string()).unwrap(),
+        slug: FieldVarchar::new(String::new()).unwrap(),
     }
 }
 
@@ -1269,12 +1269,12 @@ async fn test_hooks_insert_update_delete() {
 
     let saved = insert(&pool, hooked("Ada Lovelace")).await.unwrap();
     // before_save mutated the model and the mutation is what was written
-    assert_eq!(saved.slug.0, "ada lovelace");
+    assert_eq!(saved.slug.as_str(), "ada lovelace");
     let stored = get::<_, Hooked>(&pool, &saved.id.to_sql_value())
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(stored.slug.0, "ada lovelace");
+    assert_eq!(stored.slug.as_str(), "ada lovelace");
     assert_eq!(
         hook_events("Ada Lovelace"),
         ["before_save", "before_create", "after_create", "after_save"]
@@ -1282,9 +1282,9 @@ async fn test_hooks_insert_update_delete() {
 
     // update: save + update hooks, never create hooks
     let mut changed = saved.clone();
-    changed.slug = FieldVarchar("tampered".into());
+    changed.slug = FieldVarchar::new("tampered").unwrap();
     let updated = update(&pool, changed).await.unwrap();
-    assert_eq!(updated.slug.0, "ada lovelace");
+    assert_eq!(updated.slug.as_str(), "ada lovelace");
     assert_eq!(
         hook_events("Ada Lovelace")[4..],
         ["before_save", "before_update", "after_update", "after_save"]

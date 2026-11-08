@@ -179,7 +179,7 @@ let authors = User::filter(&amp;pool)
 
 for post in &amp;posts {
     let author = post.related::&lt;User&gt;(); // no SQL
-    println!("{} by {}", post.title.0, author.name.0);
+    println!("{} by {}", post.title, author.name);
 }
 
 <span class="cmt">// Many-to-many: one query through the pivot table</span>
