@@ -9,10 +9,10 @@ Imports data from JSON or CSV into the database.
 rango import data.json
 
 # Import into a specific table
-rango import users.json --table myapp_user
+rango import users.json --table user
 
 # Import CSV
-rango import users.csv --table myapp_user
+rango import users.csv --table user
 
 # Replace existing rows on conflict
 rango import fixtures.json --replace
@@ -49,8 +49,8 @@ rango import data --format json --table users
 With `__table` (multi-table import without `--table`):
 ```json
 [
-  { "__table": "myapp_user", "id": "...", "email": "alice@example.com" },
-  { "__table": "myapp_post", "id": "...", "title": "Hello" }
+  { "__table": "user", "id": "...", "email": "alice@example.com" },
+  { "__table": "post", "id": "...", "title": "Hello" }
 ]
 ```
 
@@ -60,7 +60,7 @@ With `__table` (multi-table import without `--table`):
 
 ```bash
 # Export production data (sanitized)
-DATABASE_URL=$PROD_URL rango export --table myapp_user --output fixtures/users.json
+DATABASE_URL=$PROD_URL rango export --table user --output fixtures/users.json
 
 # Load into dev
 DATABASE_URL=sqlite://dev.db rango import fixtures/users.json

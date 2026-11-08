@@ -43,8 +43,8 @@ Single table:
 Multiple tables (no `--table` specified):
 ```json
 [
-  { "__table": "myapp_user", "id": "...", "email": "alice@example.com" },
-  { "__table": "myapp_post", "id": "...", "title": "Hello" }
+  { "__table": "user", "id": "...", "email": "alice@example.com" },
+  { "__table": "post", "id": "...", "title": "Hello" }
 ]
 ```
 
