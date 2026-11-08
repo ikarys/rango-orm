@@ -1,7 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.2.0-beta.1 (2026-11-08)
 
+First beta of the 0.2 cycle. The API may still change between betas: pin the tag.
+
+- Docs: subquery decision rules — when to use a correlated `EXISTS` subquery vs a `JOIN` vs a `prefetch` (`docs/src/querying/filter.md`).
+- Tests: on-demand end-to-end scenario suite (`just scenarios`), gated behind `integration-scenarios` so it never runs in CI; drives a real blog/CMS app (CRUD, relations, M2M, subquery filter, transactions, bulk) on SQLite in-memory.
 - License: dual-licensed under MIT OR Apache-2.0 (was MIT only).
 - Feat: SQLite migrations rebuild the table (create, copy, drop, rename) for changes SQLite cannot `ALTER`: column type, nullability, FK, unique, constraints. They emitted a comment before. `rango migrate` runs SQLite migrations with foreign keys off and checks `PRAGMA foreign_key_check` before each commit.
 - Feat: `.explain_analyze()` on the query builder: `EXPLAIN ANALYZE` on Postgres and MySQL, `ANALYZE FORMAT=JSON` on MariaDB, `EXPLAIN QUERY PLAN` on SQLite.

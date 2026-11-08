@@ -76,6 +76,12 @@ test-postgres:
 # Run all tests: unit + sqlite + postgres
 test-all: test test-sqlite test-postgres test-mysql
 
+# On-demand end-to-end scenario suite (real blog/CMS app, SQLite in-memory, no Docker).
+# Not part of `just test` / CI: run it explicitly when you want to exercise the product.
+scenarios:
+    cargo build -p rango-orm-cli
+    cargo test --test scenarios --features rango-tests/integration-scenarios -- --test-threads=1
+
 # Generate coverage report with HTML output
 coverage:
     docker compose up -d

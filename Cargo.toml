@@ -13,7 +13,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.1.1"
+version = "0.2.0-beta.1"
 rust-version = "1.89"
 license = "MIT OR Apache-2.0"
 authors = ["Ikarys"]
@@ -21,8 +21,8 @@ repository = "https://github.com/ikarys/rango-orm"
 homepage = "https://ikarys.github.io/rango-orm/"
 
 [workspace.dependencies]
-rango-orm-core = { path = "rango-orm-core", version = "=0.1.1" }
-rango-orm-derive = { path = "rango-orm-derive", version = "=0.1.1" }
-rango-orm-postgres = { path = "rango-orm-postgres", version = "=0.1.1" }
-rango-orm-sqlite = { path = "rango-orm-sqlite", version = "=0.1.1" }
-rango-orm-mysql = { path = "rango-orm-mysql", version = "=0.1.1" }
+rango-orm-core = { path = "rango-orm-core", version = "=0.2.0-beta.1" }
+rango-orm-derive = { path = "rango-orm-derive", version = "=0.2.0-beta.1" }
+rango-orm-postgres = { path = "rango-orm-postgres", version = "=0.2.0-beta.1" }
+rango-orm-sqlite = { path = "rango-orm-sqlite", version = "=0.2.0-beta.1" }
+rango-orm-mysql = { path = "rango-orm-mysql", version = "=0.2.0-beta.1" }
