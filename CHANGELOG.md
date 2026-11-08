@@ -4,6 +4,7 @@
 
 - Fix: `rango makemigrations` detects a `CheckConstraint` (or partial unique condition) whose SQL changed while its name stayed the same: it emits a drop then an add (SQLite: table rebuild) instead of "Nothing to migrate".
 - Fix: `[models] src` in `rango.toml` is honored by `rango makemigrations` (a positional directory still overrides it).
+- Fix: the CLI reads `url` from `rango.toml` as the last fallback after `--database-url` and `DATABASE_URL`, as documented (local dev only).
 - Fix: `rango restore` skips migration names already in `_rango_migrations`, so it works on a database `rango migrate` already prepared (any backend). Every other conflict still fails.
 - Feat: `rango restore` warns, listing the migrations it recorded as applied without running them: custom SQL in them (stored procedures, views, triggers) is not reproduced and must be re-run by hand.
 - Fix: commands taking a database URL (`restore`, `dump`, `backup`, `export`, `import`, `migrate`) infer the backend from its scheme (`postgres`, `postgresql`, `mysql`, `mariadb`, `sqlite`) instead of always trusting `rango.toml`.

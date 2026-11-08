@@ -155,6 +155,7 @@ impl RangoConfig {
     /// Resolve the database URL with priority:
     /// 1. CLI argument --database-url
     /// 2. DATABASE_URL env var
+    /// 3. `url` in rango.toml (local dev only)
     pub fn resolve_database_url(&self, cli_url: Option<&str>) -> Result<String> {
         if let Some(url) = cli_url {
             return Ok(url.to_string());
@@ -162,10 +163,13 @@ impl RangoConfig {
         if let Ok(url) = std::env::var("DATABASE_URL") {
             return Ok(url);
         }
+        if let Some(url) = &self.database.url {
+            return Ok(url.clone());
+        }
         anyhow::bail!(
             "No database URL found.\n\
              Set DATABASE_URL env var or use --database-url.\n\
-             Note: database URL should not be stored in rango.toml (use env vars for secrets)."
+             (`url` in rango.toml also works for local dev; never store credentials there.)"
         )
     }
 
@@ -185,6 +189,24 @@ impl RangoConfig {
 mod tests {
     use super::*;
     use rango_orm_core::BackendKind::*;
+
+    #[test]
+    fn toml_url_is_the_last_fallback() {
+        let cfg = RangoConfig {
+            database: DatabaseConfig {
+                url: Some("sqlite://dev.db".into()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert_eq!(
+            cfg.resolve_database_url(Some("sqlite://cli.db")).unwrap(),
+            "sqlite://cli.db"
+        );
+        if std::env::var("DATABASE_URL").is_err() {
+            assert_eq!(cfg.resolve_database_url(None).unwrap(), "sqlite://dev.db");
+        }
+    }
 
     #[test]
     fn url_scheme_overrides_configured_backend() {
