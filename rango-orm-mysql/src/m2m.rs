@@ -1,7 +1,7 @@
 use crate::error::db_err;
-use rango_orm_core::related::m2m_pivot;
-use rango_orm_core::Result;
-use rango_orm_core::{quote_ident_mysql as quote_ident, FromRow, Model, ModelValues};
+use rango_orm_core::related::M2mSql;
+use rango_orm_core::{Dialect, Result};
+use rango_orm_core::{FromRow, Model, ModelValues};
 
 use crate::ops::bind_sql_values;
 use crate::row::decode_all;
@@ -19,41 +19,12 @@ where
     From: Model + ModelValues,
     To: Model + ModelValues + FromRow,
 {
+    fn sql() -> M2mSql {
+        M2mSql::new(Dialect::Mysql, From::table_name(), To::table_name())
+    }
+
     fn pivot_table() -> String {
-        m2m_pivot(From::table_name(), To::table_name()).0
-    }
-
-    fn from_col() -> String {
-        m2m_pivot(From::table_name(), To::table_name()).1
-    }
-
-    fn to_col() -> String {
-        m2m_pivot(From::table_name(), To::table_name()).2
-    }
-
-    fn insert_sql() -> String {
-        let pivot = Self::pivot_table();
-        let from_col = Self::from_col();
-        let to_col = Self::to_col();
-        // Use ON DUPLICATE KEY UPDATE, not INSERT IGNORE, to avoid silencing FK and other errors.
-        format!(
-            "INSERT INTO {} ({}, {}) VALUES (?, ?) ON DUPLICATE KEY UPDATE {} = {}",
-            quote_ident(&pivot),
-            quote_ident(&from_col),
-            quote_ident(&to_col),
-            quote_ident(&from_col),
-            quote_ident(&from_col)
-        )
-    }
-
-    fn clear_sql() -> String {
-        let pivot = Self::pivot_table();
-        let from_col = Self::from_col();
-        format!(
-            "DELETE FROM {} WHERE {} = ?",
-            quote_ident(&pivot),
-            quote_ident(&from_col)
-        )
+        Self::sql().pivot_table().to_owned()
     }
 
     /// Add a relation between from and to.
@@ -63,7 +34,7 @@ where
     where
         E: sqlx::Executor<'e, Database = sqlx::MySql>,
     {
-        let sql = Self::insert_sql();
+        let sql = Self::sql().insert();
         let q = bind_sql_values(
             sqlx::query(sqlx::AssertSqlSafe(&*sql)),
             vec![from.pk_value(), to.pk_value()],
@@ -78,15 +49,7 @@ where
     where
         E: sqlx::Executor<'e, Database = sqlx::MySql>,
     {
-        let pivot = Self::pivot_table();
-        let from_col = Self::from_col();
-        let to_col = Self::to_col();
-        let sql = format!(
-            "DELETE FROM {} WHERE {} = ? AND {} = ?",
-            quote_ident(&pivot),
-            quote_ident(&from_col),
-            quote_ident(&to_col)
-        );
+        let sql = Self::sql().remove();
         let q = bind_sql_values(
             sqlx::query(sqlx::AssertSqlSafe(&*sql)),
             vec![from.pk_value(), to.pk_value()],
@@ -101,7 +64,7 @@ where
     where
         E: sqlx::Executor<'e, Database = sqlx::MySql>,
     {
-        let sql = Self::clear_sql();
+        let sql = Self::sql().clear();
         let q = bind_sql_values(
             sqlx::query(sqlx::AssertSqlSafe(&*sql)),
             vec![from.pk_value()],
@@ -116,22 +79,7 @@ where
     where
         E: sqlx::Executor<'e, Database = sqlx::MySql>,
     {
-        let pivot = Self::pivot_table();
-        let from_col = Self::from_col();
-        let to_table = To::table_name();
-        let to_pk = To::pk_column();
-        let to_col = Self::to_col();
-
-        let sql = format!(
-            r#"SELECT t.* FROM {to_table} t
-               INNER JOIN {pivot} p ON t.{to_pk} = p.{to_col}
-               WHERE p.{from_col} = ?"#,
-            to_table = quote_ident(to_table),
-            pivot = quote_ident(&pivot),
-            to_pk = quote_ident(to_pk),
-            to_col = quote_ident(&to_col),
-            from_col = quote_ident(&from_col),
-        );
+        let sql = Self::sql().all(To::pk_column());
         let q = bind_sql_values(
             sqlx::query(sqlx::AssertSqlSafe(&*sql)),
             vec![from.pk_value()],
@@ -148,22 +96,7 @@ where
         E: sqlx::Executor<'e, Database = sqlx::MySql>,
         From: FromRow,
     {
-        let pivot = Self::pivot_table();
-        let to_col = Self::to_col();
-        let from_table = From::table_name();
-        let from_pk = From::pk_column();
-        let from_col = Self::from_col();
-
-        let sql = format!(
-            r#"SELECT f.* FROM {from_table} f
-               INNER JOIN {pivot} p ON f.{from_pk} = p.{from_col}
-               WHERE p.{to_col} = ?"#,
-            from_table = quote_ident(from_table),
-            pivot = quote_ident(&pivot),
-            from_pk = quote_ident(from_pk),
-            from_col = quote_ident(&from_col),
-            to_col = quote_ident(&to_col),
-        );
+        let sql = Self::sql().reverse(From::pk_column());
         let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*sql)), vec![to.pk_value()]);
         let rows = q.fetch_all(executor).await.map_err(db_err)?;
 
@@ -177,13 +110,14 @@ where
         A: sqlx::Acquire<'a, Database = sqlx::MySql>,
     {
         let mut tx = executor.begin().await.map_err(db_err)?;
-        let sql = Self::clear_sql();
+        let s = Self::sql();
+        let sql = s.clear();
         let q = bind_sql_values(
             sqlx::query(sqlx::AssertSqlSafe(&*sql)),
             vec![from.pk_value()],
         );
         q.execute(&mut *tx).await.map_err(db_err)?;
-        let sql = Self::insert_sql();
+        let sql = s.insert();
         for to in to_list {
             let q = bind_sql_values(
                 sqlx::query(sqlx::AssertSqlSafe(&*sql)),
@@ -201,15 +135,7 @@ where
     where
         E: sqlx::Executor<'e, Database = sqlx::MySql>,
     {
-        let pivot = Self::pivot_table();
-        let from_col = Self::from_col();
-        let to_col = Self::to_col();
-        let sql = format!(
-            "SELECT 1 FROM {} WHERE {} = ? AND {} = ? LIMIT 1",
-            quote_ident(&pivot),
-            quote_ident(&from_col),
-            quote_ident(&to_col)
-        );
+        let sql = Self::sql().exists();
         let q = bind_sql_values(
             sqlx::query(sqlx::AssertSqlSafe(&*sql)),
             vec![from.pk_value(), to.pk_value()],
