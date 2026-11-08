@@ -84,3 +84,5 @@ DATABASE_URL=sqlite::memory:
 - [ ] `.env` files are in `.gitignore`
 - [ ] Test database is separate from production
 - [ ] Production URL is injected via environment variable
+
+Every claim on this page and the test behind it: [Security requirements](../trust/security-requirements.md).

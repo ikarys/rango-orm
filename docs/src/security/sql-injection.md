@@ -53,3 +53,5 @@ User::filter(&pool).eq("email", user_input)
 | `raw()` with bound params | ✅ Safe |
 | `raw()` with string interpolation | ❌ Never do this |
 | Column names from user input | ❌ Never do this |
+
+Every claim on this page and the test behind it: [Security requirements](../trust/security-requirements.md).
