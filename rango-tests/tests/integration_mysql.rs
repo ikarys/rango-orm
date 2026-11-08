@@ -1909,3 +1909,188 @@ async fn test_mysql_bulk_upsert_single_unique_key_ok() {
         .unwrap();
     assert_eq!(TestUser::filter(&pool).count().await.unwrap(), 1);
 }
+
+// ── bulk_update: one statement per chunk, mixed types ─────────────────────────────
+
+#[derive(Model, Debug, Clone, PartialEq)]
+#[model(table = "bulk_mix")]
+struct BulkMix {
+    id: FieldUuid,
+    flag: FieldBool,
+    n: Option<FieldInt>,
+    big: FieldBigInt,
+    price: FieldDecimal<10, 2>,
+    at: FieldDateTime,
+    nick: Option<FieldText>,
+    meta: FieldJson,
+}
+
+#[derive(Model, Debug, Clone, PartialEq)]
+#[model(table = "bulk_counter")]
+struct BulkCounter {
+    id: FieldAutoInt,
+    label: FieldText,
+}
+
+fn bulk_mix(i: i64) -> BulkMix {
+    BulkMix {
+        id: FieldUuid(Uuid::new_v4()),
+        flag: FieldBool(i % 2 == 0),
+        n: if i % 3 == 0 {
+            None
+        } else {
+            Some(FieldInt(i as i32))
+        },
+        big: FieldBigInt(i * 10_000_000_000),
+        price: FieldDecimal::from_decimal(Decimal::new(i * 125, 2)),
+        at: FieldDateTime(chrono::DateTime::from_timestamp(1_700_000_000 + i, 0).unwrap()),
+        nick: if i % 5 == 0 {
+            None
+        } else {
+            Some(FieldText(format!("nick \"{i}\" 'q'")))
+        },
+        meta: FieldJson(serde_json::json!({"i": i, "tags": ["a", "b"], "nested": {"ok": true}})),
+    }
+}
+
+async fn bulk_mix_sorted(pool: &MySqlPool) -> Vec<BulkMix> {
+    let mut rows: Vec<BulkMix> = BulkMix::filter(pool)
+        .unlimited()
+        .all()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|r| r.inner)
+        .collect();
+    rows.sort_by_key(|r| r.id.0);
+    rows
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-mysql"), ignore)]
+async fn test_mysql_bulk_update_mixed_types_over_several_chunks() {
+    let pool = pool().await;
+    for ddl in [
+        "DROP TABLE IF EXISTS `bulk_mix`",
+        "DROP TABLE IF EXISTS `bulk_counter`",
+        "CREATE TABLE `bulk_mix` (`id` BINARY(16) PRIMARY KEY, `flag` BOOLEAN NOT NULL, `n` INT, `big` BIGINT NOT NULL, `price` DECIMAL(10,2) NOT NULL, `at` DATETIME(6) NOT NULL, `nick` TEXT, `meta` JSON NOT NULL) ENGINE=InnoDB",
+        "CREATE TABLE `bulk_counter` (`id` INT AUTO_INCREMENT PRIMARY KEY, `label` TEXT NOT NULL) ENGINE=InnoDB",
+    ] {
+        sqlx::query(ddl).execute(&pool).await.unwrap();
+    }
+
+    // Enough rows for at least two chunks of the multi-row UPDATE.
+    let mut rows: Vec<BulkMix> = (0..5000).map(bulk_mix).collect();
+    assert_eq!(bulk_create(&pool, &rows).await.unwrap(), 5000);
+
+    // Every column changes, NULLs become values and values become NULL.
+    for (i, r) in rows.iter_mut().enumerate() {
+        let i = i as i64;
+        r.flag = FieldBool(!r.flag.0);
+        r.n = if r.n.is_some() {
+            None
+        } else {
+            Some(FieldInt(-(i as i32)))
+        };
+        r.big = FieldBigInt(-i * 7_000_000_000);
+        r.price = FieldDecimal::from_decimal(Decimal::new(i * 3 + 1, 2));
+        r.at = FieldDateTime(chrono::DateTime::from_timestamp(1_600_000_000 + i * 60, 0).unwrap());
+        r.nick = if r.nick.is_some() {
+            None
+        } else {
+            Some(FieldText(format!("back {i}")))
+        };
+        r.meta = FieldJson(serde_json::json!({"changed": i, "s": "x\"y"}));
+    }
+    let t = std::time::Instant::now();
+    let cols = ["flag", "n", "big", "price", "at", "nick", "meta"];
+    assert_eq!(bulk_update(&pool, &rows, &cols).await.unwrap(), 5000);
+    println!("mysql bulk_update of 5000 rows: {:?}", t.elapsed());
+    rows.sort_by_key(|r| r.id.0);
+    assert_eq!(bulk_mix_sorted(&pool).await, rows);
+
+    // Unchanged rows still count as matched; a subset of columns leaves the others alone.
+    assert_eq!(
+        bulk_update(&pool, &rows, &["n", "nick"]).await.unwrap(),
+        5000
+    );
+    for r in rows.iter_mut() {
+        r.n = Some(FieldInt(5));
+        r.nick = None;
+    }
+    assert_eq!(
+        bulk_update(&pool, &rows, &["n", "nick"]).await.unwrap(),
+        5000
+    );
+    assert_eq!(bulk_mix_sorted(&pool).await, rows);
+
+    // Inside atomic(): visible in the transaction, rolled back on error, kept on commit.
+    for r in rows.iter_mut() {
+        r.flag = FieldBool(!r.flag.0);
+    }
+    let before = bulk_mix_sorted(&pool).await;
+    let snapshot = rows.clone();
+    let res: Result<(), Error> = atomic(&pool, async |tx| {
+        assert_eq!(bulk_update(&mut **tx, &snapshot, &["flag"]).await?, 5000);
+        Err(Error::Invalid("rollback".into()))
+    })
+    .await;
+    assert!(res.is_err());
+    assert_eq!(bulk_mix_sorted(&pool).await, before);
+    atomic(&pool, async |tx| {
+        assert_eq!(bulk_update(&mut **tx, &snapshot, &["flag"]).await?, 5000);
+        Ok(())
+    })
+    .await
+    .unwrap();
+    assert_eq!(bulk_mix_sorted(&pool).await, rows);
+
+    // Rows not in the slice are untouched; unknown PKs match nothing.
+    let mut some = rows[..10].to_vec();
+    some[0].big = FieldBigInt(42);
+    let mut ghost = bulk_mix(999_999);
+    ghost.big = FieldBigInt(1);
+    some.push(ghost);
+    assert_eq!(bulk_update(&pool, &some, &["big"]).await.unwrap(), 10);
+    rows[0].big = FieldBigInt(42);
+    assert_eq!(bulk_mix_sorted(&pool).await, rows);
+
+    // Auto-increment integer PK.
+    let new = |l: String| BulkCounter {
+        id: FieldAutoInt::default(),
+        label: FieldText(l),
+    };
+    bulk_create(
+        &pool,
+        &(0..5000).map(|i| new(format!("c{i}"))).collect::<Vec<_>>(),
+    )
+    .await
+    .unwrap();
+    let mut counters: Vec<BulkCounter> = BulkCounter::filter(&pool)
+        .unlimited()
+        .all()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|r| r.inner)
+        .collect();
+    assert_eq!(counters.len(), 5000);
+    for c in counters.iter_mut() {
+        c.label = FieldText(format!("renamed {}", c.id.0.unwrap()));
+    }
+    assert_eq!(
+        bulk_update(&pool, &counters, &["label"]).await.unwrap(),
+        5000
+    );
+    let mut stored: Vec<BulkCounter> = BulkCounter::filter(&pool)
+        .unlimited()
+        .all()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|r| r.inner)
+        .collect();
+    stored.sort_by_key(|c| c.id.0);
+    counters.sort_by_key(|c| c.id.0);
+    assert_eq!(stored, counters);
+}
