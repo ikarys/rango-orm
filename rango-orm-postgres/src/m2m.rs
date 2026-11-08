@@ -2,7 +2,6 @@ use crate::error::db_err;
 use rango_orm_core::Result;
 use rango_orm_core::related::m2m_pivot;
 use rango_orm_core::{FromRow, Model, ModelValues, quote_ident};
-use sqlx::PgPool;
 
 use crate::ops::bind_sql_values;
 use crate::row::decode_all;
@@ -57,19 +56,25 @@ where
     /// Add a relation between from and to.
     /// Idempotent: an existing relation is left as is.
     #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "postgresql", db.operation = "INSERT", db.sql.table = %Self::pivot_table(), db.rows = tracing::field::Empty, otel.kind = "client"))]
-    pub async fn add(pool: &PgPool, from: &From, to: &To) -> Result<()> {
+    pub async fn add<'e, E>(executor: E, from: &From, to: &To) -> Result<()>
+    where
+        E: sqlx::Executor<'e, Database = sqlx::Postgres>,
+    {
         let sql = Self::insert_sql();
         let q = bind_sql_values(
             sqlx::query(sqlx::AssertSqlSafe(&*sql)),
             vec![from.pk_value(), to.pk_value()],
         );
-        q.execute(pool).await.map_err(db_err)?;
+        q.execute(executor).await.map_err(db_err)?;
         Ok(())
     }
 
     /// Remove a relation.
     #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "postgresql", db.operation = "DELETE", db.sql.table = %Self::pivot_table(), db.rows = tracing::field::Empty, otel.kind = "client"))]
-    pub async fn remove(pool: &PgPool, from: &From, to: &To) -> Result<()> {
+    pub async fn remove<'e, E>(executor: E, from: &From, to: &To) -> Result<()>
+    where
+        E: sqlx::Executor<'e, Database = sqlx::Postgres>,
+    {
         let pivot = Self::pivot_table();
         let from_col = Self::from_col();
         let to_col = Self::to_col();
@@ -83,25 +88,31 @@ where
             sqlx::query(sqlx::AssertSqlSafe(&*sql)),
             vec![from.pk_value(), to.pk_value()],
         );
-        q.execute(pool).await.map_err(db_err)?;
+        q.execute(executor).await.map_err(db_err)?;
         Ok(())
     }
 
     /// Clear all relations from a given model instance.
     #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "postgresql", db.operation = "DELETE", db.sql.table = %Self::pivot_table(), db.rows = tracing::field::Empty, otel.kind = "client"))]
-    pub async fn clear(pool: &PgPool, from: &From) -> Result<()> {
+    pub async fn clear<'e, E>(executor: E, from: &From) -> Result<()>
+    where
+        E: sqlx::Executor<'e, Database = sqlx::Postgres>,
+    {
         let sql = Self::clear_sql();
         let q = bind_sql_values(
             sqlx::query(sqlx::AssertSqlSafe(&*sql)),
             vec![from.pk_value()],
         );
-        q.execute(pool).await.map_err(db_err)?;
+        q.execute(executor).await.map_err(db_err)?;
         Ok(())
     }
 
     /// Get all related `To` models for a given `from` instance.
     #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "postgresql", db.operation = "SELECT", db.sql.table = %Self::pivot_table(), db.rows = tracing::field::Empty, otel.kind = "client"))]
-    pub async fn all(pool: &PgPool, from: &From) -> Result<Vec<To>> {
+    pub async fn all<'e, E>(executor: E, from: &From) -> Result<Vec<To>>
+    where
+        E: sqlx::Executor<'e, Database = sqlx::Postgres>,
+    {
         let pivot = Self::pivot_table();
         let from_col = Self::from_col();
         let to_table = To::table_name();
@@ -122,15 +133,16 @@ where
             sqlx::query(sqlx::AssertSqlSafe(&*sql)),
             vec![from.pk_value()],
         );
-        let rows = q.fetch_all(pool).await.map_err(db_err)?;
+        let rows = q.fetch_all(executor).await.map_err(db_err)?;
 
         decode_all::<To>(rows)
     }
 
     /// Get all `From` models related to a given `to` instance (reverse).
     #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "postgresql", db.operation = "SELECT", db.sql.table = %Self::pivot_table(), db.rows = tracing::field::Empty, otel.kind = "client"))]
-    pub async fn reverse(pool: &PgPool, to: &To) -> Result<Vec<From>>
+    pub async fn reverse<'e, E>(executor: E, to: &To) -> Result<Vec<From>>
     where
+        E: sqlx::Executor<'e, Database = sqlx::Postgres>,
         From: FromRow,
     {
         let pivot = Self::pivot_table();
@@ -150,15 +162,18 @@ where
             to_col = quote_ident(&to_col),
         );
         let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*sql)), vec![to.pk_value()]);
-        let rows = q.fetch_all(pool).await.map_err(db_err)?;
+        let rows = q.fetch_all(executor).await.map_err(db_err)?;
 
         decode_all::<From>(rows)
     }
 
     /// Set exact relations — replaces all existing with the given list, atomically.
     #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "postgresql", db.operation = "UPDATE", db.sql.table = %Self::pivot_table(), db.rows = tracing::field::Empty, otel.kind = "client"))]
-    pub async fn set(pool: &PgPool, from: &From, to_list: &[To]) -> Result<()> {
-        let mut tx = pool.begin().await.map_err(db_err)?;
+    pub async fn set<'a, A>(executor: A, from: &From, to_list: &[To]) -> Result<()>
+    where
+        A: sqlx::Acquire<'a, Database = sqlx::Postgres>,
+    {
+        let mut tx = executor.begin().await.map_err(db_err)?;
         let sql = Self::clear_sql();
         let q = bind_sql_values(
             sqlx::query(sqlx::AssertSqlSafe(&*sql)),
@@ -179,7 +194,10 @@ where
 
     /// Check if a relation exists.
     #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "postgresql", db.operation = "SELECT", db.sql.table = %Self::pivot_table(), db.rows = tracing::field::Empty, otel.kind = "client"))]
-    pub async fn exists(pool: &PgPool, from: &From, to: &To) -> Result<bool> {
+    pub async fn exists<'e, E>(executor: E, from: &From, to: &To) -> Result<bool>
+    where
+        E: sqlx::Executor<'e, Database = sqlx::Postgres>,
+    {
         let pivot = Self::pivot_table();
         let from_col = Self::from_col();
         let to_col = Self::to_col();
@@ -193,7 +211,7 @@ where
             sqlx::query(sqlx::AssertSqlSafe(&*sql)),
             vec![from.pk_value(), to.pk_value()],
         );
-        let row = q.fetch_optional(pool).await.map_err(db_err)?;
+        let row = q.fetch_optional(executor).await.map_err(db_err)?;
         Ok(row.is_some())
     }
 }

@@ -5,9 +5,11 @@ use rango_orm_core::{
     quote_ident_mysql as quote_ident, FromRow, Model, ModelValues, Result, SqlValue,
 };
 use sqlx::mysql::MySqlRow;
-use sqlx::{Executor, MySqlPool};
+use sqlx::Executor;
 use std::any::TypeId;
 
+mod conn;
+pub use conn::Conn;
 mod exec;
 pub use exec::SelectAs;
 mod filter;
@@ -101,8 +103,8 @@ struct PrefetchSpec {
     collect_vec: CollectVecFn,
 }
 
-pub struct QueryBuilder<M> {
-    pool: MySqlPool,
+pub struct QueryBuilder<'a, M> {
+    conn: Conn<'a>,
     conditions: Vec<ConditionGroup>,
     order_by: Vec<String>,
     limit: Option<i64>,
@@ -216,8 +218,9 @@ where
 
 // ─── RangoFilterExt trait ─────────────────────────────────────────────────────
 pub trait RangoFilterExt: Model + ModelValues + FromRow + Sized {
-    fn filter(pool: &MySqlPool) -> QueryBuilder<Self> {
-        QueryBuilder::new(pool)
+    /// `&pool`, or `&mut **tx` inside `atomic`.
+    fn filter<'a>(conn: impl Into<Conn<'a>>) -> QueryBuilder<'a, Self> {
+        QueryBuilder::new(conn)
     }
 }
 

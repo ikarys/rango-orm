@@ -4,9 +4,11 @@ use rango_orm_core::related::{CollectVecFn, FromRowFn};
 use rango_orm_core::Result;
 use rango_orm_core::{quote_ident, FromRow, Model, ModelValues, SqlValue};
 use sqlx::sqlite::SqliteRow;
-use sqlx::{Executor, SqlitePool};
+use sqlx::Executor;
 use std::any::TypeId;
 
+mod conn;
+pub use conn::Conn;
 mod exec;
 pub use exec::SelectAs;
 mod filter;
@@ -101,8 +103,8 @@ struct PrefetchSpec {
     collect_vec: CollectVecFn,
 }
 
-pub struct QueryBuilder<M> {
-    pool: SqlitePool,
+pub struct QueryBuilder<'a, M> {
+    conn: Conn<'a>,
     conditions: Vec<ConditionGroup>,
     order_by: Vec<String>,
     limit: Option<i64>,
@@ -238,8 +240,9 @@ where
 
 // ─── RangoFilterExt trait ─────────────────────────────────────────────────────
 pub trait RangoFilterExt: Model + ModelValues + FromRow + Sized {
-    fn filter(pool: &SqlitePool) -> QueryBuilder<Self> {
-        QueryBuilder::new(pool)
+    /// `&pool`, or `&mut **tx` inside `atomic`.
+    fn filter<'a>(conn: impl Into<Conn<'a>>) -> QueryBuilder<'a, Self> {
+        QueryBuilder::new(conn)
     }
 }
 

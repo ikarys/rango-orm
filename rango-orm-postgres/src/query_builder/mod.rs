@@ -1,12 +1,13 @@
 use crate::error::db_err;
 use rango_orm_core::Result;
 use rango_orm_core::{SqlValue, quote_ident};
-use sqlx::PgPool;
 use std::any::TypeId;
 // ─── Bind helpers ─────────────────────────────────────────────────────────────
 use crate::ops::bind_sql_values;
 use sqlx::postgres::PgRow;
 
+mod conn;
+pub use conn::Conn;
 mod exec;
 pub use exec::SelectAs;
 mod filter;
@@ -106,8 +107,8 @@ struct PrefetchSpec {
 
 // ─── QueryBuilder ─────────────────────────────────────────────────────────────
 /// Chainable, lazy query builder. SQL is built and executed only at `.all()` / `.one()`.
-pub struct QueryBuilder<M> {
-    pool: PgPool,
+pub struct QueryBuilder<'a, M> {
+    conn: Conn<'a>,
     // TODO: cache backend trait (level 2 — Redis, Memcached, custom)
     conditions: Vec<ConditionGroup>,
     order_by: Vec<String>,
@@ -283,10 +284,13 @@ where
     q.fetch_all(executor).await.map_err(db_err)
 }
 
-async fn bind_and_fetch_one(pool: &PgPool, sql: &str, binds: Vec<SqlValue>) -> Result<PgRow> {
+async fn bind_and_fetch_one<'e, E>(executor: E, sql: &str, binds: Vec<SqlValue>) -> Result<PgRow>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Postgres>,
+{
     let q = sqlx::query(sqlx::AssertSqlSafe(sql));
     let q = bind_sql_values(q, binds);
-    q.fetch_one(pool).await.map_err(db_err)
+    q.fetch_one(executor).await.map_err(db_err)
 }
 
 #[cfg(test)]

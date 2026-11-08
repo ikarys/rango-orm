@@ -15,9 +15,10 @@ use sqlx::{
 
 pub use m2m::M2M;
 pub use ops::{
-    all, bulk_create, delete, get, get_or_create, insert, raw, raw_execute, raw_scalar, update,
+    all, bulk_create, bulk_update, bulk_upsert, delete, get, get_or_create, insert, raw,
+    raw_execute, raw_scalar, update, update_or_create,
 };
-pub use query_builder::{QueryBuilder, RangoFilterExt, SelectAs};
+pub use query_builder::{Conn, QueryBuilder, RangoFilterExt, SelectAs};
 pub use rango_orm_core::WithRelated;
 pub use transaction::{atomic, MySqlTransaction, TxFuture};
 
