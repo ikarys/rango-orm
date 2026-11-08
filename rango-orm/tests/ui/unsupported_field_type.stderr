@@ -1,0 +1,5 @@
+error: `String` is not a Rango field type: use `FieldText` or `FieldVarchar<MIN, MAX>`. Wrap it in `Option<..>` for a nullable column.
+ --> tests/ui/unsupported_field_type.rs:6:11
+  |
+6 |     name: String,
+  |           ^^^^^^

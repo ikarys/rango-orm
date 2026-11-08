@@ -47,6 +47,47 @@ Or use `#[field(primary_key)]` for a custom name:
 pub uuid: FieldUuid,
 ```
 
+## Unsupported field types
+
+Fields use Rango's `Field*` types, not bare Rust types. The derive points at the offending type and names the replacement:
+
+```text
+error: `String` is not a Rango field type: use `FieldText` or `FieldVarchar<MIN, MAX>`. ...
+ --> src/models.rs:6:11
+  |
+6 |     name: String,
+  |           ^^^^^^
+```
+
+| Rust type | Rango type |
+|---|---|
+| `String` | `FieldText` or `FieldVarchar<MIN, MAX>` |
+| `Vec<u8>` | `FieldBytes` |
+| `bool` | `FieldBool` |
+| `i16` / `i32` / `i64` | `FieldSmallInt` / `FieldInt` / `FieldBigInt` |
+| `f32` / `f64` | `FieldFloat` / `FieldDouble` |
+| `Uuid` | `FieldUuid` (`ForeignKey<M>` for a reference) |
+| `DateTime<Utc>` / `NaiveDate` / `NaiveTime` | `FieldDateTime` / `FieldDate` / `FieldTime` |
+| `serde_json::Value` | `FieldJson` |
+
+Wrapping any of them in `Option<..>` makes the column nullable.
+
+## Building a model value
+
+There is no generated constructor: the fields are the API, so every field is written out and the compiler tells you which one is missing. Field types convert from their Rust equivalent, so `.into()` is the short form, and `new(..)` validates (`FieldVarchar`, `FieldEmail`, `FieldUrl`):
+
+```rust
+let article = Article {
+    id: uuid::Uuid::new_v4().into(),
+    title: FieldVarchar::new("Hello")?,
+    body: "text".into(),
+    published: true.into(),
+    created_at: chrono::Utc::now().into(),
+};
+```
+
+`ForeignKey<M>` and `ManyToMany<M>` are `Clone` / `Debug` (and `ManyToMany` is `Default`) whatever `M` is: `M` does not need to implement them. `ForeignKey<M>` is also `Copy`, `Eq` and `Hash`. `ManyToMany::default()` is an empty relation.
+
 ## Nullable fields
 
 Use `Option<T>` for nullable columns:

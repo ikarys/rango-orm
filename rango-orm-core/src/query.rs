@@ -145,6 +145,10 @@ impl From<serde_json::Value> for SqlValue {
 pub trait Filterable: Sized {}
 
 /// Implemented by `#[derive(Model)]` — provides field names + values for INSERT/UPDATE.
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` cannot be written to the database",
+    note = "add `#[derive(Model)]` (or `#[rango::model]`) to `{Self}`"
+)]
 pub trait ModelValues {
     /// Returns (column_name, value) pairs for all non-PK fields.
     fn field_values(&self) -> Vec<(&'static str, SqlValue)>;
