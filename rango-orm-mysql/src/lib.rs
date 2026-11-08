@@ -20,7 +20,7 @@ pub use ops::{
 };
 pub use query_builder::{Conn, QueryBuilder, RangoFilterExt, SelectAs};
 pub use rango_orm_core::WithRelated;
-pub use transaction::{atomic, transaction, MySqlTransaction};
+pub use transaction::{atomic, atomic_retry, transaction, MySqlTransaction};
 
 mod error;
 pub mod m2m;

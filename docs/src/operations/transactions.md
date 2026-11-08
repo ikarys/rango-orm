@@ -19,7 +19,7 @@ If any operation returns `Err`, the entire transaction is rolled back. To abort 
 
 ## Retrying on conflict
 
-Use `atomic_retry()` for `SERIALIZABLE` / `REPEATABLE READ` workloads and deadlocks. It retries only `Error::Conflict`; other errors are returned immediately.
+Use `atomic_retry()` for `SERIALIZABLE` / `REPEATABLE READ` workloads and deadlocks. It retries only `Error::Conflict` (Postgres: serialization failure `40001`, deadlock `40P01`; MySQL/MariaDB: deadlock 1213 and lock wait timeout 1205); other errors are returned immediately.
 
 ```rust
 atomic_retry(&pool, 3, async |tx| {
@@ -30,7 +30,7 @@ atomic_retry(&pool, 3, async |tx| {
 .await?;
 ```
 
-The closure can run several times, so keep it free of side effects outside the transaction (no emails, no HTTP calls). Postgres only (`atomic()` itself works on every backend).
+The closure can run several times, so keep it free of side effects outside the transaction (no emails, no HTTP calls). Postgres and MySQL/MariaDB (`atomic()` works on every backend, SQLite has no equivalent). On MySQL a lock wait timeout is a `Conflict` (so it is retried), while on Postgres `lock_timeout` stays `Error::Timeout`.
 
 ## Manual transactions
 
