@@ -13,6 +13,10 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 pub enum Error {
     /// The query expected a row and found none.
     NotFound,
+    /// The table does not exist: migrations were not generated or applied.
+    TableMissing {
+        table: String,
+    },
     UniqueViolation {
         constraint: Option<String>,
     },
@@ -64,6 +68,10 @@ impl fmt::Display for Error {
             |c: &Option<String>| c.as_deref().map(|c| format!(" ({c})")).unwrap_or_default();
         match self {
             Error::NotFound => write!(f, "row not found"),
+            Error::TableMissing { table } => write!(
+                f,
+                "table `{table}` does not exist — run `rango makemigrations` and `rango migrate`"
+            ),
             Error::UniqueViolation { constraint: c } => {
                 write!(f, "unique violation{}", constraint(c))
             }
@@ -123,6 +131,13 @@ mod tests {
             constraint: Some("user_email_key".into()),
         };
         assert_eq!(e.to_string(), "unique violation (user_email_key)");
+        assert_eq!(
+            Error::TableMissing {
+                table: "user".into()
+            }
+            .to_string(),
+            "table `user` does not exist — run `rango makemigrations` and `rango migrate`"
+        );
         assert!(Error::Conflict.is_retryable());
         assert!(!Error::NotFound.is_retryable());
         assert_eq!(Error::abort("no funds").to_string(), "aborted: no funds");

@@ -749,7 +749,26 @@ async fn test_sqlite_unique_violation_is_typed() {
 
     insert(&pool, user("dup@sqlite.com")).await.unwrap();
     let err = insert(&pool, user("dup@sqlite.com")).await.unwrap_err();
-    assert!(matches!(err, Error::UniqueViolation { .. }), "{err:?}");
+    assert!(
+        matches!(&err, Error::UniqueViolation { constraint: Some(c) } if c.contains("email")),
+        "{err:?}"
+    );
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-sqlite"), ignore)]
+async fn test_sqlite_missing_table_is_typed() {
+    let pool = pool().await; // no setup: the table does not exist
+    let err = TestUser::filter(&pool)
+        .all()
+        .await
+        .err()
+        .expect("table is missing");
+    assert!(
+        matches!(&err, Error::TableMissing { table } if !table.is_empty()),
+        "{err:?}"
+    );
+    assert!(err.to_string().contains("rango migrate"), "{err}");
 }
 
 // ── Typed columns ─────────────────────────────────────────────────────────────

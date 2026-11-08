@@ -1099,6 +1099,18 @@ async fn test_typed_errors() {
         "error leaks SQL: {err}"
     );
 
+    teardown(&pool).await;
+    let err = TestUser::filter(&pool)
+        .all()
+        .await
+        .err()
+        .expect("table is missing");
+    assert!(
+        matches!(&err, Error::TableMissing { table } if !table.is_empty()),
+        "{err:?}"
+    );
+    setup(&pool).await;
+
     let err = atomic(&pool, |tx| {
         Box::pin(async move {
             insert(&mut **tx, user("aborted@test.com")).await?;
