@@ -208,6 +208,10 @@ fn build_condition(c: &Condition, binds: &mut Vec<SqlValue>, idx: &mut usize) ->
         Op::IsNotNull => format!("{} IS NOT NULL", col),
         Op::In => {
             let vals = c.values.as_ref().unwrap();
+            if vals.is_empty() {
+                // `IN ()` is a syntax error; an empty set matches nothing.
+                return "(1 = 0)".to_string();
+            }
             let placeholders: Vec<String> = vals
                 .iter()
                 .map(|_| {

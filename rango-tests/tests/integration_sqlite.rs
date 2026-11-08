@@ -1354,3 +1354,27 @@ async fn test_model_without_hooks_attribute_still_works() {
     let saved = insert(&pool, user("nohooks@hooks.com")).await.unwrap();
     delete(&pool, &saved).await.unwrap();
 }
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-sqlite"), ignore)]
+async fn test_sqlite_in_values_empty_list() {
+    let pool = pool().await;
+    setup(&pool).await;
+    insert(&pool, user("in1@t.com")).await.unwrap();
+    insert(&pool, user("in2@t.com")).await.unwrap();
+
+    let none = TestUser::filter(&pool)
+        .in_values(TestUser::EMAIL, vec![])
+        .all()
+        .await
+        .unwrap();
+    assert!(none.is_empty());
+
+    let all = TestUser::filter(&pool)
+        .not()
+        .in_values(TestUser::EMAIL, vec![])
+        .all()
+        .await
+        .unwrap();
+    assert_eq!(all.len(), 2);
+}
