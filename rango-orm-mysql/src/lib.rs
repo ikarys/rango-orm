@@ -39,32 +39,6 @@ fn tls_default(url: &str) -> rango_orm_core::Result<MySqlConnectOptions> {
     Ok(opts)
 }
 
-#[cfg(test)]
-mod tls_tests {
-    use super::*;
-
-    #[test]
-    fn remote_hosts_require_tls_unless_the_url_says_otherwise() {
-        let mode = |url| tls_default(url).unwrap().get_ssl_mode();
-        assert!(matches!(
-            mode("mysql://u:p@db.example.com/d"),
-            MySqlSslMode::Required
-        ));
-        assert!(matches!(
-            mode("mysql://u:p@localhost/d"),
-            MySqlSslMode::Preferred
-        ));
-        assert!(matches!(
-            mode("mysql://u:p@127.0.0.1/d"),
-            MySqlSslMode::Preferred
-        ));
-        assert!(matches!(
-            mode("mysql://u:p@db.example.com/d?ssl-mode=disabled"),
-            MySqlSslMode::Disabled
-        ));
-    }
-}
-
 /// Connect to MySQL 8.0+ / MariaDB 10.6+. The session runs in UTC (`DATETIME` has no time zone)
 /// with strict SQL mode, so invalid values are rejected instead of silently truncated.
 /// `mariadb://` URLs are accepted as an alias of `mysql://`.
@@ -97,4 +71,30 @@ pub async fn connect(url: &str) -> rango_orm_core::Result<MySqlPool> {
         .connect_with(opts)
         .await
         .map_err(db_err)
+}
+
+#[cfg(test)]
+mod tls_tests {
+    use super::*;
+
+    #[test]
+    fn remote_hosts_require_tls_unless_the_url_says_otherwise() {
+        let mode = |url| tls_default(url).unwrap().get_ssl_mode();
+        assert!(matches!(
+            mode("mysql://u:p@db.example.com/d"),
+            MySqlSslMode::Required
+        ));
+        assert!(matches!(
+            mode("mysql://u:p@localhost/d"),
+            MySqlSslMode::Preferred
+        ));
+        assert!(matches!(
+            mode("mysql://u:p@127.0.0.1/d"),
+            MySqlSslMode::Preferred
+        ));
+        assert!(matches!(
+            mode("mysql://u:p@db.example.com/d?ssl-mode=disabled"),
+            MySqlSslMode::Disabled
+        ));
+    }
 }
