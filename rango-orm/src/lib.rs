@@ -164,7 +164,7 @@ pub use rango_orm_mysql::MySqlPool;
 pub mod mysql {
     pub use rango_orm_mysql::{
         Conn, M2M, MySqlPool, MySqlTransaction, QueryBuilder, RangoFilterExt, SelectAs,
-        WithRelated, all, atomic, bulk_create, bulk_update, bulk_upsert, delete, get,
+        WithRelated, all, atomic, atomic_retry, bulk_create, bulk_update, bulk_upsert, delete, get,
         get_or_create, insert, raw, raw_execute, raw_scalar, transaction, update, update_or_create,
     };
 }
