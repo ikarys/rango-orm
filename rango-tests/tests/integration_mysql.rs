@@ -2136,3 +2136,83 @@ async fn test_mysql_missing_table_is_typed() {
         .expect_err("qualified");
     assert!(is_missing(&err), "qualified: {err:?}");
 }
+
+// ── Hostile input (docs/src/trust/security-requirements.md) ──────────────────
+
+const HOSTILE: &str = "x'); DROP TABLE test_user; --";
+
+#[derive(Model, Debug, Clone)]
+#[model(table = "ev`il; DROP TABLE test_user; --")]
+struct EvilNames {
+    id: FieldUuid,
+    #[field(column = "na`me); DROP TABLE test_user; --")]
+    name: FieldVarchar<1, 100>,
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-mysql"), ignore)]
+async fn test_mysql_hostile_values_are_bound() {
+    let pool = pool().await;
+    setup(&pool).await;
+    let mut u = user("a@mysql.com");
+    u.name = FieldVarchar::new(HOSTILE.to_string()).unwrap();
+    insert(&pool, u).await.unwrap();
+    insert(&pool, user("b@mysql.com")).await.unwrap();
+
+    let q = || TestUser::filter(&pool);
+    assert_eq!(q().eq("name", HOSTILE).count().await.unwrap(), 1);
+    assert_eq!(q().like("name", "x'%--").count().await.unwrap(), 1);
+    assert_eq!(
+        q().in_values("name", vec![SqlValue::from(HOSTILE), SqlValue::from("y")])
+            .count()
+            .await
+            .unwrap(),
+        1
+    );
+    assert_eq!(q().ne("name", HOSTILE).count().await.unwrap(), 1);
+    assert_eq!(q().count().await.unwrap(), 2); // test_user still exists
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-mysql"), ignore)]
+async fn test_mysql_hostile_identifiers_are_quoted() {
+    let pool = pool().await;
+    setup(&pool).await;
+    let s = EvilNames::schema();
+    let col = &s.columns[1].name;
+    let table = quote_ident_mysql(&s.table_name);
+    exec(&pool, &format!("DROP TABLE IF EXISTS {table}")).await;
+    exec(
+        &pool,
+        &format!(
+            "CREATE TABLE {table} (`id` BINARY(16) PRIMARY KEY, {} VARCHAR(100) NOT NULL)",
+            quote_ident_mysql(col)
+        ),
+    )
+    .await;
+
+    let mut e = EvilNames {
+        id: FieldUuid(Uuid::new_v4()),
+        name: FieldVarchar::new("n".to_string()).unwrap(),
+    };
+    insert(&pool, e.clone()).await.unwrap();
+    e.name = FieldVarchar::new("m".to_string()).unwrap();
+    update(&pool, e.clone()).await.unwrap();
+    let q = || EvilNames::filter(&pool);
+    assert_eq!(
+        q().eq(col.as_str(), "m")
+            .order_by(col.as_str())
+            .count()
+            .await
+            .unwrap(),
+        1
+    );
+    assert!(matches!(
+        q().eq("name` = 1 OR `1", "m").count().await,
+        Err(Error::Invalid(_))
+    ));
+    delete(&pool, &e).await.unwrap();
+    assert_eq!(q().count().await.unwrap(), 0);
+    exec(&pool, &format!("DROP TABLE {table}")).await;
+    assert_eq!(TestUser::filter(&pool).count().await.unwrap(), 0); // test_user still exists
+}
