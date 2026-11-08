@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Fix: `rango restore` records the applied migrations. The dump carries the names from `_rango_migrations` (new optional `migrations` field, dump version unchanged); restore recreates the tracking table and inserts them in the same transaction as the schema, so `rango migrate` after a restore into a fresh database is a no-op instead of replaying 0002 (`duplicate column name`). Postgres, SQLite, MySQL / MariaDB. Dumps made before this change restore as before and print a warning. A data-only restore into an existing schema leaves the tracking table alone.
+- Docs: FK / M2M follow the target primary key type, `FieldPassword` is `TEXT`, decimal filters and `sum` / `avg` return types, rename detection in `makemigrations` (prompt, `--yes`, no terminal), real CLI output in the quick start, plain table names in examples, install snippets use `0.2` (beta: `0.2.0-beta.1`).
+
 ## 0.2.0-beta.1 (2026-11-08)
 
 First beta of the 0.2 cycle. The API may still change between betas: pin the tag.

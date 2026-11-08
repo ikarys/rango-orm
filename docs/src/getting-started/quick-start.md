@@ -12,7 +12,7 @@ rango init --backend sqlite
 Add Rango to `Cargo.toml`:
 ```toml
 [dependencies]
-rango-orm = { version = "0.1", default-features = false, features = ["sqlite"] }
+rango-orm = { version = "0.2", default-features = false, features = ["sqlite"] }
 tokio = { version = "1", features = ["full"] }
 anyhow = "1"
 uuid = { version = "1", features = ["v4"] }   # you add these two: Rango does not re-export them
@@ -59,12 +59,23 @@ Found 2 model(s):
   - user (5 columns)
   - post (5 columns)
 ✅ Migration generated: migrations/0001_post_user.sql
+📸 Snapshot updated.
 ```
+
+Migration files are named `NNNN_<tables>.sql`, with the tables involved in alphabetical order.
 
 ## 4. Apply migrations
 
 ```bash
 DATABASE_URL=sqlite://db.sqlite3 rango migrate
+```
+
+Output:
+```
+🔌 Connecting to database (sqlite)...
+  ▶  Applying 0001_post_user.sql...
+  ✅ 0001_post_user.sql
+✅ Applied 1 migration(s).
 ```
 
 ## 5. Use the ORM
