@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 (2026-11-08)
 
 - Fix: `select_as::<P>().all()` emits the `db.query` tracing span like every other query-builder terminal (all backends).
 - Fix: `bulk_update` checks column names before the empty-input shortcut, so an unknown column is `Error::Invalid` even with an empty slice (all backends).
