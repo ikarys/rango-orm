@@ -117,7 +117,7 @@ impl std::error::Error for Error {
 
 impl From<crate::RowError> for Error {
     fn from(e: crate::RowError) -> Self {
-        Error::Decode(e.0)
+        Error::Decode(e.to_string())
     }
 }
 
