@@ -28,7 +28,7 @@ pub use pg_ext::{Pg, PgQueryExt};
 pub use query_builder::{Conn, QueryBuilder, SelectAs};
 pub use rango_orm_core::WithRelated;
 pub use sqlx::PgPool;
-pub use transaction::{RangoTransaction, TxFuture, atomic, atomic_retry, transaction};
+pub use transaction::{RangoTransaction, atomic, atomic_retry, transaction};
 
 use rango_orm_core::{Filterable, FromRow, Model, ModelValues};
 

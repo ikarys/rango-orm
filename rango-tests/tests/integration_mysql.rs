@@ -1454,17 +1454,15 @@ async fn test_mysql_filter_m2m_bulk_roll_back_in_atomic() {
     insert(&pool, user("keep@tx.com")).await.unwrap();
 
     let (b, t) = (blog.clone(), tag.clone());
-    let err = atomic(&pool, move |tx| {
-        Box::pin(async move {
-            bulk_create(&mut **tx, &[user("a@tx.com"), user("b@tx.com")]).await?;
-            // Reads see the transaction's own writes.
-            assert_eq!(TestUser::filter(&mut **tx).count().await?, 3);
-            M2M::<TestBlog, TestTag>::add(&mut **tx, &b, &t).await?;
-            assert!(M2M::<TestBlog, TestTag>::exists(&mut **tx, &b, &t).await?);
-            M2M::<TestBlog, TestTag>::set(&mut **tx, &b, &[]).await?;
-            M2M::<TestBlog, TestTag>::add(&mut **tx, &b, &t).await?;
-            Err::<(), Error>(Error::abort("roll back"))
-        })
+    let err = atomic(&pool, async |tx| {
+        bulk_create(&mut **tx, &[user("a@tx.com"), user("b@tx.com")]).await?;
+        // Reads see the transaction's own writes.
+        assert_eq!(TestUser::filter(&mut **tx).count().await?, 3);
+        M2M::<TestBlog, TestTag>::add(&mut **tx, &b, &t).await?;
+        assert!(M2M::<TestBlog, TestTag>::exists(&mut **tx, &b, &t).await?);
+        M2M::<TestBlog, TestTag>::set(&mut **tx, &b, &[]).await?;
+        M2M::<TestBlog, TestTag>::add(&mut **tx, &b, &t).await?;
+        Err::<(), Error>(Error::abort("roll back"))
     })
     .await
     .unwrap_err();
@@ -1478,12 +1476,10 @@ async fn test_mysql_filter_m2m_bulk_roll_back_in_atomic() {
     );
 
     // Same calls commit with the transaction.
-    atomic(&pool, move |tx| {
-        Box::pin(async move {
-            bulk_create(&mut **tx, &[user("c@tx.com")]).await?;
-            M2M::<TestBlog, TestTag>::add(&mut **tx, &blog, &tag).await?;
-            Ok(())
-        })
+    atomic(&pool, async |tx| {
+        bulk_create(&mut **tx, &[user("c@tx.com")]).await?;
+        M2M::<TestBlog, TestTag>::add(&mut **tx, &blog, &tag).await?;
+        Ok(())
     })
     .await
     .unwrap();
@@ -1581,4 +1577,26 @@ async fn test_hooks_update_or_create() {
         hook_events("uoc_hooked")[4..],
         ["before_save", "before_update", "after_update", "after_save"]
     );
+}
+
+// ── atomic: the future is Send (usable from a multi-thread spawn) ────────────────
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-mysql"), ignore)]
+async fn test_mysql_atomic_future_is_send() {
+    let pool = pool().await;
+    setup(&pool).await;
+
+    let p = pool.clone();
+    let n = tokio::spawn(async move {
+        atomic(&p, async |tx| {
+            insert(&mut **tx, user("spawned@tx.com")).await?;
+            TestUser::filter(&mut **tx).count().await
+        })
+        .await
+    })
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(n, 1);
 }

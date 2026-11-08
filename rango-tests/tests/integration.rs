@@ -1111,11 +1111,9 @@ async fn test_typed_errors() {
     );
     setup(&pool).await;
 
-    let err = atomic(&pool, |tx| {
-        Box::pin(async move {
-            insert(&mut **tx, user("aborted@test.com")).await?;
-            Err::<(), _>(Error::abort("business rule"))
-        })
+    let err = atomic(&pool, async |tx| {
+        insert(&mut **tx, user("aborted@test.com")).await?;
+        Err::<(), _>(Error::abort("business rule"))
     })
     .await
     .unwrap_err();
@@ -1138,12 +1136,10 @@ async fn test_atomic_retry() {
 
     let counter = std::sync::atomic::AtomicU32::new(0);
 
-    let result = atomic_retry(&pool, 5, |tx| {
+    let result = atomic_retry(&pool, 5, async |tx| {
         let n = counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
-        Box::pin(async move {
-            insert(&mut **tx, user("retry@test.com")).await?;
-            if n < 3 { Err(Error::Conflict) } else { Ok(()) }
-        })
+        insert(&mut **tx, user("retry@test.com")).await?;
+        if n < 3 { Err(Error::Conflict) } else { Ok(()) }
     })
     .await;
     assert!(result.is_ok(), "{result:?}");
@@ -1156,13 +1152,9 @@ async fn test_atomic_retry() {
     assert_eq!(count, 1);
 
     let counter = std::sync::atomic::AtomicU32::new(0);
-    let err = atomic_retry(&pool, 2, |tx| {
-        let n = counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
-        let _ = tx;
-        Box::pin(async move {
-            let _ = n;
-            Err::<(), _>(Error::Conflict)
-        })
+    let err = atomic_retry(&pool, 2, async |_tx| {
+        counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Err::<(), _>(Error::Conflict)
     })
     .await
     .unwrap_err();
@@ -1170,13 +1162,9 @@ async fn test_atomic_retry() {
     assert_eq!(counter.load(std::sync::atomic::Ordering::SeqCst), 2);
 
     let counter = std::sync::atomic::AtomicU32::new(0);
-    let err = atomic_retry(&pool, 5, |tx| {
-        let n = counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
-        let _ = tx;
-        Box::pin(async move {
-            let _ = n;
-            Err::<(), _>(Error::abort("no"))
-        })
+    let err = atomic_retry(&pool, 5, async |_tx| {
+        counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Err::<(), _>(Error::abort("no"))
     })
     .await
     .unwrap_err();
@@ -1747,17 +1735,15 @@ async fn test_pg_filter_m2m_bulk_roll_back_in_atomic() {
     insert(&pool, user("keep@tx.com")).await.unwrap();
 
     let (b, t) = (blog.clone(), tag.clone());
-    let err = atomic(&pool, move |tx| {
-        Box::pin(async move {
-            bulk_create(&mut **tx, &[user("a@tx.com"), user("b@tx.com")]).await?;
-            // Reads see the transaction's own writes.
-            assert_eq!(TestUser::filter(&mut **tx).count().await?, 3);
-            M2M::<TestBlog, TestTag>::add(&mut **tx, &b, &t).await?;
-            assert!(M2M::<TestBlog, TestTag>::exists(&mut **tx, &b, &t).await?);
-            M2M::<TestBlog, TestTag>::set(&mut **tx, &b, &[]).await?;
-            M2M::<TestBlog, TestTag>::add(&mut **tx, &b, &t).await?;
-            Err::<(), Error>(Error::abort("roll back"))
-        })
+    let err = atomic(&pool, async |tx| {
+        bulk_create(&mut **tx, &[user("a@tx.com"), user("b@tx.com")]).await?;
+        // Reads see the transaction's own writes.
+        assert_eq!(TestUser::filter(&mut **tx).count().await?, 3);
+        M2M::<TestBlog, TestTag>::add(&mut **tx, &b, &t).await?;
+        assert!(M2M::<TestBlog, TestTag>::exists(&mut **tx, &b, &t).await?);
+        M2M::<TestBlog, TestTag>::set(&mut **tx, &b, &[]).await?;
+        M2M::<TestBlog, TestTag>::add(&mut **tx, &b, &t).await?;
+        Err::<(), Error>(Error::abort("roll back"))
     })
     .await
     .unwrap_err();
@@ -1771,12 +1757,10 @@ async fn test_pg_filter_m2m_bulk_roll_back_in_atomic() {
     );
 
     // Same calls commit with the transaction.
-    atomic(&pool, move |tx| {
-        Box::pin(async move {
-            bulk_create(&mut **tx, &[user("c@tx.com")]).await?;
-            M2M::<TestBlog, TestTag>::add(&mut **tx, &blog, &tag).await?;
-            Ok(())
-        })
+    atomic(&pool, async |tx| {
+        bulk_create(&mut **tx, &[user("c@tx.com")]).await?;
+        M2M::<TestBlog, TestTag>::add(&mut **tx, &blog, &tag).await?;
+        Ok(())
     })
     .await
     .unwrap();
@@ -1874,4 +1858,28 @@ async fn test_hooks_update_or_create() {
         hook_events("uoc_hooked")[4..],
         ["before_save", "before_update", "after_update", "after_save"]
     );
+}
+
+// ── atomic: the future is Send (usable from a multi-thread spawn) ────────────────
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration"), ignore)]
+async fn test_atomic_future_is_send() {
+    let pool = pool().await;
+    setup(&pool).await;
+
+    let p = pool.clone();
+    let n = tokio::spawn(async move {
+        atomic(&p, async |tx| {
+            insert(&mut **tx, user("spawned@tx.com")).await?;
+            TestUser::filter(&mut **tx).count().await
+        })
+        .await
+    })
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(n, 1);
+
+    teardown(&pool).await;
 }

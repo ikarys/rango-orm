@@ -53,10 +53,10 @@ let adults = User::filter(&pool)
 // User::filter(&pool).eq(User::AGE, "eighteen");
 
 let user: Option<User> = rango::get(&pool, &SqlValue::from(id)).await?;
-rango::atomic(&pool, |tx| Box::pin(async move {
-    rango::insert(&mut *tx, post).await?;
+rango::atomic(&pool, async |tx| {
+    rango::insert(&mut **tx, post).await?;
     Ok(())
-})).await?;
+}).await?;
 ```
 
 ```bash

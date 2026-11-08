@@ -4,6 +4,7 @@
 
 First beta of the 0.2 cycle. The API may still change between betas: pin the tag.
 
+- Breaking: `atomic`, `transaction` and `atomic_retry` take an async closure: `atomic(&pool, async |tx| { ... }).await?` instead of `|tx| Box::pin(async move { ... })`. The returned future is `Send`. `TxFuture` is removed.
 - Breaking cleanup: removed the unused `RangoBackend` trait and the `RangoSqlitePool` / `RangoMySqlPool` newtypes; `RowError`'s field is private (use `RowError::new`); `insert_values` and the constraint-name helpers are `#[doc(hidden)]`. Dropped the unused `sqlx` dependency of `rango-orm`; `rango-orm-postgres` only needs tokio's `time` feature.
 - Deps: sqlx 0.9, syn 3, argon2 0.6, toml 1, base64 0.23, criterion 0.8. Minimum supported Rust version is now 1.94 (required by sqlx 0.9). Dynamic SQL built by Rango (identifiers through `quote_ident`, values always bound) is passed to sqlx as `AssertSqlSafe`.
 - Docs: subquery decision rules — when to use a correlated `EXISTS` subquery vs a `JOIN` vs a `prefetch` (`docs/src/querying/filter.md`).

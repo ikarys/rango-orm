@@ -268,8 +268,8 @@ async fn blog_app_end_to_end() {
     assert!(no_pub.iter().any(|a| a.name.as_str() == "lonely"));
 
     // ── Transactions: commit on Ok, roll back on Err ─────────────────────────
-    let committed = atomic(&pool, |tx| {
-        Box::pin(async move { insert(&mut **tx, post(&ada.id.0, "in-tx", true)).await })
+    let committed = atomic(&pool, async |tx| {
+        insert(&mut **tx, post(&ada.id.0, "in-tx", true)).await
     })
     .await
     .unwrap();
@@ -280,11 +280,9 @@ async fn blog_app_end_to_end() {
             .is_some()
     );
 
-    let rolled_back = atomic(&pool, |tx| {
-        Box::pin(async move {
-            insert(&mut **tx, post(&ada.id.0, "rolled-back", false)).await?;
-            Err::<(), _>(Error::abort("simulated failure"))
-        })
+    let rolled_back = atomic(&pool, async |tx| {
+        insert(&mut **tx, post(&ada.id.0, "rolled-back", false)).await?;
+        Err::<(), _>(Error::abort("simulated failure"))
     })
     .await;
     assert!(rolled_back.is_err());
