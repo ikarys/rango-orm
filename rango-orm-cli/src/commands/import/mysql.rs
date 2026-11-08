@@ -53,11 +53,7 @@ pub(super) async fn insert_rows_mysql(
         return Ok(0);
     }
 
-    let cols: Vec<&str> = rows[0]
-        .keys()
-        .filter(|k| *k != "__table")
-        .map(|k| k.as_str())
-        .collect();
+    let cols = insert_columns(rows[0]);
 
     if cols.is_empty() {
         return Ok(0);
