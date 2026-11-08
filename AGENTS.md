@@ -138,8 +138,8 @@ Design rules:
 | **prefetch_related** ✅ | Reverse FK (`Comment::POST_ID`) and M2M (`Article::TAGS`, one `INNER JOIN` on the pivot); `= ANY($1)` on Postgres, `IN (...)` in batches of 900 elsewhere |
 | **values** ✅ | `.values(&["id", "email"])` → `Vec<HashMap<String, SqlValue>>` |
 | **Aggregations** ✅ | `.count()` `.exists()` `.sum()` `.avg()` `.min()` `.max()` |
-| **Transactions** ✅ | `rango::atomic/transaction(&pool, async \|tx\| { ... }).await?` (async closure, `Send` future); crud, `filter`, M2M and bulk ops accept a pool or a transaction (`&mut **tx`) on all three backends; `get_or_create` is atomic (`INSERT … ON CONFLICT DO NOTHING RETURNING *` on Postgres); `update_or_create` on every backend; `atomic_retry` on Postgres |
-| **Bulk ops** ✅ | `rango::bulk_create/update/upsert(&pool, &models, ...)`: multi-row `INSERT`, `UPDATE … FROM (VALUES …)` (per-row `UPDATE` in one transaction on SQLite and MySQL), upsert; all three backends; atomic (savepoint inside a transaction); auto-chunked under the parameter limit; pool or transaction |
+| **Transactions** ✅ | `rango::atomic/transaction(&pool, async \|tx\| { ... }).await?` (async closure, `Send` future); crud, `filter`, M2M and bulk ops accept a pool or a transaction (`&mut **tx`) on all three backends; `get_or_create` is atomic (`INSERT … ON CONFLICT DO NOTHING RETURNING *` on Postgres); `update_or_create` on every backend; `atomic_retry` on Postgres and MySQL |
+| **Bulk ops** ✅ | `rango::bulk_create/update/upsert(&pool, &models, ...)`: multi-row `INSERT`, `UPDATE … FROM (VALUES …)` (per-row `UPDATE` in one transaction on SQLite and MySQL), upsert (MySQL rejects it with `Error::Invalid` when the table has a unique key other than `conflict_on`, since `ON DUPLICATE KEY` cannot target one); all three backends; atomic (savepoint inside a transaction); auto-chunked under the parameter limit; pool or transaction |
 | **Raw SQL escape hatch** ✅ | `rango::raw` / `raw_scalar` / `raw_execute(&pool, "SELECT ...", params)`, values always bound |
 | **Auto-increment PK** ✅ | `FieldAutoInt` / `FieldAutoBigInt`, id assigned by the database |
 | **Partial selects (only / defer)** ✅ | `#[derive(Partial)] #[partial(model = User)] struct UserLite { .. }` + `.select_as::<UserLite>()`; columns and types checked at compile time. Not a Model with defaults (`update()` would overwrite), not a `HashMap` (that is `.values()`) |
@@ -295,7 +295,7 @@ Known-CVE checklist (reviewed 2026-11-01) — keep new APIs out of these classes
 | P2 | Row decoding by column index instead of by name | Measured: ~3% on `select_all_1000` (name lookup is cheap); needs a `RangoRow` API change. Pre-sized result `Vec` ✅ (−4.5%) |
 | P1 | Postgres `bulk_create` via `UNNEST` (one statement, no 65 535-param chunking) | ✅ JSON columns fall back to chunked multi-row `VALUES` |
 | P1 | Keyset pagination helper (`.after(col, value)`) | ✅ `.after()` / `.before()` |
-| P1 | Transaction retry on serialization failure / deadlock (`40001`, `40P01`) in `atomic()`, opt-in, bounded | ✅ `atomic_retry(&pool, max_attempts, f)` (Postgres), exponential backoff without jitter |
+| P1 | Transaction retry on serialization failure / deadlock (`40001`, `40P01`) in `atomic()`, opt-in, bounded | ✅ `atomic_retry(&pool, max_attempts, f)` (Postgres: `40001`/`40P01`; MySQL: 1213/1205), exponential backoff without jitter |
 | P1 | SQLite table rebuild for ALTER TYPE / NULL / FK changes (create new → copy → drop → rename, in one transaction) | ✅ `RebuildTable` diff on SQLite; `migrate` turns FKs off and runs `PRAGMA foreign_key_check` in each migration transaction |
 | P2 | Optimistic locking (`#[field(version)]` → `UPDATE … WHERE version = $n`) | Safe concurrent updates without row locks |
 | P2 | Read-replica routing (writes → primary, reads → replica) | |

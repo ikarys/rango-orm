@@ -1802,3 +1802,110 @@ async fn mysql_test_fk_and_m2m_follow_the_target_pk_type() {
         1
     );
 }
+
+// ── atomic_retry ─────────────────────────────────────────────────────────────────
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-mysql"), ignore)]
+async fn test_mysql_atomic_retry_recovers_from_deadlock() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use tokio::sync::Barrier;
+
+    let pool = pool().await;
+    setup(&pool).await;
+    bulk_create(&pool, &[user("dl_a@t.com"), user("dl_b@t.com")])
+        .await
+        .unwrap();
+
+    let barrier = Arc::new(Barrier::new(2));
+    let runs = Arc::new(AtomicU32::new(0));
+    let worker = |first: &'static str, second: &'static str| {
+        let (pool, barrier, runs) = (pool.clone(), barrier.clone(), runs.clone());
+        async move {
+            let mut attempt = 0;
+            atomic_retry(&pool, 5, async |tx| {
+                attempt += 1;
+                runs.fetch_add(1, Ordering::SeqCst);
+                let sql = "UPDATE `test_user` SET `score` = 1 WHERE `email` = ?";
+                raw_execute(&mut **tx, sql, vec![SqlValue::Text(first.into())]).await?;
+                if attempt == 1 {
+                    // Both transactions hold their first row before asking for the second.
+                    barrier.wait().await;
+                }
+                raw_execute(&mut **tx, sql, vec![SqlValue::Text(second.into())]).await?;
+                Ok(())
+            })
+            .await
+        }
+    };
+    // Same task, interleaved by `join!` (async closures are not `Send`-inferable for `spawn`).
+    let (r1, r2) = tokio::join!(
+        worker("dl_a@t.com", "dl_b@t.com"),
+        worker("dl_b@t.com", "dl_a@t.com")
+    );
+    r1.unwrap();
+    r2.unwrap();
+    assert!(
+        runs.load(Ordering::SeqCst) > 2,
+        "a deadlock victim must have retried"
+    );
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-mysql"), ignore)]
+async fn test_mysql_atomic_retry_does_not_retry_other_errors() {
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    let pool = pool().await;
+    let runs = AtomicU32::new(0);
+    let err = atomic_retry(&pool, 5, async |_tx| {
+        runs.fetch_add(1, Ordering::SeqCst);
+        Err::<(), _>(Error::abort("nope"))
+    })
+    .await
+    .unwrap_err();
+    assert_eq!(runs.load(Ordering::SeqCst), 1);
+    assert!(!err.is_retryable());
+}
+
+// ── bulk_upsert key check ────────────────────────────────────────────────────────
+
+#[derive(Model, Debug, Clone)]
+#[model(table = "test_two_keys")]
+struct TwoKeys {
+    id: FieldUuid,
+    #[field(unique)]
+    email: FieldEmail,
+    #[field(unique)]
+    username: FieldVarchar<1, 100>,
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-mysql"), ignore)]
+async fn test_mysql_bulk_upsert_rejects_other_unique_keys() {
+    let pool = pool().await;
+    // The table does not exist: the check must fail before any SQL runs.
+    let row = TwoKeys {
+        id: FieldUuid(Uuid::new_v4()),
+        email: FieldEmail::new("k@t.com".to_string()).unwrap(),
+        username: FieldVarchar::new("k".to_string()).unwrap(),
+    };
+    for on in [&["email"][..], &["id"][..]] {
+        let err = bulk_upsert(&pool, std::slice::from_ref(&row), on)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, Error::Invalid(_)), "{err:?}");
+    }
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-mysql"), ignore)]
+async fn test_mysql_bulk_upsert_single_unique_key_ok() {
+    let pool = pool().await;
+    setup(&pool).await;
+    bulk_upsert(&pool, &[user("one@t.com")], &["email"])
+        .await
+        .unwrap();
+    assert_eq!(TestUser::filter(&pool).count().await.unwrap(), 1);
+}
