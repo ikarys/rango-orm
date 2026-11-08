@@ -48,6 +48,7 @@ The full list, with the test behind each claim and what Rango does *not* protect
 | Unit tests | unit tests and the SQLite integration suite (in memory) |
 | Integration tests (PostgreSQL 14, 18) | integration and CLI migration tests on PostgreSQL 14 and 18 |
 | Integration tests (MySQL / MariaDB) | integration and CLI migration tests on MySQL 8.0, 8.4 and MariaDB 10.6, 11.4 |
+| Coverage | `cargo llvm-cov` over the workspace, uploaded to Codecov (badge in the README); informative, no threshold |
 
 A change is merged only when every job passes.
 
