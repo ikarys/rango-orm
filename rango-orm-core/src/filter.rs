@@ -1038,7 +1038,9 @@ mod tests {
 
     #[test]
     fn exists_sql_short_circuits() {
-        let (sql, binds) = Filter::<T>::new(Dialect::Postgres).eq("a", 1i32).exists_sql();
+        let (sql, binds) = Filter::<T>::new(Dialect::Postgres)
+            .eq("a", 1i32)
+            .exists_sql();
         assert_eq!(
             sql,
             "SELECT EXISTS(SELECT 1 FROM \"test_model\" WHERE \"a\" = $1)"

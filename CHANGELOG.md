@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Perf: `bulk_create`, `bulk_update` and `bulk_upsert` no longer open a transaction when the work is a single statement (one chunk, or the Postgres `UNNEST` path): one statement is already atomic. Several chunks still share one transaction (a savepoint inside `atomic`).
+- Perf: `.exists()` runs `SELECT EXISTS(SELECT 1 ...)` instead of `SELECT COUNT(*)`, so it stops at the first matching row.
+
 ## 0.2.0-beta.1 (2026-11-08)
 
 First beta of the 0.2 cycle. The API may still change between betas: pin the tag.
