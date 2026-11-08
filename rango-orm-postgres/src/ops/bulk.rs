@@ -65,10 +65,6 @@ where
     A: Acquire<'a, Database = Postgres>,
     M: Model + ModelValues,
 {
-    if models.is_empty() || fields.is_empty() {
-        return Ok(0);
-    }
-
     for f in fields {
         if let Some(msg) = rango_orm_core::unknown_column::<M>(f) {
             return Err(rango_orm_core::Error::Invalid(msg));
@@ -78,6 +74,9 @@ where
                 "`{f}` is the primary key and cannot be updated"
             )));
         }
+    }
+    if models.is_empty() || fields.is_empty() {
+        return Ok(0);
     }
 
     let n_cols = fields.len() + 1; // +1 for pk

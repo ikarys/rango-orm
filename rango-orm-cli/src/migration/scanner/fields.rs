@@ -143,7 +143,9 @@ pub(super) fn map_field_type(ty: &Type) -> Result<ColumnType> {
         return Ok(ColumnType::Uuid);
     }
     type_map::column_type(&s).map_err(|e| match e {
-        TypeMapError::Unknown => anyhow::anyhow!("Unknown field type: {s}"),
+        TypeMapError::Unknown => {
+            anyhow::anyhow!("Unknown field type: {s}: {}", type_map::rango_type_hint(&s))
+        }
         TypeMapError::Invalid(name) => anyhow::anyhow!("Invalid {name}: {s}"),
     })
 }

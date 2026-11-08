@@ -1569,6 +1569,11 @@ async fn test_sqlite_bulk_update_bulk_upsert_update_or_create() {
         let err = bulk_update(&pool, &users, &[bad]).await.unwrap_err();
         assert!(matches!(err, Error::Invalid(_)), "{err:?}");
     }
+    // ... even when the slice is empty.
+    let err = bulk_update::<_, TestUser>(&pool, &[], &["nope"])
+        .await
+        .unwrap_err();
+    assert!(matches!(err, Error::Invalid(_)), "{err:?}");
 
     // Upsert: existing email keeps its id and takes the new name, new email is inserted.
     let mut again = user("bu0@t.com");

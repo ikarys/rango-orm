@@ -330,6 +330,7 @@ where
     P: Partial<Model = M>,
 {
     /// Fetch all matching rows as `P`.
+    #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "sqlite", db.operation = "SELECT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
     pub async fn all(mut self) -> Result<Vec<P>> {
         self.qb.f.ensure_valid()?;
         if !self.qb.f.select_related_specs().is_empty() || !self.qb.f.prefetch_specs().is_empty() {
@@ -344,6 +345,7 @@ where
         let (sql, binds) = self.qb.f.select_sql_cols(&cols.join(", "));
         let rows = self.qb.conn.fetch_all(&sql, binds).await?;
         self.qb.warn_if_capped(rows.len());
+        tracing::Span::current().record("db.rows", rows.len());
         decode_all::<P>(rows)
     }
 
