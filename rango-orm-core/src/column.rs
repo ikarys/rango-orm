@@ -205,6 +205,7 @@ pub trait FilterValue<T> {
     fn into_sql_value(self) -> SqlValue;
 }
 
+#[diagnostic::do_not_recommend]
 impl<T: ToSqlValue> FilterValue<T> for T {
     fn into_sql_value(self) -> SqlValue {
         self.to_sql_value()
@@ -215,16 +216,22 @@ impl<T: ToSqlValue> FilterValue<T> for T {
 ///
 /// `Column<M, T>` only accepts values of its field type (`.eq(User::AGE, "x")` does
 /// not compile); `&str` accepts anything convertible to `SqlValue`.
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` is not a column of this model that accepts a `{V}` value",
+    note = "pass a typed column such as `Model::NAME` with a value of its field type, or a column name as `&str`"
+)]
 pub trait FilterColumn<M, V>: ColumnRef<M> {
     fn bind(&self, val: V) -> SqlValue;
 }
 
+#[diagnostic::do_not_recommend]
 impl<M, T, V: FilterValue<T>> FilterColumn<M, V> for Column<M, T> {
     fn bind(&self, val: V) -> SqlValue {
         val.into_sql_value()
     }
 }
 
+#[diagnostic::do_not_recommend]
 impl<M, V: Into<SqlValue>> FilterColumn<M, V> for &str {
     fn bind(&self, val: V) -> SqlValue {
         val.into()

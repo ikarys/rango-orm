@@ -8,5 +8,6 @@ See [Migrations → makemigrations](../migrations/makemigrations.md) for the ful
 rango makemigrations                  # generate migrations
 rango makemigrations --dry-run        # preview SQL without writing
 rango makemigrations --check          # CI guard: exit 1 if pending
+rango makemigrations --yes            # non-interactive: confirm renames and drops
 rango makemigrations src/models       # custom source directory
 ```

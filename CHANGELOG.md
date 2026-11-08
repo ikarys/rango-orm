@@ -15,6 +15,10 @@ First beta of the 0.2 cycle. The API may still change between betas: pin the tag
 - Docs: stored procedures and functions through `raw*` (no dedicated API).
 - Breaking (pre-1.0): the inner value of `FieldVarchar`, `FieldEmail`, `FieldUrl` and `FieldRange` is private, so `FieldVarchar("".into())` no longer skips validation. Build them with `new(..)` (or `TryFrom`; `Deserialize` now validates too) and read them with `as_str()` / `Deref<Target = str>` / `into_inner()` (`get()` for `FieldRange`). Rows read from the database are not re-validated.
 - Fix: `FieldVarchar` and `FieldEmail` length bounds count characters, not bytes.
+- Feat: clearer compiler errors. `Model`, `FromRow`, `ModelValues` and `FilterColumn` carry `#[diagnostic::on_unimplemented]` notes ("add `#[derive(Model)]`"), and the blanket filter impls are hidden from error suggestions. The derive reports an unsupported field type on the type itself and names the replacement (`Vec<u8>` → `FieldBytes`, `String` → `FieldText` / `FieldVarchar`, ...). Covered by trybuild UI tests.
+- Feat: new `Error::TableMissing { table }` (Postgres 42P01, SQLite "no such table", MySQL 1146) saying to run `rango makemigrations` and `rango migrate`. Unknown column names now suggest the closest column. SQLite `UniqueViolation` (and other constraint errors) carry the failing columns as `constraint`.
+- Fix: `rango makemigrations` without a terminal no longer fails with a bare NOT NULL error when a column may have been renamed: it says so and points to `--yes` or a terminal.
+- Fix: `ForeignKey<M>` and `ManyToMany<M>` no longer require `M: Clone` / `Default` / `Debug` / `PartialEq`. `ForeignKey<M>` is now `Copy`, `Eq` and `Hash`.
 
 ## 0.1.1 (2026-11-06)
 

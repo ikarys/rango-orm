@@ -622,13 +622,33 @@ impl<M> ToSqlValue for Option<ForeignKey<M>> {
 ///     contributors: ManyToMany<User>,             // explicit pivot table
 /// }
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Serialize, Deserialize)]
+#[serde(bound = "")]
 pub struct ManyToMany<M>(
     /// Always empty when loaded from the database: use `.prefetch_related(Model::FIELD)`
     /// and `.prefetched::<M>()` to load the related rows.
     pub Vec<uuid::Uuid>,
     std::marker::PhantomData<M>,
 );
+
+// Manual impls: derives would require `M: Clone + Default + Debug`, but `M` is only a marker.
+impl<M> Clone for ManyToMany<M> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone(), std::marker::PhantomData)
+    }
+}
+
+impl<M> Default for ManyToMany<M> {
+    fn default() -> Self {
+        Self::empty()
+    }
+}
+
+impl<M> std::fmt::Debug for ManyToMany<M> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("ManyToMany").field(&self.0).finish()
+    }
+}
 
 impl<M> ManyToMany<M> {
     pub fn empty() -> Self {
@@ -649,8 +669,38 @@ impl<M> ManyToMany<M> {
 ///     author_id: ForeignKey<User>,
 /// }
 /// ```
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
+#[serde(bound = "")]
 pub struct ForeignKey<M>(pub uuid::Uuid, std::marker::PhantomData<M>);
+
+// Manual impls: derives would require `M: Clone + Debug + PartialEq`, but `M` is only a marker.
+impl<M> Clone for ForeignKey<M> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<M> Copy for ForeignKey<M> {}
+
+impl<M> PartialEq for ForeignKey<M> {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
+    }
+}
+
+impl<M> Eq for ForeignKey<M> {}
+
+impl<M> std::hash::Hash for ForeignKey<M> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.0.hash(state);
+    }
+}
+
+impl<M> std::fmt::Debug for ForeignKey<M> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("ForeignKey").field(&self.0).finish()
+    }
+}
 
 impl<M> ForeignKey<M> {
     pub fn new(id: uuid::Uuid) -> Self {

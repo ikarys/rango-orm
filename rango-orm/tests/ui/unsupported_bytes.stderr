@@ -1,0 +1,5 @@
+error: `Vec<u8>` is not a Rango field type: use `FieldBytes`. Wrap it in `Option<..>` for a nullable column.
+ --> tests/ui/unsupported_bytes.rs:6:18
+  |
+6 |     data: Option<Vec<u8>>,
+  |                  ^^^^^^^

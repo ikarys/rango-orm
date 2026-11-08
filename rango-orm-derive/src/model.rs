@@ -656,17 +656,37 @@ fn map_field_type(ty: &Type, core: &TokenStream) -> Result<TokenStream> {
         s if s.starts_with("FieldDecimal<") => parse_decimal(s, core)?,
         s if s.starts_with("FieldPassword<") => parse_password(s, core)?,
         s if s.starts_with("FieldRange<") => quote! { #core::ColumnType::BigInt },
-        _ => {
-            return Err(syn::Error::new(
-                proc_macro2::Span::call_site(),
-                format!(
-                    "Unknown Rango field type: `{}`. Use a FieldXxx type.",
-                    type_str
-                ),
-            ));
-        }
+        _ => return Err(unsupported_type(ty, &type_str)),
     };
     Ok(col_type)
+}
+
+/// Error on the field type itself, naming the Rango replacement for common Rust types.
+fn unsupported_type(ty: &Type, type_str: &str) -> syn::Error {
+    let hint = match type_str {
+        "String" | "&str" => "use `FieldText` or `FieldVarchar<MIN, MAX>`",
+        "Vec<u8>" => "use `FieldBytes`",
+        "bool" => "use `FieldBool`",
+        "i16" => "use `FieldSmallInt`",
+        "i32" => "use `FieldInt` (or `FieldAutoInt` for a database-assigned id)",
+        "i64" => "use `FieldBigInt` (or `FieldAutoBigInt` for a database-assigned id)",
+        "f32" => "use `FieldFloat`",
+        "f64" => "use `FieldDouble`",
+        "Uuid" | "uuid::Uuid" => "use `FieldUuid` (or `ForeignKey<Model>` for a reference)",
+        "DateTime<Utc>" | "DateTime" => "use `FieldDateTime`",
+        "NaiveDate" => "use `FieldDate`",
+        "NaiveTime" => "use `FieldTime`",
+        "Decimal" => "use `FieldDecimal<PRECISION, SCALE>`",
+        "Value" => "use `FieldJson`",
+        _ => "use one of the `Field*` types, `ForeignKey<Model>` or `ManyToMany<Model>`",
+    };
+    syn::Error::new_spanned(
+        ty,
+        format!(
+            "`{type_str}` is not a Rango field type: {hint}. \
+             Wrap it in `Option<..>` for a nullable column."
+        ),
+    )
 }
 
 fn parse_varchar(s: &str, core: &TokenStream) -> Result<TokenStream> {

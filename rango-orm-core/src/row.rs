@@ -30,6 +30,10 @@ pub trait RangoRow {
 }
 
 /// Implemented by `#[derive(Model)]` — reads a model from a RangoRow.
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` cannot be read from a database row",
+    note = "add `#[derive(Model)]` (or `#[rango::model]`, or `#[derive(Partial)]` for a column subset) to `{Self}`"
+)]
 pub trait FromRow: Sized {
     fn from_row(row: &dyn RangoRow) -> Result<Self, RowError>;
 }
