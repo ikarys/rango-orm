@@ -1,4 +1,5 @@
 use anyhow::{Context, Result, bail};
+use rango_orm_core::type_map::{self, TypeMapError};
 use rango_orm_core::{
     CheckConstraint, ColumnDef, ColumnType, Constraint, DefaultValue, FkReference, OrderBy,
     OrderDir, ReferentialAction, TableSchema, UniqueConstraint,
@@ -371,66 +372,14 @@ fn extract_option(ty: &Type) -> (bool, &Type) {
 
 fn map_field_type(ty: &Type) -> Result<ColumnType> {
     let s = type_name(ty);
-    let col = match s.as_str() {
-        "FieldBool" => ColumnType::Bool,
-        "FieldSmallInt" => ColumnType::SmallInt,
-        "FieldInt" => ColumnType::Int,
-        "FieldBigInt" => ColumnType::BigInt,
-        "FieldAutoInt" => ColumnType::AutoInt,
-        "FieldAutoBigInt" => ColumnType::AutoBigInt,
-        "FieldFloat" => ColumnType::Float,
-        "FieldDouble" => ColumnType::Double,
-        "FieldText" => ColumnType::Text,
-        "FieldEmail" => ColumnType::Varchar(254),
-        "FieldUrl" => ColumnType::Varchar(2048),
-        "FieldBytes" => ColumnType::Bytea,
-        "FieldUuid" => ColumnType::Uuid,
-        "FieldDate" => ColumnType::Date,
-        "FieldTime" => ColumnType::Time,
-        "FieldDateTime" => ColumnType::DateTime,
-        "FieldJson" => ColumnType::Jsonb,
-        s if s.starts_with("FieldVarchar<") => parse_varchar(s)?,
-        s if s.starts_with("FieldPassword<") => parse_password(s)?,
-        s if s.starts_with("FieldDecimal<") => parse_decimal(s)?,
-        s if s.starts_with("FieldRange<") => ColumnType::BigInt,
-        s if s.starts_with("ForeignKey<") => ColumnType::Uuid,
-        _ => anyhow::bail!("Unknown field type: {}", s),
-    };
-    Ok(col)
-}
-
-fn parse_varchar(s: &str) -> Result<ColumnType> {
-    let inner = s.trim_start_matches("FieldVarchar<").trim_end_matches('>');
-    let parts: Vec<&str> = inner.split(',').collect();
-    if parts.len() == 2
-        && let Ok(max) = parts[1].trim().parse::<u32>()
-    {
-        return Ok(ColumnType::Varchar(max));
+    if s.starts_with("ForeignKey<") {
+        // Resolved against the target primary key later (`resolve_model_tables`).
+        return Ok(ColumnType::Uuid);
     }
-    anyhow::bail!("Invalid FieldVarchar: {}", s)
-}
-
-fn parse_password(s: &str) -> Result<ColumnType> {
-    let inner = s.trim_start_matches("FieldPassword<").trim_end_matches('>');
-    let parts: Vec<&str> = inner.split(',').collect();
-    if parts.len() == 2 && parts[1].trim().parse::<u32>().is_ok() {
-        return Ok(ColumnType::Text);
-    }
-    anyhow::bail!("Invalid FieldPassword: {}", s)
-}
-
-fn parse_decimal(s: &str) -> Result<ColumnType> {
-    let inner = s.trim_start_matches("FieldDecimal<").trim_end_matches('>');
-    let parts: Vec<&str> = inner.split(',').collect();
-    if parts.len() == 2
-        && let (Ok(p), Ok(sc)) = (parts[0].trim().parse::<u8>(), parts[1].trim().parse::<u8>())
-    {
-        return Ok(ColumnType::Decimal {
-            precision: p,
-            scale: sc,
-        });
-    }
-    anyhow::bail!("Invalid FieldDecimal: {}", s)
+    type_map::column_type(&s).map_err(|e| match e {
+        TypeMapError::Unknown => anyhow::anyhow!("Unknown field type: {s}"),
+        TypeMapError::Invalid(name) => anyhow::anyhow!("Invalid {name}: {s}"),
+    })
 }
 
 /// Extract `managed = false` from `#[model(...)]`, defaults to `true`.
