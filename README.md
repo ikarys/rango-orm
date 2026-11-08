@@ -4,7 +4,7 @@ A Django-inspired async ORM for Rust: define a struct, Rango generates the schem
 
 [![CI](https://github.com/ikarys/rango-orm/actions/workflows/ci.yml/badge.svg)](https://github.com/ikarys/rango-orm/actions/workflows/ci.yml) [![codecov](https://codecov.io/gh/ikarys/rango-orm/graph/badge.svg)](https://codecov.io/gh/ikarys/rango-orm)
 
-> `0.1.0`, on crates.io as [`rango-orm`](https://crates.io/crates/rango-orm). Pre-1.0: a `0.x` minor release may still break the API.
+> `0.1.1`, on crates.io as [`rango-orm`](https://crates.io/crates/rango-orm). Pre-1.0: a `0.x` minor release may still break the API.
 
 ## Why Rango
 
@@ -80,7 +80,7 @@ tokio = { version = "1", features = ["full"] }
 ```
 
 ```bash
-cargo install rango-orm-cli --version 0.1.0
+cargo install rango-orm-cli --version 0.1.1
 ```
 
 In production, pass the URL via `DATABASE_URL`; never put credentials in `rango.toml`.

@@ -1179,3 +1179,17 @@ async fn test_mysql_in_values_empty_list() {
         .unwrap();
     assert_eq!(all.len(), 2);
 }
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-mysql"), ignore)]
+async fn test_keyset_after_does_not_duplicate_order_by() {
+    let pool = pool().await;
+    setup(&pool).await;
+    let sql = TestUser::filter(&pool)
+        .order_by(TestUser::ID)
+        .after(TestUser::ID, FieldUuid(uuid::Uuid::new_v4()))
+        .explain();
+    assert_eq!(sql.matches("ORDER BY").count(), 1, "{sql}");
+    let order = sql.split("ORDER BY").nth(1).unwrap();
+    assert_eq!(order.matches("id").count(), 1, "{sql}");
+}

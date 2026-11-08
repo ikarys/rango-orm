@@ -1364,12 +1364,15 @@ dependencies = [
 name = "rango-orm"
 version = "0.2.0-beta.1"
 dependencies = [
+ "chrono",
  "rango-orm-core",
  "rango-orm-derive",
  "rango-orm-mysql",
  "rango-orm-postgres",
  "rango-orm-sqlite",
  "sqlx",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]

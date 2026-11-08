@@ -599,8 +599,8 @@ async fn test_bulk_create_unnest_large_with_nulls() {
         .into_iter()
         .map(|r| r.inner)
         .collect();
-    fetched.sort_by(|a, b| a.email.as_str().cmp(&b.email.as_str()));
-    users.sort_by(|a, b| a.email.as_str().cmp(&b.email.as_str()));
+    fetched.sort_by(|a, b| a.email.as_str().cmp(b.email.as_str()));
+    users.sort_by(|a, b| a.email.as_str().cmp(b.email.as_str()));
     assert_eq!(fetched, users);
 
     teardown(&pool).await;
@@ -1677,4 +1677,18 @@ async fn test_in_values_empty_list() {
         .await
         .unwrap();
     assert_eq!(all.len(), 2);
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration"), ignore)]
+async fn test_keyset_after_does_not_duplicate_order_by() {
+    let pool = pool().await;
+    setup(&pool).await;
+    let sql = TestUser::filter(&pool)
+        .order_by(TestUser::ID)
+        .after(TestUser::ID, FieldUuid(uuid::Uuid::new_v4()))
+        .explain();
+    assert_eq!(sql.matches("ORDER BY").count(), 1, "{sql}");
+    let order = sql.split("ORDER BY").nth(1).unwrap();
+    assert_eq!(order.matches("id").count(), 1, "{sql}");
 }

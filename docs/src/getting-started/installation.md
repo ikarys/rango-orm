@@ -18,6 +18,11 @@ rango-orm = { version = "0.1", default-features = false, features = ["sqlite"] }
 rango-orm = { version = "0.1", default-features = false, features = ["mysql"] }
 
 tokio = { version = "1", features = ["full"] }
+
+# Rango does not re-export these: add them yourself to build
+# FieldUuid / FieldDateTime values (uuid::Uuid, chrono::Utc::now()).
+uuid = { version = "1", features = ["v4"] }
+chrono = "0.4"
 ```
 
 ## Install the CLI

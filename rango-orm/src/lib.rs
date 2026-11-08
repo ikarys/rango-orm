@@ -11,6 +11,9 @@
 //! rango-orm = { version = "0.1", default-features = false, features = ["mysql"] }
 //! ```
 //!
+//! Rango does not re-export `uuid` or `chrono`: add them to your own
+//! `Cargo.toml` to build `FieldUuid` / `FieldDateTime` values.
+//!
 //! Then:
 //! ```rust,ignore
 //! use rango::prelude::*;
@@ -162,6 +165,12 @@ pub async fn connect_mysql(url: &str) -> Result<MySqlPool> {
 // ─── Prelude ──────────────────────────────────────────────────────────────────
 
 pub mod prelude {
+    #[cfg(feature = "mysql")]
+    pub use crate::connect_mysql;
+    #[cfg(feature = "postgres")]
+    pub use crate::connect_postgres;
+    #[cfg(feature = "sqlite")]
+    pub use crate::connect_sqlite;
     pub use rango_orm_core::ModelHooks;
     pub use rango_orm_core::*;
     pub use rango_orm_derive::{Model, ModelMixin, Partial};

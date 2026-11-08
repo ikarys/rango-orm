@@ -11,22 +11,28 @@ Every database operation (CRUD, query builder executions, aggregates, bulk ops, 
 | `otel.kind` | `"client"` |
 
 ## sqlx events
-sqlx additionally logs one event per statement on target `sqlx::query`:
-- `db.statement`
+sqlx logs one event per statement on target `sqlx::query`, at `DEBUG` level. Fields:
+- `summary`: the SQL text when it is short, otherwise a truncated form ending in `…`
+- `db.statement`: the full SQL text, filled only when `summary` is truncated; an empty string for short statements (their SQL is in `summary`)
 - `rows_affected`
 - `rows_returned`
 - `elapsed`
 
 Bound values are never logged.
 
+Statements slower than the threshold are logged on the same target at `WARN` ("slow statement"), with the same fields plus `slow_threshold`.
+
 ## Slow query log
 - Postgres: `DatabaseConfig::slow_query_threshold_ms` (default `500`) logs statements slower than the threshold at `WARN`.
-- SQLite: fixed `500` ms.
+- SQLite and MySQL: fixed `500` ms.
 
 ## Setup
+The per-statement events are `DEBUG`, so a default `info` filter hides them. To see every statement, enable `sqlx::query=debug`; to keep only the slow-statement warnings, use `sqlx::query=warn` (it hides all the other statements).
+
 ```rust,ignore
 tracing_subscriber::fmt()
-    .with_env_filter("info,sqlx::query=warn")
+    .with_env_filter("info,sqlx::query=debug")   // every statement
+    // .with_env_filter("info,sqlx::query=warn") // slow statements only
     .init();
 ```
 
