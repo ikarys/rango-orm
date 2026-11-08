@@ -150,6 +150,7 @@ The user guide is an mdBook in `docs/` (`mdbook serve docs`).
 - [Filtering and typed columns](docs/src/querying/filter.md)
 - [Generating migrations](docs/src/migrations/makemigrations.md)
 - [Security model](docs/src/security/sql-injection.md)
+- [How Rango is built and verified](docs/src/trust/how-rango-is-built.md): AI-assisted, and every claim comes with the check that backs it
 
 ## Workspace layout
 
