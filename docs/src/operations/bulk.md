@@ -50,6 +50,8 @@ let updated = bulk_upsert(&pool, &users, &["email"]).await?;
 // conflict_on: columns used to detect duplicates (must have a UNIQUE constraint)
 ```
 
+The return value is the number of rows the database reports as affected, summed over chunks. On PostgreSQL and SQLite it is one per inserted or updated row. On MySQL / MariaDB it is 1 per inserted row and 2 per updated row (and 0 for a row left unchanged), so it is not the number of models you passed.
+
 Uses `INSERT ... ON CONFLICT (email) DO UPDATE SET ...` on PostgreSQL and SQLite, and `INSERT ... ON DUPLICATE KEY UPDATE` on MySQL. MySQL fires on a duplicate of any unique index and cannot target one, so Rango checks the model first: if it has a unique key other than `conflict_on` (a `#[field(unique)]` column or a non-partial `UniqueConstraint`, compared as an unordered column set), `bulk_upsert` returns `Error::Invalid` before any SQL runs. The primary key is exempt (a PK collision is the same row), but upserting on the primary key is rejected when another unique key exists. On MySQL the `conflict_on` columns are not overwritten.
 
 ## Chunking

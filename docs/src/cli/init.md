@@ -8,6 +8,7 @@ Initializes a new Rango project by generating `rango.toml` and the `migrations/`
 rango init                    # SQLite backend (default)
 rango init --backend postgres # PostgreSQL backend
 rango init --backend sqlite   # explicit SQLite
+rango init --backend mysql    # MySQL (or `mariadb`)
 ```
 
 ## Generated files
@@ -40,4 +41,4 @@ dir = "migrations"
 
 - `rango init` fails if `rango.toml` already exists
 - The `url` field is commented out by default — use `DATABASE_URL` env var for credentials
-- The backend field (`sqlite` or `postgres`) determines the SQL dialect for `makemigrations`
+- The backend field (`sqlite`, `postgres`, `mysql` or `mariadb`) determines the SQL dialect for `makemigrations`
