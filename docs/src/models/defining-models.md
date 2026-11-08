@@ -117,7 +117,7 @@ pub name: FieldVarchar<1, 100>,   // NOT NULL
 #[model(managed = false)]          // exclude from migrations (external table)
 #[model(ordering = [asc("name"), desc("created_at")])]
 #[model(constraints = [
-    CheckConstraint::raw("age >= 0").name("chk_age"),
+    CheckConstraint::new("age >= 0").name("chk_age"),
     UniqueConstraint::on(&["email", "tenant_id"]).name("uniq_email_tenant"),
 ])]
 ```
