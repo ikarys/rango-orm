@@ -80,8 +80,8 @@ async fn main() -> anyhow::Result<()> {
     // Insert
     let user = User {
         id: FieldUuid(uuid::Uuid::new_v4()),
-        email: FieldEmail("alice@example.com".into()),
-        name: FieldVarchar("Alice".into()),
+        email: FieldEmail::new("alice@example.com".into())?,
+        name: FieldVarchar::new("Alice".into())?,
         active: FieldBool(true),
         created_at: FieldDateTime(chrono::Utc::now()),
     };

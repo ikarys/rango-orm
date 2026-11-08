@@ -46,8 +46,8 @@ async fn setup() -> PgPool {
 fn make_user(i: usize) -> BenchUser {
     BenchUser {
         id: FieldUuid(Uuid::new_v4()),
-        email: FieldEmail(format!("u{}@bench.com", i)),
-        name: FieldVarchar("Bench User".into()),
+        email: FieldEmail::new(format!("u{}@bench.com", i)).unwrap(),
+        name: FieldVarchar::new("Bench User".into()).unwrap(),
         active: FieldBool(true),
         score: Some(FieldInt(i as i32)),
         created_at: FieldDateTime(chrono::Utc::now()),
@@ -148,7 +148,7 @@ fn bench_update(c: &mut Criterion) {
     c.bench_function("rango/update_one", |b| {
         b.iter(|| {
             let mut u = user.clone();
-            u.name = FieldVarchar("Updated".into());
+            u.name = FieldVarchar::new("Updated".into()).unwrap();
             rt.block_on(async { update(&pool, u).await.unwrap() })
         })
     });

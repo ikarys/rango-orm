@@ -42,8 +42,8 @@ async fn setup() -> SqlitePool {
 fn make_user(i: usize) -> BenchUser {
     BenchUser {
         id: FieldUuid(Uuid::new_v4()),
-        email: FieldEmail(format!("user{}@bench.com", i)),
-        name: FieldVarchar(format!("User {}", i)),
+        email: FieldEmail::new(format!("user{}@bench.com", i)).unwrap(),
+        name: FieldVarchar::new(format!("User {}", i)).unwrap(),
         active: FieldBool(true),
         score: Some(FieldInt(i as i32)),
     }

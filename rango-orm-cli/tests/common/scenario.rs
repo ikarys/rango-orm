@@ -18,8 +18,8 @@ macro_rules! scenario {
             fn author(n: &str, karma: Option<i32>) -> RpxAuthor {
                 RpxAuthor {
                     id: FieldUuid(Uuid::new_v4()),
-                    email: FieldEmail(format!("{n}@rpx.test")),
-                    name: FieldVarchar(n.to_string()),
+                    email: FieldEmail::new(format!("{n}@rpx.test")).unwrap(),
+                    name: FieldVarchar::new(n.to_string()).unwrap(),
                     bio: None,
                     karma: karma.map(FieldInt),
                     created: FieldDateTime::now(),
@@ -32,7 +32,7 @@ macro_rules! scenario {
                     id: FieldUuid(Uuid::new_v4()),
                     author: ForeignKey::new(a.id.0),
                     reviewer: None,
-                    title: FieldVarchar(title.to_string()),
+                    title: FieldVarchar::new(title.to_string()).unwrap(),
                     body: FieldText(format!("body of {title}")),
                     published: FieldBool(true),
                     rating: FieldInt(rating),
@@ -43,7 +43,7 @@ macro_rules! scenario {
             fn tag(n: &str) -> RpxTag {
                 RpxTag {
                     id: FieldUuid(Uuid::new_v4()),
-                    name: FieldVarchar(n.to_string()),
+                    name: FieldVarchar::new(n.to_string()).unwrap(),
                 }
             }
 
@@ -123,7 +123,7 @@ macro_rules! scenario {
 
                 // Default ordering is `ordering = [asc("name")]`.
                 let all = RpxAuthor::filter(pool).all().await.unwrap();
-                let names: Vec<_> = all.iter().map(|a| a.name.0.clone()).collect();
+                let names: Vec<_> = all.iter().map(|a| a.name.to_string()).collect();
                 assert_eq!(names, ["ada", "bob", "cyd"]);
 
                 let top = RpxAuthor::filter(pool)
@@ -132,7 +132,7 @@ macro_rules! scenario {
                     .all()
                     .await
                     .unwrap();
-                let names: Vec<_> = top.iter().map(|a| a.name.0.clone()).collect();
+                let names: Vec<_> = top.iter().map(|a| a.name.to_string()).collect();
                 assert_eq!(names, ["bob", "ada"]);
 
                 let victim = author("victim", None);
@@ -185,8 +185,8 @@ macro_rules! scenario {
                     .await
                     .unwrap();
                 assert_eq!(posts.len(), 3);
-                assert_eq!(posts[0].title.0, "first");
-                assert_eq!(posts[0].related::<RpxAuthor>().name.0, "ada");
+                assert_eq!(posts[0].title.as_str(), "first");
+                assert_eq!(posts[0].related::<RpxAuthor>().name.as_str(), "ada");
                 assert_eq!(posts[0].body.0, "body of first");
 
                 let authors = RpxAuthor::filter(pool)
@@ -197,7 +197,7 @@ macro_rules! scenario {
                 let n = |name: &str| {
                     authors
                         .iter()
-                        .find(|a| a.name.0 == name)
+                        .find(|a| a.name.as_str() == name)
                         .unwrap()
                         .prefetched::<RpxBlogPost>()
                         .len()
@@ -233,7 +233,7 @@ macro_rules! scenario {
                     .await
                     .unwrap()
                     .iter()
-                    .map(|t| t.name.0.clone())
+                    .map(|t| t.name.to_string())
                     .collect();
                 names.sort();
                 assert_eq!(names, ["orm", "rust"]);
@@ -246,7 +246,7 @@ macro_rules! scenario {
                 let count = |t: &str| {
                     posts
                         .iter()
-                        .find(|p| p.title.0 == t)
+                        .find(|p| p.title.as_str() == t)
                         .unwrap()
                         .prefetched::<RpxTag>()
                         .len()
@@ -267,7 +267,7 @@ macro_rules! scenario {
                 M2M::<RpxAuthor, RpxAuthor>::add(pool, &ada, &cyd).await.unwrap();
                 M2M::<RpxAuthor, RpxAuthor>::add(pool, &bob, &ada).await.unwrap();
                 let names = |v: Vec<RpxAuthor>| {
-                    let mut n: Vec<_> = v.iter().map(|a| a.name.0.clone()).collect();
+                    let mut n: Vec<_> = v.iter().map(|a| a.name.to_string()).collect();
                     n.sort();
                     n
                 };
@@ -284,7 +284,7 @@ macro_rules! scenario {
                 let followed = |n: &str| {
                     authors
                         .iter()
-                        .find(|a| a.name.0 == n)
+                        .find(|a| a.name.as_str() == n)
                         .unwrap()
                         .prefetched::<RpxAuthor>()
                         .len()
@@ -300,8 +300,8 @@ macro_rules! scenario {
                     .all()
                     .await
                     .unwrap();
-                assert!(lite.iter().any(|l| l.name.0 == "ada" && l.bio.is_none()));
-                assert!(lite.iter().any(|l| l.name.0 == "bob" && l.bio.is_some()));
+                assert!(lite.iter().any(|l| l.name.as_str() == "ada" && l.bio.is_none()));
+                assert!(lite.iter().any(|l| l.name.as_str() == "bob" && l.bio.is_some()));
 
                 let events: Vec<RpxEvent> = (0..7)
                     .map(|i| RpxEvent {
@@ -388,7 +388,7 @@ macro_rules! scenario {
                     pool,
                     RpxCounter {
                         id: FieldAutoBigInt(None),
-                        name: FieldVarchar("c".into()),
+                        name: FieldVarchar::new("c").unwrap(),
                         hits: FieldBigInt(1),
                     },
                 )
@@ -424,15 +424,15 @@ macro_rules! scenario {
                     double: FieldDouble(2.25),
                     dec: FieldDecimal("12345678.90".parse().unwrap()),
                     text: FieldText("t".into()),
-                    short: FieldVarchar("s".into()),
-                    email: FieldEmail("s@rpx.test".into()),
-                    url: FieldUrl("https://rpx.test/x".into()),
+                    short: FieldVarchar::new("s").unwrap(),
+                    email: FieldEmail::new("s@rpx.test").unwrap(),
+                    url: FieldUrl::new("https://rpx.test/x").unwrap(),
                     bytes: FieldBytes(vec![0, 1, 2, 255]),
                     day: FieldDate(chrono::NaiveDate::from_ymd_opt(2026, 11, 6).unwrap()),
                     at: FieldTime(chrono::NaiveTime::from_hms_opt(12, 30, 15).unwrap()),
                     stamp: FieldDateTime::now(),
                     json: FieldJson(serde_json::json!({"k": [1, 2]})),
-                    range: FieldRange(42),
+                    range: FieldRange::new(42).unwrap(),
                     secret: FieldPassword::new("hunter2hunter2").unwrap(),
                 };
                 insert(pool, sink.clone()).await.unwrap();

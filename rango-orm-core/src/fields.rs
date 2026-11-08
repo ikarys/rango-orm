@@ -58,34 +58,97 @@ impl<const P: u8, const S: u8> FieldDecimal<P, S> {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FieldText(pub String);
 
-/// VARCHAR with min/max length validation.
+/// VARCHAR with min/max length validation (in characters, not bytes).
+///
+/// The inner value is private: the only ways to build one are the validating
+/// [`new`](Self::new) / `TryFrom` / `Deserialize`, and decoding from a database row.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct FieldVarchar<const MIN: usize, const MAX: usize>(pub String);
+#[serde(try_from = "String")]
+pub struct FieldVarchar<const MIN: usize, const MAX: usize>(String);
 
 impl<const MIN: usize, const MAX: usize> FieldVarchar<MIN, MAX> {
     pub fn new(s: impl Into<String>) -> Result<Self, FieldError> {
         let s = s.into();
-        if s.len() < MIN {
+        let len = s.chars().count();
+        if len < MIN {
             return Err(FieldError(format!("Value too short (min {})", MIN)));
         }
-        if s.len() > MAX {
+        if len > MAX {
             return Err(FieldError(format!("Value too long (max {})", MAX)));
         }
         Ok(Self(s))
     }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn into_inner(self) -> String {
+        self.0
+    }
+
+    /// Wraps a value read from the database without re-validating it, so rows written
+    /// before a bound changed stay readable. Not for application code.
+    #[doc(hidden)]
+    pub fn from_db(s: String) -> Self {
+        Self(s)
+    }
 }
 
-/// Email field — validated on construction.
+impl<const MIN: usize, const MAX: usize> TryFrom<String> for FieldVarchar<MIN, MAX> {
+    type Error = FieldError;
+    fn try_from(s: String) -> Result<Self, FieldError> {
+        Self::new(s)
+    }
+}
+
+impl<const MIN: usize, const MAX: usize> std::ops::Deref for FieldVarchar<MIN, MAX> {
+    type Target = str;
+    fn deref(&self) -> &str {
+        &self.0
+    }
+}
+
+/// Email field — validated on construction (inner value is private, see [`FieldVarchar`]).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct FieldEmail(pub String);
+#[serde(try_from = "String")]
+pub struct FieldEmail(String);
 
 impl FieldEmail {
     pub fn new(s: impl Into<String>) -> Result<Self, FieldError> {
         let s = s.into();
-        if !s.contains('@') || s.len() > 254 {
+        if !s.contains('@') || s.chars().count() > 254 {
             return Err(FieldError("Invalid email address".into()));
         }
         Ok(Self(s))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn into_inner(self) -> String {
+        self.0
+    }
+
+    /// Wraps a value read from the database without re-validating it. Not for application code.
+    #[doc(hidden)]
+    pub fn from_db(s: String) -> Self {
+        Self(s)
+    }
+}
+
+impl TryFrom<String> for FieldEmail {
+    type Error = FieldError;
+    fn try_from(s: String) -> Result<Self, FieldError> {
+        Self::new(s)
+    }
+}
+
+impl std::ops::Deref for FieldEmail {
+    type Target = str;
+    fn deref(&self) -> &str {
+        &self.0
     }
 }
 
@@ -153,9 +216,10 @@ impl<const MIN: usize, const MAX: usize> FieldPassword<MIN, MAX> {
     }
 }
 
-/// URL field — basic validation.
+/// URL field — basic validation (inner value is private, see [`FieldVarchar`]).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct FieldUrl(pub String);
+#[serde(try_from = "String")]
+pub struct FieldUrl(String);
 
 impl FieldUrl {
     pub fn new(s: impl Into<String>) -> Result<Self, FieldError> {
@@ -164,6 +228,34 @@ impl FieldUrl {
             return Err(FieldError("URL must start with http:// or https://".into()));
         }
         Ok(Self(s))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn into_inner(self) -> String {
+        self.0
+    }
+
+    /// Wraps a value read from the database without re-validating it. Not for application code.
+    #[doc(hidden)]
+    pub fn from_db(s: String) -> Self {
+        Self(s)
+    }
+}
+
+impl TryFrom<String> for FieldUrl {
+    type Error = FieldError;
+    fn try_from(s: String) -> Result<Self, FieldError> {
+        Self::new(s)
+    }
+}
+
+impl std::ops::Deref for FieldUrl {
+    type Target = str;
+    fn deref(&self) -> &str {
+        &self.0
     }
 }
 
@@ -214,8 +306,10 @@ pub struct FieldJson(pub serde_json::Value);
 
 // ─── Range ───────────────────────────────────────────────────────────────────
 
+/// Integer bounded to `MIN..=MAX` (inner value is private, see [`FieldVarchar`]).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct FieldRange<const MIN: i64, const MAX: i64>(pub i64);
+#[serde(try_from = "i64")]
+pub struct FieldRange<const MIN: i64, const MAX: i64>(i64);
 
 impl<const MIN: i64, const MAX: i64> FieldRange<MIN, MAX> {
     pub fn new(val: i64) -> Result<Self, FieldError> {
@@ -226,6 +320,23 @@ impl<const MIN: i64, const MAX: i64> FieldRange<MIN, MAX> {
             )));
         }
         Ok(Self(val))
+    }
+
+    pub fn get(&self) -> i64 {
+        self.0
+    }
+
+    /// Wraps a value read from the database without re-validating it. Not for application code.
+    #[doc(hidden)]
+    pub fn from_db(v: i64) -> Self {
+        Self(v)
+    }
+}
+
+impl<const MIN: i64, const MAX: i64> TryFrom<i64> for FieldRange<MIN, MAX> {
+    type Error = FieldError;
+    fn try_from(v: i64) -> Result<Self, FieldError> {
+        Self::new(v)
     }
 }
 
@@ -631,6 +742,29 @@ impl From<serde_json::Value> for FieldJson {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn varchar_counts_chars_not_bytes() {
+        // 3 chars, 6 bytes
+        assert!(FieldVarchar::<1, 3>::new("éèà").is_ok());
+        assert!(FieldVarchar::<4, 10>::new("éèà").is_err());
+    }
+
+    #[test]
+    fn varchar_rejects_out_of_bounds() {
+        assert!(FieldVarchar::<1, 100>::new("").is_err());
+        assert!(FieldVarchar::<1, 100>::new("a".repeat(101)).is_err());
+        assert_eq!(FieldVarchar::<1, 100>::new("ok").unwrap().as_str(), "ok");
+    }
+
+    #[test]
+    fn deserialize_validates() {
+        assert!(serde_json::from_str::<FieldVarchar<1, 5>>("\"\"").is_err());
+        assert!(serde_json::from_str::<FieldEmail>("\"nope\"").is_err());
+        assert!(serde_json::from_str::<FieldUrl>("\"ftp://x\"").is_err());
+        assert!(serde_json::from_str::<FieldRange<0, 10>>("11").is_err());
+        assert!(serde_json::from_str::<FieldRange<0, 10>>("10").is_ok());
+    }
 
     #[test]
     fn field_password_new_rejects_too_short() {

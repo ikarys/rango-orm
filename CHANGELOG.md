@@ -13,6 +13,8 @@ First beta of the 0.2 cycle. The API may still change between betas: pin the tag
 - Feat: `.explain_analyze()` on the query builder: `EXPLAIN ANALYZE` on Postgres and MySQL, `ANALYZE FORMAT=JSON` on MariaDB, `EXPLAIN QUERY PLAN` on SQLite.
 - Feat: `rango migrate` reads `MIGRATE_DATABASE_URL` before `DATABASE_URL`, so migrations can use a DDL role and the app a DML-only one.
 - Docs: stored procedures and functions through `raw*` (no dedicated API).
+- Breaking (pre-1.0): the inner value of `FieldVarchar`, `FieldEmail`, `FieldUrl` and `FieldRange` is private, so `FieldVarchar("".into())` no longer skips validation. Build them with `new(..)` (or `TryFrom`; `Deserialize` now validates too) and read them with `as_str()` / `Deref<Target = str>` / `into_inner()` (`get()` for `FieldRange`). Rows read from the database are not re-validated.
+- Fix: `FieldVarchar` and `FieldEmail` length bounds count characters, not bytes.
 
 ## 0.1.1 (2026-11-06)
 
