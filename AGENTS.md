@@ -91,47 +91,37 @@ Une commande, ça marche pareil quel que soit le backend.
 
 ## Model Hooks
 
-Opt-in trait `ModelHooks` — implement only what you need.
+Opt-in trait `ModelHooks` (supertrait of `Model`). `#[derive(Model)]` emits an empty impl; with
+`#[model(hooks)]` you write `impl ModelHooks for X { ... }` yourself.
 
 ```rust
 #[derive(Model)]
+#[model(hooks)]
 struct User {
     id: FieldUuid,
     name: FieldVarchar<1, 100>,
-    slug: FieldVarchar<1, 100>,
+    slug: FieldVarchar<0, 100>,
 }
 
 impl ModelHooks for User {
-    async fn before_save(&mut self) -> Result<()> {
-        self.slug = slugify(&self.name);
-        Ok(())
-    }
-
-    async fn after_save(&self) -> Result<()> {
-        send_welcome_email(self).await?;
-        Ok(())
+    fn before_save(&mut self) -> BoxFuture<'_> {
+        Box::pin(async move {
+            self.slug = slugify(&self.name);
+            Ok(())
+        })
     }
 }
 ```
 
-Available hooks (all have a no-op default impl):
-
-| Hook | Triggered |
-|---|---|
-| `before_save` | Before INSERT or UPDATE |
-| `after_save` | After INSERT or UPDATE |
-| `before_create` | Before INSERT only |
-| `after_create` | After INSERT only |
-| `before_update` | Before UPDATE only |
-| `after_update` | After UPDATE only |
-| `before_delete` | Before DELETE |
-| `after_delete` | After DELETE |
+Available hooks (all have a no-op default impl): `before_save` / `after_save` (INSERT or UPDATE),
+`before_create` / `after_create` (INSERT), `before_update` / `after_update` (UPDATE),
+`before_delete` / `after_delete` (DELETE).
 
 Design rules:
-- All hooks are `async`
-- All hooks return `Result<()>` — returning `Err` cancels the operation
-- Hooks run inside the same transaction as the DB operation
-- `ModelHooks` is opt-in — no impl needed if unused
+- Fired by `insert`, `update`, `delete`, `get_or_create` (create hooks only when it inserts; `before_*` run on `defaults` first) and `update_or_create`. Order: `before_save`, `before_create|update`, SQL, `after_create|update`, `after_save`.
+- Not fired: bulk ops, query-builder updates/deletes, `raw*` (same as Django).
+- Hooks return `HookResult`; an `Err` becomes `Error::Hook`. `before_*` Err: no SQL runs. `after_*` Err: returned to the caller, and rolled back only inside `atomic()`/a transaction (a plain pool has already committed).
+- Hooks do not open a transaction themselves.
 
 ## Roadmap
 

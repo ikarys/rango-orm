@@ -294,6 +294,8 @@ mod tests {
     #[derive(Debug)]
     struct TestModel;
 
+    impl rango_orm_core::ModelHooks for TestModel {}
+
     impl Model for TestModel {
         fn table_name() -> &'static str {
             "test_model"

@@ -2,6 +2,9 @@
 
 use crate::error::db_err;
 use crate::row::{decode_all, SqliteRangoRow};
+use rango_orm_core::{
+    after_delete, after_insert, after_update, before_delete, before_insert, before_update,
+};
 use rango_orm_core::{quote_ident, FromRow, Model, ModelValues, SqlValue};
 use rango_orm_core::{Error, Result};
 use sqlx::{Executor, Sqlite, SqlitePool};
@@ -10,27 +13,33 @@ use super::*;
 
 // ─── CRUD ops ─────────────────────────────────────────────────────────────────
 #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "sqlite", db.operation = "INSERT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
-pub async fn insert<'e, E, M>(executor: E, model: M) -> Result<M>
+pub async fn insert<'e, E, M>(executor: E, mut model: M) -> Result<M>
 where
     E: Executor<'e, Database = Sqlite>,
     M: Model + ModelValues + FromRow,
 {
+    before_insert(&mut model).await?;
     let (sql, values) = build_insert_sql::<M>(&model);
     let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*sql)), values);
     let row = q.fetch_one(executor).await.map_err(db_err)?;
-    M::from_row(&SqliteRangoRow(row)).map_err(Error::from)
+    let saved = M::from_row(&SqliteRangoRow(row)).map_err(Error::from)?;
+    after_insert(&saved).await?;
+    Ok(saved)
 }
 
 #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "sqlite", db.operation = "UPDATE", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
-pub async fn update<'e, E, M>(executor: E, model: M) -> Result<M>
+pub async fn update<'e, E, M>(executor: E, mut model: M) -> Result<M>
 where
     E: Executor<'e, Database = Sqlite>,
     M: Model + ModelValues + FromRow,
 {
+    before_update(&mut model).await?;
     let (sql, values) = build_update_sql::<M>(&model);
     let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*sql)), values);
     let row = q.fetch_one(executor).await.map_err(db_err)?;
-    M::from_row(&SqliteRangoRow(row)).map_err(Error::from)
+    let saved = M::from_row(&SqliteRangoRow(row)).map_err(Error::from)?;
+    after_update(&saved).await?;
+    Ok(saved)
 }
 
 #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "sqlite", db.operation = "DELETE", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
@@ -39,16 +48,15 @@ where
     E: Executor<'e, Database = Sqlite>,
     M: Model + ModelValues,
 {
+    before_delete(model).await?;
     let sql = format!(
         "DELETE FROM {} WHERE {} = ?",
         quote_ident(M::table_name()),
         quote_ident(M::pk_column())
     );
-    let q = bind_sql_values(
-        sqlx::query(sqlx::AssertSqlSafe(&*sql)),
-        vec![model.pk_value()],
-    );
-    q.execute(executor).await.map(|_| ()).map_err(db_err)
+    let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*sql)), vec![model.pk_value()]);
+    q.execute(executor).await.map_err(db_err)?;
+    after_delete(model).await
 }
 
 #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "sqlite", db.operation = "SELECT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
@@ -88,18 +96,21 @@ where
 pub async fn get_or_create<M>(
     pool: &SqlitePool,
     lookup: Vec<(&'static str, SqlValue)>,
-    defaults: M,
+    mut defaults: M,
 ) -> Result<(M, bool)>
 where
     M: Model + ModelValues + FromRow,
 {
+    before_insert(&mut defaults).await?;
     let conflict_cols: Vec<&str> = lookup.iter().map(|(col, _)| *col).collect();
     let (insert_sql, insert_vals) = build_get_or_create_sql(&defaults, &conflict_cols);
     let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*insert_sql)), insert_vals);
     let row = q.fetch_optional(pool).await.map_err(db_err)?;
 
     if let Some(r) = row {
-        return Ok((M::from_row(&SqliteRangoRow(r)).map_err(Error::from)?, true));
+        let created = M::from_row(&SqliteRangoRow(r)).map_err(Error::from)?;
+        after_insert(&created).await?;
+        return Ok((created, true));
     }
 
     let (select_sql, select_vals) = build_lookup_sql::<M>(&lookup);

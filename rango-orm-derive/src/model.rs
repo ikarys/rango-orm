@@ -27,6 +27,7 @@ struct ModelAttr {
     table: Option<String>,
     comment: Option<String>,
     managed: Option<bool>,
+    hooks: bool,
     ordering: Vec<syn::Expr>,
     constraints: Vec<syn::Expr>,
 }
@@ -188,7 +189,14 @@ pub fn expand(input: DeriveInput) -> Result<TokenStream> {
     };
 
     let core2 = rango_core_path();
+    let default_hooks = if model_attr.hooks {
+        quote! {}
+    } else {
+        quote! { impl #core2::ModelHooks for #struct_name {} }
+    };
     Ok(quote! {
+        #default_hooks
+
         impl #core2::Model for #struct_name {
             fn table_name() -> &'static str {
                 #table_name
@@ -278,6 +286,7 @@ fn parse_model_attr(input: &DeriveInput) -> Result<ModelAttr> {
                         attr.comment = Some(s.value());
                     }
                 }
+                Meta::Path(p) if p.is_ident("hooks") => attr.hooks = true,
                 Meta::NameValue(nv) if nv.path.is_ident("managed") => {
                     if let syn::Expr::Lit(expr_lit) = &nv.value
                         && let Lit::Bool(b) = &expr_lit.lit
