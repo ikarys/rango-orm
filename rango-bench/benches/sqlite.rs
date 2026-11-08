@@ -90,6 +90,34 @@ fn bench_bulk_create(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_bulk_update(c: &mut Criterion) {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let mut group = c.benchmark_group("sqlite/bulk_update");
+    for size in [100, 1000] {
+        let (pool, mut users) = rt.block_on(async {
+            let pool = setup().await;
+            let users: Vec<BenchUser> = (0..size).map(make_user).collect();
+            bulk_create(&pool, &users).await.unwrap();
+            (pool, users)
+        });
+        for u in users.iter_mut() {
+            u.name = FieldVarchar::new("renamed".to_string()).unwrap();
+            u.score = None;
+        }
+        group.throughput(Throughput::Elements(size as u64));
+        group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, _| {
+            b.iter(|| {
+                rt.block_on(async {
+                    bulk_update(&pool, &users, &["name", "score"])
+                        .await
+                        .unwrap()
+                })
+            })
+        });
+    }
+    group.finish();
+}
+
 fn bench_filter(c: &mut Criterion) {
     let rt = tokio::runtime::Runtime::new().unwrap();
     let pool = rt.block_on(async {
@@ -155,6 +183,7 @@ criterion_group!(
     benches,
     bench_insert,
     bench_bulk_create,
+    bench_bulk_update,
     bench_filter,
     bench_aggregations
 );
