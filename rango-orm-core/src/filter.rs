@@ -710,6 +710,12 @@ impl<M: Model + ModelValues> Filter<M> {
         self.aggregate_expr_sql("COUNT(*)".to_string())
     }
 
+    /// `SELECT EXISTS(SELECT 1 FROM t WHERE ..)`: stops at the first matching row.
+    pub fn exists_sql(&self) -> (String, Vec<SqlValue>) {
+        let (inner, binds) = self.aggregate_expr_sql("1".to_string());
+        (format!("SELECT EXISTS({inner})"), binds)
+    }
+
     /// `SELECT <func>(col) FROM t WHERE ..` for `SUM`, `AVG`, `MIN`, `MAX` (floats for `SUM` / `AVG`).
     pub fn aggregate_sql(&self, func: &str, col: &str) -> (String, Vec<SqlValue>) {
         self.aggregate_expr_sql(self.dialect.aggregate(func, &self.q(col)))
@@ -1028,6 +1034,16 @@ mod tests {
             .where_exists::<T>("parent_id", |q| q.eq("b", 2i32))
             .in_subquery::<T>("c", "id", |q| q)
             .eq("d", 3i32)
+    }
+
+    #[test]
+    fn exists_sql_short_circuits() {
+        let (sql, binds) = Filter::<T>::new(Dialect::Postgres).eq("a", 1i32).exists_sql();
+        assert_eq!(
+            sql,
+            "SELECT EXISTS(SELECT 1 FROM \"test_model\" WHERE \"a\" = $1)"
+        );
+        assert_eq!(binds.len(), 1);
     }
 
     #[test]
