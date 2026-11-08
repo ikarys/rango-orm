@@ -121,9 +121,23 @@ impl From<crate::RowError> for Error {
     }
 }
 
+impl From<crate::FieldError> for Error {
+    fn from(e: crate::FieldError) -> Self {
+        Error::Invalid(e.0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::Error;
+
+    #[test]
+    fn field_error_converts_with_question_mark() {
+        fn f() -> super::Result<crate::FieldVarchar<1, 3>> {
+            Ok(crate::FieldVarchar::new("too long")?)
+        }
+        assert!(matches!(f(), Err(Error::Invalid(m)) if m.contains("too long")));
+    }
 
     #[test]
     fn display_and_retryable() {
