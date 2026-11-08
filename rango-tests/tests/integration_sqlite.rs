@@ -2207,3 +2207,23 @@ async fn test_sqlite_bound_values_never_logged_or_in_errors() {
     assert!(seen.contains("db.query"), "no span recorded: {seen}");
     assert!(!seen.contains(needle), "{seen}");
 }
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-sqlite"), ignore)]
+async fn test_sqlite_unknown_lookup_and_conflict_columns_are_invalid() {
+    let pool = pool().await;
+    setup(&pool).await;
+    let bogus = vec![("emial", SqlValue::Text("a@b.c".into()))];
+    let err = get_or_create(&pool, bogus.clone(), user("a@b.c"))
+        .await
+        .unwrap_err();
+    assert!(matches!(err, Error::Invalid(_)), "{err:?}");
+    let err = update_or_create(&pool, bogus, user("a@b.c"))
+        .await
+        .unwrap_err();
+    assert!(matches!(err, Error::Invalid(_)), "{err:?}");
+    let err = bulk_upsert(&pool, &[user("a@b.c")], &["emial"])
+        .await
+        .unwrap_err();
+    assert!(matches!(err, Error::Invalid(_)), "{err:?}");
+}

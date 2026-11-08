@@ -151,6 +151,17 @@ pub fn unknown_column<M: Model>(name: &str) -> Option<String> {
     ))
 }
 
+/// Check that every name is a column of `M`; `Error::Invalid` otherwise (before any SQL runs).
+#[doc(hidden)]
+pub fn check_columns<'a, M: Model>(names: impl IntoIterator<Item = &'a str>) -> crate::Result<()> {
+    for n in names {
+        if let Some(msg) = unknown_column::<M>(n) {
+            return Err(crate::Error::Invalid(msg));
+        }
+    }
+    Ok(())
+}
+
 /// Levenshtein distance, two rows.
 fn edit_distance(a: &str, b: &str) -> usize {
     let b: Vec<char> = b.chars().collect();

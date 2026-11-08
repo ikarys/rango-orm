@@ -106,6 +106,7 @@ where
     A: Acquire<'a, Database = Sqlite>,
     M: Model + ModelValues + FromRow,
 {
+    rango_orm_core::check_columns::<M>(lookup.iter().map(|(c, _)| *c))?;
     let mut conn = executor.acquire().await.map_err(db_err)?;
     before_insert(&mut defaults).await?;
     let conflict_cols: Vec<&str> = lookup.iter().map(|(col, _)| *col).collect();
@@ -143,6 +144,7 @@ where
     A: Acquire<'a, Database = Sqlite>,
     M: Model + ModelValues + FromRow,
 {
+    rango_orm_core::check_columns::<M>(lookup.iter().map(|(c, _)| *c))?;
     let mut conn = executor.acquire().await.map_err(db_err)?;
     let (lookup_sql, lookup_vals) = build_lookup_sql::<M>(&lookup);
     let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*lookup_sql)), lookup_vals);
