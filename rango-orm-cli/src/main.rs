@@ -26,9 +26,8 @@ enum Command {
 
     /// Scan models and generate migration files
     Makemigrations {
-        /// Directory to scan (default: src/)
-        #[arg(default_value = "src")]
-        path: String,
+        /// Directory to scan (default: `[models] src` in rango.toml, else src/)
+        path: Option<String>,
 
         /// Output directory for migration files (default: migrations/)
         #[arg(short, long, default_value = "migrations")]
@@ -169,6 +168,7 @@ fn main() -> Result<()> {
                      because the runtime never applied them. Remove it and use `#[model(table = \"...\")]` instead"
                 );
             }
+            let path = path.unwrap_or_else(|| cfg.models.src.clone());
             makemigrations::run(&path, &output, dry_run, check, yes)?;
         }
         Command::Export {
