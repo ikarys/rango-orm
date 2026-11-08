@@ -99,3 +99,32 @@ Differences between the three backends:
 Score: 6.5/10.
 
 Would I use Rango for this app? Yes for the MySQL production path: schema, migrations, concurrency, transactions and the query builder were pleasant and fast. I would not rely on it yet for the SQLite test double: decimals diverge (`values()`, aggregates), the constraint names in errors differ, `FOR UPDATE`/`atomic_retry` have no SQLite equivalent so tests exercise different code, and there is no documented way to apply generated migrations in tests. The silent `NullText` for a DECIMAL column in `values()` is the finding I would fix first, because it loses data with no error, in the exact feature (plain maps for CSV export) that the brief asks for.
+
+## (f) Decisions
+
+Checked against the tree at commit e37c896 (2026-11-08).
+
+| # | Decision | Commit or reason |
+|---|---|---|
+| 1 | fixed | 4de78a2: `values()` returns DECIMAL as `SqlValue::Decimal` at the column scale on SQLite and MySQL / MariaDB. |
+| 2 | fixed | 5768e48: examples use `raw::<_, User>` or inference from the binding. |
+| 3 | fixed | 8116398: `atomic_retry` is spawnable; compile test `rango-tests/tests/spawn_atomic.rs`. |
+| 4 | fixed | 484e3a0: `From<FieldError> for Error`. |
+| 5 | fixed | 5544c15: makemigrations.md states the real naming rule. |
+| 6 | documented | e37c896: configuration.md and init.md list mysql / mariadb and the `MIGRATE_DATABASE_URL` priority. |
+| 7 | fixed | f30fc83: the constraint name is parsed from the server message (MySQL 8 `table.` prefix stripped); errors.md updated. |
+| 8 | documented | f85e1ad: sqlite.md "Production on PostgreSQL/MySQL, tests on SQLite" (second folder with its own `rango.toml`, limits stated). |
+| 9 | documented | f85e1ad: in-memory tests apply the generated migration files with `raw_execute`, no sqlx. A public `migrate` helper stays out of scope for 0.2.0. |
+| 10 | documented | 61c3323: per-backend rule for decimal aggregates and the portable workaround. |
+| 11 | fixed | 5544c15: restore warns, listing migrations recorded as applied without being run (custom SQL to re-run by hand); restore docs updated. |
+| 12 | fixed | 5544c15: restore skips migration rows that already exist; works after `migrate` on every backend. |
+| 13 | open | Same as campaign A #12: value type not checked for string column names. Planned after 0.2.0. |
+| 14 | fixed | 2ee1ccf: columns are validated before the empty-input early return. |
+| 15 | documented | e37c896: bulk.md gives the meaning of the count per backend. |
+| 16 | fixed | 4de78a2: `WithRelated::into_inner`. |
+| 17 | documented | 61c3323: models may derive `Clone`/`Debug`. |
+| 18 | open | `raw` maps rows to models only; reading an arbitrary result set needs an unmanaged model. A `raw_values` returning maps is a candidate after 0.2.0. |
+| 19 | fixed | 2ee1ccf: the CLI suggests the Rango field type (`use FieldBool`), shared with the derive. |
+| 20 | open | No typed variant for numeric overflow; it stays `Error::Database`. Candidate after 0.2.0. |
+| 21 | open | Not reproduced yet; likely Rango's slow-query `WARN` plus sqlx's own slow-statement event. To check. |
+| 22 | documented | e37c896: raw-sql.md says where the ops live when `postgres` is off (`rango::sqlite::`, `rango::mysql::`, prelude). |

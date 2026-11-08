@@ -67,3 +67,27 @@ No BLOCKER. No source was read.
 Score: 7/10. For this app I would use Rango for the CRUD, bulk, keyset, relations and transaction parts, which behave as a SQL-literate engineer expects. I would not trust it yet for schema evolution of constraints (finding 3) or a spawned retrying worker (4); revenue reporting needs raw SQL.
 
 Counts: BLOCKER 0, PAINFUL 4, DOC-WRONG 2, MINOR 11.
+
+## (f) Decisions
+
+Checked against the tree at commit e37c896 (2026-11-08).
+
+| # | Decision | Commit or reason |
+|---|---|---|
+| 1 | fixed | 5768e48: every page, the first included, orders by the keyset column; one sentence explains why. |
+| 2 | fixed | 5768e48: examples use `app_user`, plus a note on quoting reserved names. |
+| 3 | fixed | fd58afe: a changed definition under the same name emits drop then add (SQLite: rebuild). |
+| 4 | fixed | 8116398: `atomic_retry` is spawnable; compile test `rango-tests/tests/spawn_atomic.rs`. |
+| 5 | fixed | 4de78a2: `WithRelated::into_inner`; 61c3323: models may derive `Clone`/`Debug`. |
+| 6 | fixed | 584126e: lookup and conflict columns are checked, `Error::Invalid` before any SQL, on every backend. |
+| 7 | fixed | 2ee1ccf: `select_as` emits the `db.query` span. |
+| 8 | documented | e37c896: TLS section in credentials.md. |
+| 9 | documented | e37c896: run the grants in the target database, `GRANT CONNECT`, roles are cluster-global. |
+| 10 | fixed | 5544c15: makemigrations.md states the naming rule. |
+| 11 | fixed | 484e3a0: `From<FieldError> for Error`. |
+| 12 | won't fix | Already signalled: a `WARN` is logged when exactly 1000 rows come back (pagination.md "Default limit"); `.unlimited()` lifts the cap. |
+| 13 | open | Same as campaign A #12: value type not checked for string column names. Planned after 0.2.0. |
+| 14 | open | 61c3323 documents `sum`/`avg` as `f64` and the exact workaround. GROUP BY in the query builder is a feature request, not planned for 0.2.0. |
+| 15 | documented | e37c896: dump/backup need a role that reads every table; 5544c15 fixes the schema-only count. |
+| 16 | documented | e37c896: crud.md says `update_or_create` overwrites the whole row, only the PK is kept. |
+| 17 | documented | e37c896: installation.md lists `serde_json`. |
