@@ -2094,3 +2094,45 @@ async fn test_mysql_bulk_update_mixed_types_over_several_chunks() {
     counters.sort_by_key(|c| c.id.0);
     assert_eq!(stored, counters);
 }
+
+// ── Missing table ────────────────────────────────────────────────────────────────
+
+#[derive(Model, Debug, Clone)]
+#[model(table = "never_migrated")]
+struct NeverMigrated {
+    id: FieldUuid,
+    label: FieldVarchar<1, 50>,
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-mysql"), ignore)]
+async fn test_mysql_missing_table_is_typed() {
+    let pool = pool().await;
+    raw_execute(&pool, "DROP TABLE IF EXISTS `never_migrated`", vec![])
+        .await
+        .unwrap();
+    let is_missing = |err: &Error| {
+        matches!(err, Error::TableMissing { table } if table == "never_migrated")
+            && err.to_string().contains("rango migrate")
+    };
+
+    let err = NeverMigrated::filter(&pool)
+        .all()
+        .await
+        .err()
+        .expect("read");
+    assert!(is_missing(&err), "read: {err:?}");
+
+    let row = NeverMigrated {
+        id: FieldUuid(Uuid::new_v4()),
+        label: FieldVarchar::new("x").unwrap(),
+    };
+    let err = insert(&pool, row).await.expect_err("write");
+    assert!(is_missing(&err), "write: {err:?}");
+
+    // A missing table in another database is reported by its bare name too.
+    let err = raw_execute(&pool, "SELECT 1 FROM `mysql`.`never_migrated`", vec![])
+        .await
+        .expect_err("qualified");
+    assert!(is_missing(&err), "qualified: {err:?}");
+}
