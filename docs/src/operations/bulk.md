@@ -52,7 +52,7 @@ Uses `INSERT ... ON CONFLICT (email) DO UPDATE SET ...` on PostgreSQL and SQLite
 
 ## Chunking
 
-PostgreSQL and MySQL have a limit of 65,535 bind parameters per query. SQLite has a limit of 999.
+PostgreSQL and MySQL have a limit of 65,535 bind parameters per query. SQLite (3.32+, bundled with sqlx) allows 32,766; Rango chunks at 32,000.
 Rango automatically splits large batches into chunks — transparent to the caller. Postgres `bulk_create` needs no chunking: UNNEST binds one array per column.
 
 ## Atomicity

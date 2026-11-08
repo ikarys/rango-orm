@@ -7,6 +7,10 @@ use sqlx::{Acquire, Sqlite};
 
 use super::*;
 
+/// Bound parameters per statement. SQLite >= 3.32 defaults `SQLITE_MAX_VARIABLE_NUMBER` to 32766
+/// (sqlx bundles 3.46); this keeps a margin below it.
+const MAX_PARAMS: usize = 32_000;
+
 #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "sqlite", db.operation = "INSERT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
 pub async fn bulk_create<'a, A, M>(executor: A, models: &[M]) -> Result<usize>
 where
@@ -17,7 +21,7 @@ where
         return Ok(0);
     }
     let n_cols = rango_orm_core::insert_values(&models[0]).len();
-    let chunk_size = (999 / n_cols).max(1); // SQLite limit: 999 bound params
+    let chunk_size = (MAX_PARAMS / n_cols).max(1);
     run_chunks(executor, models, chunk_size, |chunk| {
         build_bulk_create_sql::<M>(chunk)
     })
@@ -72,7 +76,7 @@ where
             )));
         }
     }
-    let chunk_size = (999 / (fields.len() + 1)).max(1);
+    let chunk_size = (MAX_PARAMS / (fields.len() + 1)).max(1);
     run_chunks(executor, models, chunk_size, |chunk| {
         build_bulk_update_sql::<M>(chunk, fields)
     })
@@ -131,7 +135,7 @@ where
         }
     }
     let n_cols = rango_orm_core::insert_values(&models[0]).len();
-    let chunk_size = (999 / n_cols).max(1);
+    let chunk_size = (MAX_PARAMS / n_cols).max(1);
     run_chunks(executor, models, chunk_size, |chunk| {
         build_bulk_upsert_sql::<M>(chunk, conflict_on)
     })

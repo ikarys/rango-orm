@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Perf: SQLite bulk operations chunk at 32,000 bound parameters instead of 999 (the bundled SQLite 3.46 allows 32,766): `bulk_create` of 1,000 rows is one statement.
+- Docs: `makemigrations` detection table lists renames, constraint, index and FK changes and the SQLite rebuild; `CheckConstraint::new` (not `raw`); partial unique indexes on Postgres and SQLite; typed columns first in the quick start with PostgreSQL / MySQL connect examples; `FieldPassword` hashing cost.
 - Perf: `bulk_create`, `bulk_update` and `bulk_upsert` no longer open a transaction when the work is a single statement (one chunk, or the Postgres `UNNEST` path): one statement is already atomic. Several chunks still share one transaction (a savepoint inside `atomic`).
 - Perf: `.exists()` runs `SELECT EXISTS(SELECT 1 ...)` instead of `SELECT COUNT(*)`, so it stops at the first matching row.
 - Fix: `rango restore` records the applied migrations. The dump carries the names from `_rango_migrations` (new optional `migrations` field, dump version unchanged); restore recreates the tracking table and inserts them in the same transaction as the schema, so `rango migrate` after a restore into a fresh database is a no-op instead of replaying 0002 (`duplicate column name`). Postgres, SQLite, MySQL / MariaDB. Dumps made before this change restore as before and print a warning. A data-only restore into an existing schema leaves the tracking table alone.
