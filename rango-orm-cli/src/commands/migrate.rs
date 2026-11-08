@@ -56,11 +56,7 @@ async fn run_postgres(
 
     let result = async {
         sqlx::query(
-            "CREATE TABLE IF NOT EXISTS _rango_migrations (
-                id         SERIAL PRIMARY KEY,
-                name       TEXT NOT NULL UNIQUE,
-                applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
-            )",
+            tracking_table_ddl(BackendKind::Postgres),
         )
         .execute(&mut *conn)
         .await
@@ -97,11 +93,7 @@ async fn run_sqlite(database_url: &str, migrations_dir: &str) -> Result<()> {
 
     // SQLite serialises writers, so no advisory lock is needed.
     sqlx::query(
-        "CREATE TABLE IF NOT EXISTS _rango_migrations (
-            id         INTEGER PRIMARY KEY AUTOINCREMENT,
-            name       TEXT NOT NULL UNIQUE,
-            applied_at TEXT NOT NULL DEFAULT (datetime('now'))
-        )",
+        tracking_table_ddl(BackendKind::Sqlite),
     )
     .execute(&pool)
     .await
@@ -161,11 +153,7 @@ async fn run_mysql(database_url: &str, migrations_dir: &str) -> Result<()> {
 
     let result = async {
         sqlx::query(
-            "CREATE TABLE IF NOT EXISTS _rango_migrations (
-                id         BIGINT AUTO_INCREMENT PRIMARY KEY,
-                name       VARCHAR(255) NOT NULL UNIQUE,
-                applied_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
+            tracking_table_ddl(BackendKind::Mysql),
         )
         .execute(&mut *conn)
         .await
@@ -186,6 +174,27 @@ async fn run_mysql(database_url: &str, migrations_dir: &str) -> Result<()> {
         .await;
 
     finish(result, unlock, "Failed to release the migration lock")
+}
+
+/// `CREATE TABLE IF NOT EXISTS` for the migration tracking table (also used by `restore`).
+pub(crate) fn tracking_table_ddl(backend: BackendKind) -> &'static str {
+    match backend {
+        BackendKind::Sqlite => "CREATE TABLE IF NOT EXISTS _rango_migrations (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            name       TEXT NOT NULL UNIQUE,
+            applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )",
+        BackendKind::Mysql => "CREATE TABLE IF NOT EXISTS _rango_migrations (
+                id         BIGINT AUTO_INCREMENT PRIMARY KEY,
+                name       VARCHAR(255) NOT NULL UNIQUE,
+                applied_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
+        _ => "CREATE TABLE IF NOT EXISTS _rango_migrations (
+                id         SERIAL PRIMARY KEY,
+                name       TEXT NOT NULL UNIQUE,
+                applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )",
+    }
 }
 
 // ─── Shared logic ─────────────────────────────────────────────────────────────
