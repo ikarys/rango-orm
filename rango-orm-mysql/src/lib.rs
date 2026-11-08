@@ -29,27 +29,6 @@ mod query_builder;
 mod row;
 mod transaction;
 
-/// Newtype wrapper around MySqlPool that implements RangoBackend.
-/// Use this when you need the backend trait — for direct DB calls use MySqlPool directly.
-#[derive(Clone)]
-pub struct RangoMySqlPool(pub MySqlPool);
-
-impl std::ops::Deref for RangoMySqlPool {
-    type Target = MySqlPool;
-    fn deref(&self) -> &MySqlPool {
-        &self.0
-    }
-}
-
-impl rango_orm_core::RangoBackend for RangoMySqlPool {
-    fn backend_kind(&self) -> rango_orm_core::BackendKind {
-        rango_orm_core::BackendKind::Mysql
-    }
-    fn placeholder(&self, _n: usize) -> String {
-        "?".to_string()
-    }
-}
-
 /// Connect to MySQL 8.0+ / MariaDB 10.6+. The session runs in UTC (`DATETIME` has no time zone)
 /// with strict SQL mode, so invalid values are rejected instead of silently truncated.
 /// `mariadb://` URLs are accepted as an alias of `mysql://`.
