@@ -115,38 +115,41 @@ pub fn diff(old: &Snapshot, new_schemas: &[TableSchema]) -> Vec<SchemaDiff> {
                     }
                 }
 
-                // Added constraints
-                let old_constraint_names: HashSet<&str> = old_table
+                // A constraint is identified by name; one whose definition changed under
+                // the same name is dropped then re-added (drops first: the names collide).
+                let old_defs: HashMap<&str, &str> = old_table
                     .constraints
                     .iter()
-                    .map(|c| c.name.as_str())
+                    .map(|c| (c.name.as_str(), c.definition.as_str()))
                     .collect();
-                for (i, constraint) in schema.constraints.iter().enumerate() {
-                    let name = constraint_name(&schema.table_name, constraint, i);
-                    if !old_constraint_names.contains(name.as_str()) {
-                        diffs.push(SchemaDiff::AddConstraint {
-                            table: schema.table_name.clone(),
-                            constraint: SnapshotConstraint {
-                                name,
-                                definition: constraint_definition(constraint),
-                            },
-                        });
-                    }
-                }
-
-                // Dropped constraints
-                let new_constraint_names: HashSet<String> = schema
+                let new_constraints: HashMap<String, String> = schema
                     .constraints
                     .iter()
                     .enumerate()
-                    .map(|(i, c)| constraint_name(&schema.table_name, c, i))
+                    .map(|(i, c)| {
+                        (
+                            constraint_name(&schema.table_name, c, i),
+                            constraint_definition(c),
+                        )
+                    })
                     .collect();
                 for old_constraint in &old_table.constraints {
-                    if !new_constraint_names.contains(&old_constraint.name) {
+                    if new_constraints.get(&old_constraint.name) != Some(&old_constraint.definition)
+                    {
                         diffs.push(SchemaDiff::DropConstraint {
                             table: schema.table_name.clone(),
                             name: old_constraint.name.clone(),
                             partial: old_constraint.definition.contains(" WHERE "),
+                        });
+                    }
+                }
+                for (i, constraint) in schema.constraints.iter().enumerate() {
+                    let name = constraint_name(&schema.table_name, constraint, i);
+                    let definition = constraint_definition(constraint);
+                    if old_defs.get(name.as_str()) != Some(&definition.as_str()) {
+                        diffs.push(SchemaDiff::AddConstraint {
+                            table: schema.table_name.clone(),
+                            constraint: SnapshotConstraint { name, definition },
                         });
                     }
                 }
@@ -317,7 +320,7 @@ fn references_changed(old: Option<&SnapshotFk>, new: Option<&FkReference>) -> bo
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rango_orm_core::{ColumnDef, ColumnType};
+    use rango_orm_core::{ColumnDef, ColumnType, constraints::Constraint};
 
     fn text_col(name: &str) -> ColumnDef {
         ColumnDef {
@@ -413,5 +416,30 @@ mod tests {
             result[0],
             SchemaDiff::DropConstraint { partial: true, .. }
         ));
+    }
+
+    fn constrained(constraint: Constraint) -> TableSchema {
+        TableSchema {
+            constraints: vec![constraint],
+            ..simple_table("t")
+        }
+    }
+
+    #[test]
+    fn changed_constraint_definition_is_dropped_then_added() {
+        use rango_orm_core::constraints::{CheckConstraint, UniqueConstraint};
+        let check = |sql| Constraint::Check(CheckConstraint::new(sql).name("chk"));
+        let old = Snapshot::from_schemas(&[constrained(check("id > 1"))]);
+        assert!(diff(&old, &[constrained(check("id > 1"))]).is_empty());
+        let d = diff(&old, &[constrained(check("id > 2"))]);
+        assert!(matches!(d[0], SchemaDiff::DropConstraint { .. }));
+        assert!(matches!(d[1], SchemaDiff::AddConstraint { .. }));
+        assert_eq!(d.len(), 2);
+
+        let uniq = |cond: &str| {
+            Constraint::Unique(UniqueConstraint::on(&["name"]).condition(cond).name("u"))
+        };
+        let old = Snapshot::from_schemas(&[constrained(uniq("id > 1"))]);
+        assert_eq!(diff(&old, &[constrained(uniq("id > 2"))]).len(), 2);
     }
 }

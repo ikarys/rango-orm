@@ -19,7 +19,7 @@ Found 3 model(s):
 📸 Snapshot updated.
 ```
 
-The file is named `NNNN_<tables>.sql`: the number is the next free one, followed by the tables the migration touches in alphabetical order.
+The file is named `NNNN_<label>.sql`. `NNNN` is the next free number (highest existing prefix plus one, four digits). `<label>` is the names of the tables the migration touches (including M2M pivot tables), sorted alphabetically and joined with `_`, for example `0002_event.sql` or `0001_post_tag_user.sql`. When that joined string is longer than 40 characters (typically when many tables change at once) the label is `auto`, for example `0001_auto.sql`.
 
 ## Options
 
@@ -80,8 +80,8 @@ The snapshot (`migrations/snapshot.json`) tracks the current known state of your
 | `#[field(unique)]` added or removed | `ALTER TABLE ... ADD CONSTRAINT ... UNIQUE`, or the backend's drop (SQLite: table rebuild) |
 | Index added or removed (`#[field(index)]`, foreign keys) | `CREATE INDEX IF NOT EXISTS ...` / `DROP INDEX ...` |
 | Foreign key target or `on_delete` changed | `DROP CONSTRAINT` + `ADD CONSTRAINT ... REFERENCES ...` (SQLite: table rebuild) |
-| `CheckConstraint` / `UniqueConstraint` added or removed | `ALTER TABLE ... ADD/DROP CONSTRAINT ...` (SQLite: table rebuild) |
-| Partial unique constraint (`.condition(..)`) added or removed | `CREATE UNIQUE INDEX ... WHERE ...` / `DROP INDEX` (Postgres and SQLite; skipped with a comment on MySQL / MariaDB) |
+| `CheckConstraint` / `UniqueConstraint` added, removed, or its SQL / columns changed under the same name | `ALTER TABLE ... ADD/DROP CONSTRAINT ...` (SQLite: table rebuild) |
+| Partial unique constraint (`.condition(..)`) added, removed or its condition changed | `CREATE UNIQUE INDEX ... WHERE ...` / `DROP INDEX` (Postgres and SQLite; skipped with a comment on MySQL / MariaDB) |
 
 ## SQLite limitations
 

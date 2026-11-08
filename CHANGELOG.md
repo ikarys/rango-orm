@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fix: `rango makemigrations` detects a `CheckConstraint` (or partial unique condition) whose SQL changed while its name stayed the same: it emits a drop then an add (SQLite: table rebuild) instead of "Nothing to migrate".
+- Docs: `makemigrations` migration file naming rule (`NNNN_<tables>.sql`, or `NNNN_auto.sql` above 40 characters).
 - Perf: SQLite bulk operations chunk at 32,000 bound parameters instead of 999 (the bundled SQLite 3.46 allows 32,766): `bulk_create` of 1,000 rows is one statement.
 - Docs: `makemigrations` detection table lists renames, constraint, index and FK changes and the SQLite rebuild; `CheckConstraint::new` (not `raw`); partial unique indexes on Postgres and SQLite; typed columns first in the quick start with PostgreSQL / MySQL connect examples; `FieldPassword` hashing cost.
 - Perf: `bulk_create`, `bulk_update` and `bulk_upsert` no longer open a transaction when the work is a single statement (one chunk, or the Postgres `UNNEST` path): one statement is already atomic. Several chunks still share one transaction (a savepoint inside `atomic`).
