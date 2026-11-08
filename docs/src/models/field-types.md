@@ -25,6 +25,8 @@ All field types live in `rango::prelude::*`.
 | `FieldUrl` | `VARCHAR(2048)` | `TEXT` | |
 | `FieldPassword<MIN, MAX>` | `TEXT` | `TEXT` | MIN / MAX bound the plain password, which is stored as an argon2id hash: the column is always `TEXT` (`LONGTEXT` on MySQL / MariaDB) |
 
+`FieldPassword` hashes with argon2id on every write. This is deliberately slow (about 200 ms per value in a debug build, much less in release), so a bulk insert of users pays it per row.
+
 ## Numeric types
 
 | Rust type | SQL (Postgres) | SQL (SQLite) | SQL (MySQL / MariaDB) | Notes |
