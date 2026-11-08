@@ -15,7 +15,7 @@ Use a unique, indexed column, such as a primary key or unique timestamp. Cost is
 ```rust,ignore
 let mut last = None;
 loop {
-    let mut q = User::filter(&pool).limit(100);
+    let mut q = User::filter(&pool).order_by(User::ID).limit(100);
     if let Some(id) = last {
         q = q.after(User::ID, id);
     }
@@ -24,6 +24,8 @@ loop {
     last = Some(row.id.clone());
 }
 ```
+
+Always call `.order_by(User::ID)` (the keyset column) on the first page too. `.after()` only puts its column first on the pages that call it. Without `order_by`, page 1 uses the model's default `ordering`, later pages use the keyset column, and rows are silently skipped.
 
 ## Default limit
 When no limit is set, the default cap is 1000 rows, and a `WARN` is logged if exactly 1000 rows come back. Use `.unlimited()` to remove it.
