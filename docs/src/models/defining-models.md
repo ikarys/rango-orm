@@ -15,6 +15,8 @@ pub struct Article {
 }
 ```
 
+A model is a normal struct, so it can derive other traits next to `Model`, for example `#[derive(Model, Clone, Debug)]`. A struct with a `FieldPassword` field prints `<redacted>` for it in `Debug`. `FieldPassword::new`, `verify` and `from_hash` are documented in [Field types](./field-types.md).
+
 ## Table name
 
 By default, the table name is the snake_case of the struct name. Tables are never prefixed.
