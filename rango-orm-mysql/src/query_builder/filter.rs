@@ -103,6 +103,9 @@ where
     fn order_first(mut self, col: &str) -> Self {
         self = self.order_by(col);
         let last = self.order_by.pop().expect("order_by pushed one entry");
+        // Drop an earlier `order_by` on the same column: no duplicate ORDER BY term.
+        let prefix = format!("{} ", quote_ident(col.trim_start_matches('-')));
+        self.order_by.retain(|o| !o.starts_with(&prefix));
         self.order_by.insert(0, last);
         self
     }
