@@ -15,11 +15,12 @@ use sqlx::{
 
 pub use m2m::M2M;
 pub use ops::{
-    all, bulk_create, delete, get, get_or_create, insert, raw, raw_execute, raw_scalar, update,
+    all, bulk_create, bulk_update, bulk_upsert, delete, get, get_or_create, insert, raw,
+    raw_execute, raw_scalar, update, update_or_create,
 };
-pub use query_builder::{QueryBuilder, RangoFilterExt, SelectAs};
+pub use query_builder::{Conn, QueryBuilder, RangoFilterExt, SelectAs};
 pub use rango_orm_core::WithRelated;
-pub use transaction::{atomic, MySqlTransaction, TxFuture};
+pub use transaction::{atomic, atomic_retry, transaction, MySqlTransaction};
 
 mod error;
 pub mod m2m;
@@ -28,25 +29,14 @@ mod query_builder;
 mod row;
 mod transaction;
 
-/// Newtype wrapper around MySqlPool that implements RangoBackend.
-/// Use this when you need the backend trait — for direct DB calls use MySqlPool directly.
-#[derive(Clone)]
-pub struct RangoMySqlPool(pub MySqlPool);
-
-impl std::ops::Deref for RangoMySqlPool {
-    type Target = MySqlPool;
-    fn deref(&self) -> &MySqlPool {
-        &self.0
+/// Parse the URL; remote hosts get `ssl-mode=REQUIRED` unless the URL sets a mode.
+fn tls_default(url: &str) -> rango_orm_core::Result<MySqlConnectOptions> {
+    let mut opts = MySqlConnectOptions::from_str(url).map_err(db_err)?;
+    let explicit_ssl = url.contains("ssl-mode=") || url.contains("sslmode=");
+    if !explicit_ssl && opts.get_socket().is_none() && !is_local_host(opts.get_host()) {
+        opts = opts.ssl_mode(MySqlSslMode::Required);
     }
-}
-
-impl rango_orm_core::RangoBackend for RangoMySqlPool {
-    fn backend_kind(&self) -> rango_orm_core::BackendKind {
-        rango_orm_core::BackendKind::Mysql
-    }
-    fn placeholder(&self, _n: usize) -> String {
-        "?".to_string()
-    }
+    Ok(opts)
 }
 
 /// Connect to MySQL 8.0+ / MariaDB 10.6+. The session runs in UTC (`DATETIME` has no time zone)
@@ -61,11 +51,7 @@ pub async fn connect(url: &str) -> rango_orm_core::Result<MySqlPool> {
         Some(rest) => format!("mysql://{rest}"),
         None => url.to_string(),
     };
-    let mut opts = MySqlConnectOptions::from_str(&url).map_err(db_err)?;
-    let explicit_ssl = url.contains("ssl-mode=") || url.contains("sslmode=");
-    if !explicit_ssl && opts.get_socket().is_none() && !is_local_host(opts.get_host()) {
-        opts = opts.ssl_mode(MySqlSslMode::Required);
-    }
+    let opts = tls_default(&url)?;
     let opts = opts
         .charset("utf8mb4")
         .timezone(Some("+00:00".to_string()))
@@ -85,4 +71,30 @@ pub async fn connect(url: &str) -> rango_orm_core::Result<MySqlPool> {
         .connect_with(opts)
         .await
         .map_err(db_err)
+}
+
+#[cfg(test)]
+mod tls_tests {
+    use super::*;
+
+    #[test]
+    fn remote_hosts_require_tls_unless_the_url_says_otherwise() {
+        let mode = |url| tls_default(url).unwrap().get_ssl_mode();
+        assert!(matches!(
+            mode("mysql://u:p@db.example.com/d"),
+            MySqlSslMode::Required
+        ));
+        assert!(matches!(
+            mode("mysql://u:p@localhost/d"),
+            MySqlSslMode::Preferred
+        ));
+        assert!(matches!(
+            mode("mysql://u:p@127.0.0.1/d"),
+            MySqlSslMode::Preferred
+        ));
+        assert!(matches!(
+            mode("mysql://u:p@db.example.com/d?ssl-mode=disabled"),
+            MySqlSslMode::Disabled
+        ));
+    }
 }

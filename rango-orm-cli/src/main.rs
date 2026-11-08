@@ -26,9 +26,8 @@ enum Command {
 
     /// Scan models and generate migration files
     Makemigrations {
-        /// Directory to scan (default: src/)
-        #[arg(default_value = "src")]
-        path: String,
+        /// Directory to scan (default: `[models] src` in rango.toml, else src/)
+        path: Option<String>,
 
         /// Output directory for migration files (default: migrations/)
         #[arg(short, long, default_value = "migrations")]
@@ -138,7 +137,7 @@ enum Command {
 
     /// Apply pending migrations to the database
     Migrate {
-        /// Database URL (overrides DATABASE_URL from .env)
+        /// Database URL (overrides MIGRATE_DATABASE_URL, then DATABASE_URL)
         #[arg(short, long)]
         database_url: Option<String>,
 
@@ -169,6 +168,7 @@ fn main() -> Result<()> {
                      because the runtime never applied them. Remove it and use `#[model(table = \"...\")]` instead"
                 );
             }
+            let path = path.unwrap_or_else(|| cfg.models.src.clone());
             makemigrations::run(&path, &output, dry_run, check, yes)?;
         }
         Command::Export {
@@ -255,7 +255,7 @@ fn main() -> Result<()> {
             migrations,
         } => {
             let cfg = config::RangoConfig::load()?;
-            let url = cfg.resolve_database_url(database_url.as_deref())?;
+            let url = cfg.resolve_migrate_url(database_url.as_deref())?;
             let dir = if migrations == "migrations" {
                 cfg.migrations.dir.clone()
             } else {

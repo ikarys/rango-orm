@@ -1,7 +1,5 @@
 use argon2::Argon2;
-use argon2::password_hash::{
-    PasswordHash, PasswordHasher, PasswordVerifier, SaltString, rand_core::OsRng,
-};
+use argon2::password_hash::{PasswordHasher, PasswordVerifier, phc::PasswordHash};
 use chrono::{DateTime, NaiveDate, NaiveTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -60,34 +58,109 @@ impl<const P: u8, const S: u8> FieldDecimal<P, S> {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FieldText(pub String);
 
-/// VARCHAR with min/max length validation.
+/// VARCHAR with min/max length validation (in characters, not bytes).
+///
+/// The inner value is private: the only ways to build one are the validating
+/// [`new`](Self::new) / `TryFrom` / `Deserialize`, and decoding from a database row.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct FieldVarchar<const MIN: usize, const MAX: usize>(pub String);
+#[serde(try_from = "String")]
+pub struct FieldVarchar<const MIN: usize, const MAX: usize>(String);
 
 impl<const MIN: usize, const MAX: usize> FieldVarchar<MIN, MAX> {
     pub fn new(s: impl Into<String>) -> Result<Self, FieldError> {
         let s = s.into();
-        if s.len() < MIN {
+        let len = s.chars().count();
+        if len < MIN {
             return Err(FieldError(format!("Value too short (min {})", MIN)));
         }
-        if s.len() > MAX {
+        if len > MAX {
             return Err(FieldError(format!("Value too long (max {})", MAX)));
         }
         Ok(Self(s))
     }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn into_inner(self) -> String {
+        self.0
+    }
+
+    /// Wraps a value read from the database without re-validating it, so rows written
+    /// before a bound changed stay readable. Not for application code.
+    #[doc(hidden)]
+    pub fn from_db(s: String) -> Self {
+        Self(s)
+    }
 }
 
-/// Email field — validated on construction.
+impl<const MIN: usize, const MAX: usize> TryFrom<String> for FieldVarchar<MIN, MAX> {
+    type Error = FieldError;
+    fn try_from(s: String) -> Result<Self, FieldError> {
+        Self::new(s)
+    }
+}
+
+impl<const MIN: usize, const MAX: usize> std::ops::Deref for FieldVarchar<MIN, MAX> {
+    type Target = str;
+    fn deref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl<const MIN: usize, const MAX: usize> std::fmt::Display for FieldVarchar<MIN, MAX> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+/// Email field — validated on construction (inner value is private, see [`FieldVarchar`]).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct FieldEmail(pub String);
+#[serde(try_from = "String")]
+pub struct FieldEmail(String);
 
 impl FieldEmail {
     pub fn new(s: impl Into<String>) -> Result<Self, FieldError> {
         let s = s.into();
-        if !s.contains('@') || s.len() > 254 {
+        if !s.contains('@') || s.chars().count() > 254 {
             return Err(FieldError("Invalid email address".into()));
         }
         Ok(Self(s))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn into_inner(self) -> String {
+        self.0
+    }
+
+    /// Wraps a value read from the database without re-validating it. Not for application code.
+    #[doc(hidden)]
+    pub fn from_db(s: String) -> Self {
+        Self(s)
+    }
+}
+
+impl TryFrom<String> for FieldEmail {
+    type Error = FieldError;
+    fn try_from(s: String) -> Result<Self, FieldError> {
+        Self::new(s)
+    }
+}
+
+impl std::ops::Deref for FieldEmail {
+    type Target = str;
+    fn deref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for FieldEmail {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
     }
 }
 
@@ -104,6 +177,20 @@ impl FieldEmail {
 ///     #[serde(skip)]
 ///     password: FieldPassword<8, 128>,
 /// }
+/// ```
+///
+/// Serializing the field is a compile error:
+///
+/// ```compile_fail,E0277
+/// fn needs_serialize<T: serde::Serialize>() {}
+/// needs_serialize::<rango_orm_core::FieldPassword<8, 128>>();
+/// ```
+///
+/// So is deserializing it:
+///
+/// ```compile_fail,E0277
+/// fn needs_deserialize<T: serde::de::DeserializeOwned>() {}
+/// needs_deserialize::<rango_orm_core::FieldPassword<8, 128>>();
 /// ```
 #[derive(Clone, PartialEq)]
 pub struct FieldPassword<const MIN: usize, const MAX: usize> {
@@ -127,9 +214,8 @@ impl<const MIN: usize, const MAX: usize> FieldPassword<MIN, MAX> {
             return Err(FieldError(format!("Password too long (max {})", MAX)));
         }
 
-        let salt = SaltString::generate(&mut OsRng);
         let hash = Argon2::default()
-            .hash_password(plain.as_bytes(), &salt)
+            .hash_password(plain.as_bytes())
             .map_err(|e| FieldError(e.to_string()))?;
 
         Ok(Self {
@@ -156,9 +242,10 @@ impl<const MIN: usize, const MAX: usize> FieldPassword<MIN, MAX> {
     }
 }
 
-/// URL field — basic validation.
+/// URL field — basic validation (inner value is private, see [`FieldVarchar`]).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct FieldUrl(pub String);
+#[serde(try_from = "String")]
+pub struct FieldUrl(String);
 
 impl FieldUrl {
     pub fn new(s: impl Into<String>) -> Result<Self, FieldError> {
@@ -167,6 +254,40 @@ impl FieldUrl {
             return Err(FieldError("URL must start with http:// or https://".into()));
         }
         Ok(Self(s))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn into_inner(self) -> String {
+        self.0
+    }
+
+    /// Wraps a value read from the database without re-validating it. Not for application code.
+    #[doc(hidden)]
+    pub fn from_db(s: String) -> Self {
+        Self(s)
+    }
+}
+
+impl TryFrom<String> for FieldUrl {
+    type Error = FieldError;
+    fn try_from(s: String) -> Result<Self, FieldError> {
+        Self::new(s)
+    }
+}
+
+impl std::ops::Deref for FieldUrl {
+    type Target = str;
+    fn deref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for FieldUrl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
     }
 }
 
@@ -217,8 +338,10 @@ pub struct FieldJson(pub serde_json::Value);
 
 // ─── Range ───────────────────────────────────────────────────────────────────
 
+/// Integer bounded to `MIN..=MAX` (inner value is private, see [`FieldVarchar`]).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct FieldRange<const MIN: i64, const MAX: i64>(pub i64);
+#[serde(try_from = "i64")]
+pub struct FieldRange<const MIN: i64, const MAX: i64>(i64);
 
 impl<const MIN: i64, const MAX: i64> FieldRange<MIN, MAX> {
     pub fn new(val: i64) -> Result<Self, FieldError> {
@@ -229,6 +352,23 @@ impl<const MIN: i64, const MAX: i64> FieldRange<MIN, MAX> {
             )));
         }
         Ok(Self(val))
+    }
+
+    pub fn get(&self) -> i64 {
+        self.0
+    }
+
+    /// Wraps a value read from the database without re-validating it. Not for application code.
+    #[doc(hidden)]
+    pub fn from_db(v: i64) -> Self {
+        Self(v)
+    }
+}
+
+impl<const MIN: i64, const MAX: i64> TryFrom<i64> for FieldRange<MIN, MAX> {
+    type Error = FieldError;
+    fn try_from(v: i64) -> Result<Self, FieldError> {
+        Self::new(v)
     }
 }
 
@@ -307,6 +447,22 @@ impl ToSqlValue for FieldUrl {
 impl ToSqlValue for FieldBytes {
     fn to_sql_value(&self) -> SqlValue {
         SqlValue::Bytes(self.0.clone())
+    }
+}
+// Raw key values: what `ForeignKey<M>` holds (`Model::Pk`).
+impl ToSqlValue for Uuid {
+    fn to_sql_value(&self) -> SqlValue {
+        SqlValue::Uuid(*self)
+    }
+}
+impl ToSqlValue for i32 {
+    fn to_sql_value(&self) -> SqlValue {
+        SqlValue::Int(*self)
+    }
+}
+impl ToSqlValue for i64 {
+    fn to_sql_value(&self) -> SqlValue {
+        SqlValue::BigInt(*self)
     }
 }
 impl ToSqlValue for FieldUuid {
@@ -473,10 +629,12 @@ impl<const MIN: i64, const MAX: i64> ToSqlValue for Option<FieldRange<MIN, MAX>>
             .map_or(SqlValue::NullBigInt, |v| v.to_sql_value())
     }
 }
-impl<M> ToSqlValue for Option<ForeignKey<M>> {
+impl<M: crate::Model> ToSqlValue for Option<ForeignKey<M>> {
     fn to_sql_value(&self) -> SqlValue {
         self.as_ref()
-            .map_or(SqlValue::NullUuid, |v| v.to_sql_value())
+            .map_or_else(<M::Pk as crate::PrimaryKey>::null_value, |v| {
+                v.to_sql_value()
+            })
     }
 }
 
@@ -496,15 +654,38 @@ impl<M> ToSqlValue for Option<ForeignKey<M>> {
 ///     contributors: ManyToMany<User>,             // explicit pivot table
 /// }
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct ManyToMany<M>(
+#[derive(Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "<M as crate::Model>::Pk: Serialize",
+    deserialize = "<M as crate::Model>::Pk: serde::de::DeserializeOwned"
+))]
+pub struct ManyToMany<M: crate::Model>(
     /// Always empty when loaded from the database: use `.prefetch_related(Model::FIELD)`
     /// and `.prefetched::<M>()` to load the related rows.
-    pub Vec<uuid::Uuid>,
+    pub Vec<<M as crate::Model>::Pk>,
     std::marker::PhantomData<M>,
 );
 
-impl<M> ManyToMany<M> {
+// Manual impls: derives would require `M: Clone + Default + Debug`, but `M` is only a marker.
+impl<M: crate::Model> Clone for ManyToMany<M> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone(), std::marker::PhantomData)
+    }
+}
+
+impl<M: crate::Model> Default for ManyToMany<M> {
+    fn default() -> Self {
+        Self::empty()
+    }
+}
+
+impl<M: crate::Model> std::fmt::Debug for ManyToMany<M> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("ManyToMany").field(&self.0).finish()
+    }
+}
+
+impl<M: crate::Model> ManyToMany<M> {
     pub fn empty() -> Self {
         Self(Vec::new(), std::marker::PhantomData)
     }
@@ -512,8 +693,10 @@ impl<M> ManyToMany<M> {
 
 // ─── Foreign Key ─────────────────────────────────────────────────────────────
 
-/// A foreign key reference — stores the PK value of the related model.
-/// The related model type `M` is used for type safety and select_related.
+/// A foreign key reference: stores the primary key value of the related model.
+/// The value type follows the target's primary key (`Model::Pk`): `Uuid` for `FieldUuid`,
+/// `i32` for `FieldAutoInt`, `i64` for `FieldAutoBigInt`. The column type in the schema
+/// and migrations follows it too.
 ///
 /// # Example
 /// ```rust,ignore
@@ -523,28 +706,55 @@ impl<M> ManyToMany<M> {
 ///     author_id: ForeignKey<User>,
 /// }
 /// ```
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ForeignKey<M>(pub uuid::Uuid, std::marker::PhantomData<M>);
+#[derive(Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "<M as crate::Model>::Pk: Serialize",
+    deserialize = "<M as crate::Model>::Pk: serde::de::DeserializeOwned"
+))]
+pub struct ForeignKey<M: crate::Model>(pub <M as crate::Model>::Pk, std::marker::PhantomData<M>);
 
-impl<M> ForeignKey<M> {
-    pub fn new(id: uuid::Uuid) -> Self {
+// Manual impls: derives would require `M: Clone + Debug + PartialEq`, but `M` is only a marker.
+impl<M: crate::Model> Clone for ForeignKey<M> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<M: crate::Model> Copy for ForeignKey<M> {}
+
+impl<M: crate::Model> PartialEq for ForeignKey<M> {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
+    }
+}
+
+impl<M: crate::Model> Eq for ForeignKey<M> {}
+
+impl<M: crate::Model> std::hash::Hash for ForeignKey<M> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.0.hash(state);
+    }
+}
+
+impl<M: crate::Model> std::fmt::Debug for ForeignKey<M> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("ForeignKey").field(&self.0).finish()
+    }
+}
+
+impl<M: crate::Model> ForeignKey<M> {
+    pub fn new(id: <M as crate::Model>::Pk) -> Self {
         Self(id, std::marker::PhantomData)
     }
 
-    pub fn id(&self) -> uuid::Uuid {
+    pub fn id(&self) -> <M as crate::Model>::Pk {
         self.0
     }
 }
 
-impl<M> From<uuid::Uuid> for ForeignKey<M> {
-    fn from(id: uuid::Uuid) -> Self {
-        Self::new(id)
-    }
-}
-
-impl<M> ToSqlValue for ForeignKey<M> {
+impl<M: crate::Model> ToSqlValue for ForeignKey<M> {
     fn to_sql_value(&self) -> SqlValue {
-        SqlValue::Uuid(self.0)
+        self.0.to_sql_value()
     }
 }
 
@@ -636,6 +846,36 @@ mod tests {
     use super::*;
 
     #[test]
+    fn validated_fields_display_their_value() {
+        let name = FieldVarchar::<1, 10>::new("ada").unwrap();
+        let email = FieldEmail::new("ada@x.io").unwrap();
+        assert_eq!(format!("{name} <{email}>"), "ada <ada@x.io>");
+    }
+
+    #[test]
+    fn varchar_counts_chars_not_bytes() {
+        // 3 chars, 6 bytes
+        assert!(FieldVarchar::<1, 3>::new("éèà").is_ok());
+        assert!(FieldVarchar::<4, 10>::new("éèà").is_err());
+    }
+
+    #[test]
+    fn varchar_rejects_out_of_bounds() {
+        assert!(FieldVarchar::<1, 100>::new("").is_err());
+        assert!(FieldVarchar::<1, 100>::new("a".repeat(101)).is_err());
+        assert_eq!(FieldVarchar::<1, 100>::new("ok").unwrap().as_str(), "ok");
+    }
+
+    #[test]
+    fn deserialize_validates() {
+        assert!(serde_json::from_str::<FieldVarchar<1, 5>>("\"\"").is_err());
+        assert!(serde_json::from_str::<FieldEmail>("\"nope\"").is_err());
+        assert!(serde_json::from_str::<FieldUrl>("\"ftp://x\"").is_err());
+        assert!(serde_json::from_str::<FieldRange<0, 10>>("11").is_err());
+        assert!(serde_json::from_str::<FieldRange<0, 10>>("10").is_ok());
+    }
+
+    #[test]
     fn field_password_new_rejects_too_short() {
         assert!(FieldPassword::<8, 128>::new("short").is_err());
     }
@@ -722,12 +962,22 @@ impl<const P: u8, const S: u8> FilterValue<FieldDecimal<P, S>> for rust_decimal:
         SqlValue::Decimal(self)
     }
 }
-impl<M> FilterValue<ForeignKey<M>> for Uuid {
+impl<M: crate::Model<Pk = Uuid>> FilterValue<ForeignKey<M>> for Uuid {
     fn into_sql_value(self) -> SqlValue {
         SqlValue::Uuid(self)
     }
 }
-impl<M> FilterValue<ForeignKey<M>> for FieldUuid {
+impl<M: crate::Model<Pk = i32>> FilterValue<ForeignKey<M>> for i32 {
+    fn into_sql_value(self) -> SqlValue {
+        SqlValue::Int(self)
+    }
+}
+impl<M: crate::Model<Pk = i64>> FilterValue<ForeignKey<M>> for i64 {
+    fn into_sql_value(self) -> SqlValue {
+        SqlValue::BigInt(self)
+    }
+}
+impl<M: crate::Model<Pk = Uuid>> FilterValue<ForeignKey<M>> for FieldUuid {
     fn into_sql_value(self) -> SqlValue {
         SqlValue::Uuid(self.0)
     }

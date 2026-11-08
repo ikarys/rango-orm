@@ -2,7 +2,7 @@
 
 ## ForeignKey
 
-A `ForeignKey<M>` stores the UUID of a related model.
+A `ForeignKey<M>` stores the primary key of a related model. The column type follows the target's key: `UUID` for `FieldUuid` (the default), `INT` for `FieldInt` / `FieldAutoInt`, `BIGINT` for `FieldBigInt` / `FieldAutoBigInt`.
 
 ```rust
 use rango::prelude::*;
@@ -22,6 +22,26 @@ pub struct Post {
 ```
 
 The column is stored as `UUID` (Postgres) or `TEXT` (SQLite). Every FK column is indexed.
+
+Pointing at an integer key works the same way; the FK holds an `i32` / `i64`:
+
+```rust
+#[derive(Model)]
+pub struct Author {
+    pub id: FieldAutoBigInt,
+    pub name: FieldVarchar<1, 100>,
+}
+
+#[derive(Model)]
+pub struct Book {
+    pub id: FieldUuid,
+    pub author_id: ForeignKey<Author>,  // → BIGINT NOT NULL REFERENCES author(id)
+}
+
+let book_author = ForeignKey::<Author>::new(42_i64);
+```
+
+Only UUID, integer and bigint primary keys can be the target of a `ForeignKey` or `ManyToMany`.
 
 ### On delete
 
@@ -64,7 +84,7 @@ let results = Post::filter(&pool)
 
 for post in &results {
     let author = post.related::<User>();
-    println!("{} by {}", post.title.0, author.name.0);
+    println!("{} by {}", post.title, author.name);
 }
 ```
 
@@ -87,11 +107,11 @@ pub struct Tag {
 }
 ```
 
-This creates a pivot table `article_tag` with two UUID columns.
+This creates a pivot table `article_tag` with two key columns, each typed like the primary key it references (UUID here, INT or BIGINT for integer keys).
 
 ### M2M operations
 
-`M2M` works on every backend. `add` is idempotent (adding an existing link is a no-op).
+`M2M` works on every backend and takes a pool or a transaction (`&mut **tx` inside `atomic()`). `add` is idempotent (adding an existing link is a no-op).
 
 ```rust
 // Add a relation
@@ -115,6 +135,28 @@ M2M::<Article, Tag>::clear(&pool, &article).await?;
 // Check if relation exists
 let exists = M2M::<Article, Tag>::exists(&pool, &article, &tag).await?;
 ```
+
+### Adding many links at once
+
+`M2M::add` links one pair per call, and there is no bulk `add`: the pivot is not a model, so `bulk_create` does not apply. The pivot is a plain table, so write one multi-row `INSERT` with `raw_execute`. The table is `<table_a>_<table_b>` and the columns are `<table_a>_id` and `<table_b>_id` (table names, here `article_tag`, `article_id`, `tag_id`; `from_` / `to_` prefixes for a self-reference). The pair is the primary key, so `ON CONFLICT DO NOTHING` keeps it idempotent like `add`.
+
+```rust
+// PostgreSQL: `$n` placeholders. On SQLite and MySQL write `?` instead.
+let mut sql = String::from(r#"INSERT INTO "article_tag" ("article_id", "tag_id") VALUES "#);
+let mut params = Vec::new();
+for (i, tag) in tags.iter().enumerate() {
+    if i > 0 {
+        sql.push_str(", ");
+    }
+    sql.push_str(&format!("(${}, ${})", 2 * i + 1, 2 * i + 2));
+    params.push(SqlValue::Uuid(article.id.0));
+    params.push(SqlValue::Uuid(tag.id.0));
+}
+sql.push_str(" ON CONFLICT DO NOTHING");
+raw_execute(&pool, &sql, params).await?;
+```
+
+On MySQL quote the names with backticks and end the statement with `ON DUPLICATE KEY UPDATE article_id = article_id`. Only placeholders are built into the SQL string: the ids are bound. Keep each statement under the bind limit (see [Bulk operations](../operations/bulk.md#chunking)) and wrap several statements in `atomic()`. `M2M::set` is the better tool when you want to replace all links of one row.
 
 ### Self-referencing ManyToMany
 
@@ -149,7 +191,7 @@ let posts = Post::filter(&pool)
 
 for post in &posts {
     let comments = post.prefetched::<Comment>(); // &[Comment], zero SQL
-    println!("{} has {} comments", post.title.0, comments.len());
+    println!("{} has {} comments", post.title, comments.len());
 }
 ```
 

@@ -1,17 +1,18 @@
-use crate::migration::diff::{SchemaDiff, diff};
+use crate::migration::diff::{SchemaDiff, diff, sqlite_rebuilds};
 use crate::migration::renames::detect_renames;
-use crate::migration::scanner::{generate_pivot_table, scan_models};
+use crate::migration::scanner::{fk_type, generate_pivot_table, scan_models};
 use crate::migration::snapshot::Snapshot;
 use crate::migration::sql::generate_sql_from_diff;
 use anyhow::{Result, bail};
-use rango_orm_core::{BackendKind, ColumnType, TableSchema};
+use rango_orm_core::{BackendKind, TableSchema};
 use std::fs;
 use std::io::{IsTerminal, Write};
 
 /// MySQL rejects table/column names over 64 bytes. Constraint and index names are
 /// shortened by the SQL generator, but table names are also derived at runtime
 /// (M2M pivots), so they must fit as-is.
-/// Pivot columns are UUIDs, so both sides of a ManyToMany need a UUID primary key.
+/// Pivot columns follow the primary keys they reference, so both sides of a ManyToMany
+/// need a UUID, integer or bigint primary key.
 fn check_pivot_targets(schemas: &[TableSchema], pivots: &[TableSchema]) -> Result<()> {
     for pivot in pivots {
         for fk in pivot.columns.iter().filter_map(|c| c.references.as_ref()) {
@@ -20,10 +21,10 @@ fn check_pivot_targets(schemas: &[TableSchema], pivots: &[TableSchema]) -> Resul
                 .find(|s| s.table_name == fk.table)
                 .and_then(|s| s.columns.iter().find(|c| c.primary_key))
                 .map(|c| &c.col_type);
-            if let Some(t) = pk_type.filter(|t| **t != ColumnType::Uuid) {
+            if let Some(t) = pk_type.filter(|t| fk_type(t).is_none()) {
                 bail!(
                     "ManyToMany pivot \"{}\" references \"{}\", whose primary key is {:?}; \
-                     ManyToMany needs UUID primary keys on both models",
+                     ManyToMany needs a UUID, integer or bigint primary key on both models",
                     pivot.table_name,
                     fk.table,
                     t
@@ -90,7 +91,10 @@ pub fn run(
         return Ok(());
     }
 
-    let pivot_schemas: Vec<TableSchema> = m2m_relations.iter().map(generate_pivot_table).collect();
+    let pivot_schemas: Vec<TableSchema> = m2m_relations
+        .iter()
+        .map(|rel| generate_pivot_table(rel, &schemas))
+        .collect();
 
     println!("Found {} model(s):", schemas.len());
     for s in &schemas {
@@ -142,7 +146,13 @@ pub fn run(
     if !destructive.is_empty() {
         eprintln!("⚠️  Destructive changes: {}", destructive.join(", "));
     }
-    let sql = with_destructive_warning(generate_sql_from_diff(&diffs, backend), &destructive);
+    // SQLite cannot alter columns/constraints in place: those tables are rebuilt.
+    let sql_diffs = if backend == BackendKind::Sqlite {
+        sqlite_rebuilds(diffs.clone(), &schemas)
+    } else {
+        diffs.clone()
+    };
+    let sql = with_destructive_warning(generate_sql_from_diff(&sql_diffs, backend), &destructive);
 
     // --dry-run: print SQL, do not write files
     if dry_run {
@@ -189,6 +199,30 @@ fn check_not_null_additions(diffs: &[SchemaDiff]) -> Result<()> {
             && column.default.is_none()
             && !column.primary_key
         {
+            let dropped: Vec<&str> = diffs
+                .iter()
+                .filter_map(|d| match d {
+                    SchemaDiff::DropColumn { table: t, column } if t == table => {
+                        Some(column.as_str())
+                    }
+                    _ => None,
+                })
+                .collect();
+            if !dropped.is_empty() {
+                bail!(
+                    "Column \"{table}\".\"{}\" was added while {} dropped: this may be a rename \
+                     of \"{}\", which needs confirmation. Run `rango makemigrations` in a terminal and \
+                     answer `y`, or pass `--yes` to confirm every rename and drop non-interactively \
+                     (review the SQL with `--dry-run`). Otherwise add #[field(default = \"...\")] or make it Option<T>.",
+                    column.name,
+                    if dropped.len() == 1 {
+                        "another column was"
+                    } else {
+                        "other columns were"
+                    },
+                    dropped.join("\", \""),
+                );
+            }
             bail!(
                 "Cannot add NOT NULL column \"{}\".\"{}\" without a default: existing rows would violate it. Add #[field(default = \"...\")] or make it Option<T>.",
                 table,
@@ -257,6 +291,7 @@ fn migration_label(diffs: &[SchemaDiff]) -> String {
             SchemaDiff::AddConstraint { table, .. } => table.clone(),
             SchemaDiff::DropConstraint { table, .. } => table.clone(),
             SchemaDiff::RenameColumn { table, .. } => table.clone(),
+            SchemaDiff::RebuildTable { schema, .. } => schema.table_name.clone(),
         })
         .collect::<std::collections::HashSet<_>>()
         .into_iter()
@@ -359,6 +394,23 @@ mod tests {
             column: text_col("title"),
         }];
         assert!(check_not_null_additions(&diffs).is_err());
+    }
+
+    #[test]
+    fn unconfirmed_rename_error_mentions_rename_and_yes() {
+        let diffs = vec![
+            SchemaDiff::DropColumn {
+                table: "t".to_string(),
+                column: "name".to_string(),
+            },
+            SchemaDiff::AddColumn {
+                table: "t".to_string(),
+                column: text_col("title"),
+            },
+        ];
+        let msg = check_not_null_additions(&diffs).unwrap_err().to_string();
+        assert!(msg.contains("may be a rename of \"name\""), "{msg}");
+        assert!(msg.contains("--yes"), "{msg}");
     }
 
     #[test]

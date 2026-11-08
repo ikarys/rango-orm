@@ -43,9 +43,9 @@ macro_rules! bind {
 }
 
 pub fn bind_sql_values<'q>(
-    mut q: Query<'q, Sqlite, SqliteArguments<'q>>,
+    mut q: Query<'q, Sqlite, SqliteArguments>,
     values: Vec<SqlValue>,
-) -> Query<'q, Sqlite, SqliteArguments<'q>> {
+) -> Query<'q, Sqlite, SqliteArguments> {
     for val in values {
         q = bind!(q, val);
     }

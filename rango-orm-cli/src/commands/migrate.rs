@@ -10,7 +10,7 @@ const MIGRATION_LOCK_KEY: i64 = 0x72616e676f;
 pub async fn run(database_url: &str, migrations_dir: &str, after_connect: &[String]) -> Result<()> {
     // Detect backend from rango.toml
     let cfg = crate::config::RangoConfig::load().unwrap_or_default();
-    let backend = cfg.database.backend_kind();
+    let backend = cfg.backend_for(database_url);
 
     println!(
         "🔌 Connecting to database ({})...",
@@ -55,21 +55,16 @@ async fn run_postgres(
         .context("Failed to acquire the migration advisory lock")?;
 
     let result = async {
-        sqlx::query(
-            "CREATE TABLE IF NOT EXISTS _rango_migrations (
-                id         SERIAL PRIMARY KEY,
-                name       TEXT NOT NULL UNIQUE,
-                applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
-            )",
-        )
-        .execute(&mut *conn)
-        .await
-        .context("Failed to create _rango_migrations")?;
+        sqlx::query(tracking_table_ddl(BackendKind::Postgres))
+            .execute(&mut *conn)
+            .await
+            .context("Failed to create _rango_migrations")?;
 
         apply_pending::<sqlx::Postgres>(
             &mut *conn,
             migrations_dir,
             "INSERT INTO _rango_migrations (name) VALUES ($1)",
+            None,
         )
         .await
     }
@@ -80,15 +75,11 @@ async fn run_postgres(
         .execute(&mut *conn)
         .await;
 
-    if let Err(err) = unlock
-        && result.is_ok()
-    {
-        return Err(
-            anyhow::Error::from(err).context("Failed to release the migration advisory lock")
-        );
-    }
-
-    result
+    finish(
+        result,
+        unlock,
+        "Failed to release the migration advisory lock",
+    )
 }
 
 // ─── SQLite ───────────────────────────────────────────────────────────────────
@@ -99,27 +90,37 @@ async fn run_sqlite(database_url: &str, migrations_dir: &str) -> Result<()> {
         .context("Failed to connect to SQLite")?;
 
     // SQLite serialises writers, so no advisory lock is needed.
-    sqlx::query(
-        "CREATE TABLE IF NOT EXISTS _rango_migrations (
-            id         INTEGER PRIMARY KEY AUTOINCREMENT,
-            name       TEXT NOT NULL UNIQUE,
-            applied_at TEXT NOT NULL DEFAULT (datetime('now'))
-        )",
-    )
-    .execute(&pool)
-    .await
-    .context("Failed to create _rango_migrations")?;
+    sqlx::query(tracking_table_ddl(BackendKind::Sqlite))
+        .execute(&pool)
+        .await
+        .context("Failed to create _rango_migrations")?;
 
     let mut conn = pool
         .acquire()
         .await
         .context("Failed to acquire a SQLite connection")?;
-    apply_pending::<sqlx::Sqlite>(
+
+    // `PRAGMA foreign_keys` is a no-op inside a transaction, and a rebuild's DROP TABLE
+    // would otherwise fire ON DELETE CASCADE on child tables. Disable it around the
+    // migration, then re-enable it afterwards.
+    sqlx::query("PRAGMA foreign_keys = OFF")
+        .execute(&mut *conn)
+        .await
+        .context("Failed to disable foreign key checks")?;
+
+    let result = apply_pending::<sqlx::Sqlite>(
         &mut *conn,
         migrations_dir,
         "INSERT INTO _rango_migrations (name) VALUES (?)",
+        Some("PRAGMA foreign_key_check"),
     )
-    .await
+    .await;
+
+    let enable = sqlx::query("PRAGMA foreign_keys = ON")
+        .execute(&mut *conn)
+        .await;
+
+    finish(result, enable, "Failed to re-enable foreign key checks")
 }
 
 // ─── MySQL ────────────────────────────────────────────────────────────────────
@@ -147,21 +148,16 @@ async fn run_mysql(database_url: &str, migrations_dir: &str) -> Result<()> {
     }
 
     let result = async {
-        sqlx::query(
-            "CREATE TABLE IF NOT EXISTS _rango_migrations (
-                id         BIGINT AUTO_INCREMENT PRIMARY KEY,
-                name       VARCHAR(255) NOT NULL UNIQUE,
-                applied_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
-        )
-        .execute(&mut *conn)
-        .await
-        .context("Failed to create _rango_migrations")?;
+        sqlx::query(tracking_table_ddl(BackendKind::Mysql))
+            .execute(&mut *conn)
+            .await
+            .context("Failed to create _rango_migrations")?;
 
         apply_pending::<sqlx::MySql>(
             &mut *conn,
             migrations_dir,
             "INSERT INTO _rango_migrations (name) VALUES (?)",
+            None,
         )
         .await
     }
@@ -171,28 +167,63 @@ async fn run_mysql(database_url: &str, migrations_dir: &str) -> Result<()> {
         .execute(&mut *conn)
         .await;
 
-    if let Err(err) = unlock
-        && result.is_ok()
-    {
-        return Err(anyhow::Error::from(err).context("Failed to release the migration lock"));
-    }
+    finish(result, unlock, "Failed to release the migration lock")
+}
 
-    result
+/// `CREATE TABLE IF NOT EXISTS` for the migration tracking table (also used by `restore`).
+pub(crate) fn tracking_table_ddl(backend: BackendKind) -> &'static str {
+    match backend {
+        BackendKind::Sqlite => {
+            "CREATE TABLE IF NOT EXISTS _rango_migrations (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            name       TEXT NOT NULL UNIQUE,
+            applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )"
+        }
+        BackendKind::Mysql => {
+            "CREATE TABLE IF NOT EXISTS _rango_migrations (
+                id         BIGINT AUTO_INCREMENT PRIMARY KEY,
+                name       VARCHAR(255) NOT NULL UNIQUE,
+                applied_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+        }
+        _ => {
+            "CREATE TABLE IF NOT EXISTS _rango_migrations (
+                id         SERIAL PRIMARY KEY,
+                name       TEXT NOT NULL UNIQUE,
+                applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )"
+        }
+    }
 }
 
 // ─── Shared logic ─────────────────────────────────────────────────────────────
+
+/// Result of the migrations, or the cleanup error (unlock, re-enable FKs) when they succeeded:
+/// a migration error is never masked by a failed cleanup.
+fn finish<T>(
+    result: Result<()>,
+    cleanup: std::result::Result<T, sqlx::Error>,
+    what: &str,
+) -> Result<()> {
+    match cleanup {
+        Err(err) if result.is_ok() => Err(anyhow::Error::from(err).context(what.to_string())),
+        _ => result,
+    }
+}
 
 /// Apply every pending migration, each in its own transaction. Backend-agnostic.
 async fn apply_pending<DB: sqlx::Database>(
     conn: &mut DB::Connection,
     migrations_dir: &str,
     record_sql: &str,
+    fk_check: Option<&str>,
 ) -> Result<()>
 where
     for<'c> &'c mut DB::Connection: sqlx::Executor<'c, Database = DB>,
     for<'q> String: sqlx::Encode<'q, DB> + sqlx::Decode<'q, DB> + sqlx::Type<DB>,
     usize: sqlx::ColumnIndex<DB::Row>,
-    for<'q> DB::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    DB::Arguments: sqlx::IntoArguments<DB>,
 {
     let rows: Vec<String> = sqlx::query_scalar("SELECT name FROM _rango_migrations")
         .fetch_all(&mut *conn)
@@ -212,11 +243,20 @@ where
         let mut tx = sqlx::Connection::begin(&mut *conn)
             .await
             .with_context(|| format!("Failed to begin transaction for {}", name))?;
-        sqlx::raw_sql(&sql)
+        sqlx::raw_sql(sqlx::AssertSqlSafe(&*sql))
             .execute(&mut *tx)
             .await
             .with_context(|| format!("Failed to apply {}", name))?;
-        sqlx::query(record_sql)
+        if let Some(fk_check) = fk_check
+            && !sqlx::raw_sql(sqlx::AssertSqlSafe(fk_check))
+                .fetch_all(&mut *tx)
+                .await
+                .with_context(|| format!("Failed to check foreign keys for {}", name))?
+                .is_empty()
+        {
+            bail!("{name} leaves foreign key violations; rolled back");
+        }
+        sqlx::query(sqlx::AssertSqlSafe(record_sql))
             .bind(name.clone())
             .execute(&mut *tx)
             .await

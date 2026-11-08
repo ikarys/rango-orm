@@ -29,7 +29,9 @@ pub async fn run(
     let requested: Vec<String> = table.map(str::to_string).into_iter().collect();
 
     let mut data = Vec::new();
-    for (name, rows) in fetch_tables(cfg.database.backend_kind(), database_url, &requested).await? {
+    for (name, rows) in
+        fetch_tables(cfg.backend_for(database_url), database_url, &requested).await?
+    {
         for mut row in rows {
             // Add table name for multi-table exports
             if table.is_none() {
@@ -92,6 +94,49 @@ fn select_tables(
     Ok(super::import::order_by_dependencies(wanted, edges))
 }
 
+const PG_TABLES: &str =
+    "SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename";
+const SQLITE_TABLES: &str =
+    "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name";
+const MYSQL_TABLES: &str = "SELECT CAST(TABLE_NAME AS CHAR) FROM information_schema.TABLES \
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_TYPE = 'BASE TABLE' \
+     ORDER BY TABLE_NAME";
+
+/// Single-column text query (table names), shared by the three backends.
+async fn list_names<DB: sqlx::Database>(
+    pool: &sqlx::Pool<DB>,
+    sql: &'static str,
+    what: &str,
+) -> Result<Vec<String>>
+where
+    for<'c> &'c sqlx::Pool<DB>: sqlx::Executor<'c, Database = DB>,
+    for<'q> String: sqlx::Decode<'q, DB> + sqlx::Type<DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    DB::Arguments: sqlx::IntoArguments<DB>,
+{
+    sqlx::query_scalar(sqlx::AssertSqlSafe(sql))
+        .fetch_all(pool)
+        .await
+        .with_context(|| format!("Failed to {what}"))
+}
+
+/// `(child, parent)` foreign key pairs from a catalog query, shared by SQLite and MySQL.
+async fn list_edges<DB: sqlx::Database>(
+    pool: &sqlx::Pool<DB>,
+    sql: &'static str,
+) -> Result<Vec<(String, String)>>
+where
+    for<'c> &'c sqlx::Pool<DB>: sqlx::Executor<'c, Database = DB>,
+    for<'q> String: sqlx::Decode<'q, DB> + sqlx::Type<DB>,
+    usize: sqlx::ColumnIndex<DB::Row>,
+    DB::Arguments: sqlx::IntoArguments<DB>,
+{
+    sqlx::query_as(sqlx::AssertSqlSafe(sql))
+        .fetch_all(pool)
+        .await
+        .context("Failed to read foreign keys")
+}
+
 // ─── Postgres export ──────────────────────────────────────────────────────────
 
 async fn export_postgres(database_url: &str, requested: &[String]) -> Result<Vec<(String, Rows)>> {
@@ -104,7 +149,11 @@ async fn export_postgres(database_url: &str, requested: &[String]) -> Result<Vec
         .await
         .context("Failed to acquire a connection")?;
     let edges = super::import::fk_edges_postgres(&mut conn).await?;
-    let tables = select_tables(list_tables_postgres(&pool).await?, requested, &edges)?;
+    let tables = select_tables(
+        list_names(&pool, PG_TABLES, "list tables").await?,
+        requested,
+        &edges,
+    )?;
     let mut binary = HashMap::new();
     for t in &tables {
         binary.insert(
@@ -137,7 +186,7 @@ async fn export_postgres(database_url: &str, requested: &[String]) -> Result<Vec
                 quote_ident(&t)
             );
         }
-        let mut query = sqlx::query_scalar::<_, String>(&sql);
+        let mut query = sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(&*sql));
         for c in &numeric {
             query = query.bind(c);
         }
@@ -165,20 +214,6 @@ async fn export_postgres(database_url: &str, requested: &[String]) -> Result<Vec
     Ok(out)
 }
 
-async fn list_tables_postgres(pool: &sqlx::PgPool) -> Result<Vec<String>> {
-    use sqlx::Row;
-    let rows = sqlx::query(
-        "SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename",
-    )
-    .fetch_all(pool)
-    .await
-    .context("Failed to list tables")?;
-    Ok(rows
-        .into_iter()
-        .map(|r| r.try_get::<String, _>(0).unwrap_or_default())
-        .collect())
-}
-
 // ─── SQLite export ────────────────────────────────────────────────────────────
 
 async fn export_sqlite(database_url: &str, requested: &[String]) -> Result<Vec<(String, Rows)>> {
@@ -188,19 +223,22 @@ async fn export_sqlite(database_url: &str, requested: &[String]) -> Result<Vec<(
         .await
         .context("Failed to connect to SQLite")?;
 
-    let edges: Vec<(String, String)> = sqlx::query_as(
+    let edges = list_edges(
+        &pool,
         "SELECT m.name, f.\"table\" FROM sqlite_master m, pragma_foreign_key_list(m.name) f \
          WHERE m.type = 'table'",
     )
-    .fetch_all(&pool)
-    .await
-    .context("Failed to read foreign keys")?;
-    let tables = select_tables(list_tables_sqlite(&pool).await?, requested, &edges)?;
+    .await?;
+    let tables = select_tables(
+        list_names(&pool, SQLITE_TABLES, "list tables").await?,
+        requested,
+        &edges,
+    )?;
 
     let mut out = Vec::new();
     for t in tables {
         let sql = format!("SELECT * FROM {}", quote_ident(&t));
-        let fetched = sqlx::query(&sql)
+        let fetched = sqlx::query(sqlx::AssertSqlSafe(&*sql))
             .fetch_all(&pool)
             .await
             .with_context(|| format!("Failed to export table {}", t))?;
@@ -216,20 +254,6 @@ async fn export_sqlite(database_url: &str, requested: &[String]) -> Result<Vec<(
         out.push((t, rows));
     }
     Ok(out)
-}
-
-async fn list_tables_sqlite(pool: &sqlx::SqlitePool) -> Result<Vec<String>> {
-    use sqlx::Row;
-    let rows = sqlx::query(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
-    )
-    .fetch_all(pool)
-    .await
-    .context("Failed to list tables")?;
-    Ok(rows
-        .into_iter()
-        .map(|r| r.try_get::<String, _>(0).unwrap_or_default())
-        .collect())
 }
 
 fn sqlite_column_to_json(row: &sqlx::sqlite::SqliteRow, i: usize) -> serde_json::Value {
@@ -267,20 +291,23 @@ async fn export_mysql(database_url: &str, requested: &[String]) -> Result<Vec<(S
         .await
         .context("Failed to connect to MySQL")?;
 
-    let edges: Vec<(String, String)> = sqlx::query_as(
+    let edges = list_edges(
+        &pool,
         "SELECT CAST(TABLE_NAME AS CHAR), CAST(REFERENCED_TABLE_NAME AS CHAR) \
          FROM information_schema.KEY_COLUMN_USAGE \
          WHERE TABLE_SCHEMA = DATABASE() AND REFERENCED_TABLE_NAME IS NOT NULL",
     )
-    .fetch_all(&pool)
-    .await
-    .context("Failed to read foreign keys")?;
-    let tables = select_tables(list_tables_mysql(&pool).await?, requested, &edges)?;
+    .await?;
+    let tables = select_tables(
+        list_names(&pool, MYSQL_TABLES, "list tables").await?,
+        requested,
+        &edges,
+    )?;
 
     let mut out = Vec::new();
     for t in tables {
         let sql = format!("SELECT * FROM {}", quote_ident_mysql(&t));
-        let fetched = sqlx::raw_sql(&sql)
+        let fetched = sqlx::raw_sql(sqlx::AssertSqlSafe(&*sql))
             .fetch_all(&pool)
             .await
             .with_context(|| format!("Failed to export table {}", t))?;
@@ -300,22 +327,6 @@ async fn export_mysql(database_url: &str, requested: &[String]) -> Result<Vec<(S
     Ok(out)
 }
 
-async fn list_tables_mysql(pool: &sqlx::MySqlPool) -> Result<Vec<String>> {
-    use sqlx::Row;
-    let rows = sqlx::query(
-        "SELECT CAST(TABLE_NAME AS CHAR) FROM information_schema.TABLES \
-         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_TYPE = 'BASE TABLE' \
-         ORDER BY TABLE_NAME",
-    )
-    .fetch_all(pool)
-    .await
-    .context("Failed to list tables")?;
-    Ok(rows
-        .into_iter()
-        .map(|r| r.try_get::<String, _>(0).unwrap_or_default())
-        .collect())
-}
-
 #[derive(Clone, Copy, PartialEq)]
 enum TextKind {
     Text,
@@ -332,7 +343,7 @@ async fn text_column_kinds_mysql(
     table: &str,
 ) -> Result<HashMap<String, TextKind>> {
     use sqlx::Row;
-    let rows = sqlx::query(
+    let rows = sqlx::query(sqlx::AssertSqlSafe(
         "SELECT CAST(c.COLUMN_NAME AS CHAR), \
            c.DATA_TYPE = 'json' OR EXISTS ( \
              SELECT 1 FROM information_schema.TABLE_CONSTRAINTS tc \
@@ -345,7 +356,7 @@ async fn text_column_kinds_mysql(
          FROM information_schema.COLUMNS c \
          WHERE c.TABLE_SCHEMA = DATABASE() AND c.TABLE_NAME = ? \
            AND (c.CHARACTER_SET_NAME IS NOT NULL OR c.DATA_TYPE = 'json')",
-    )
+    ))
     .bind(table)
     .fetch_all(pool)
     .await

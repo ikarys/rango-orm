@@ -26,10 +26,12 @@ async fn real_project_postgres() {
         async move {
             let pool = sqlx::PgPool::connect(&url).await.unwrap();
             for t in tables {
-                sqlx::query(&format!("DROP TABLE IF EXISTS \"{t}\" CASCADE"))
-                    .execute(&pool)
-                    .await
-                    .unwrap();
+                sqlx::query(sqlx::AssertSqlSafe(&*format!(
+                    "DROP TABLE IF EXISTS \"{t}\" CASCADE"
+                )))
+                .execute(&pool)
+                .await
+                .unwrap();
             }
             pool.close().await;
         }

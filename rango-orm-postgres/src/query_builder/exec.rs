@@ -1,9 +1,6 @@
-use crate::ops::DEFAULT_QUERY_LIMIT;
 use crate::related::WithRelated;
 use crate::row::{PgPrefixedRow, PgRangoRow, PgRangoRow2, decode_all};
-use rango_orm_core::{
-    ColumnRef, FromRow, Model, ModelValues, Partial, RangoRow, SqlValue, quote_ident,
-};
+use rango_orm_core::{ColumnRef, FromRow, Model, ModelValues, Partial, RangoRow, SqlValue};
 use rango_orm_core::{Error, Result};
 use sqlx::Postgres;
 use std::any::Any;
@@ -14,7 +11,7 @@ use sqlx::Row;
 use super::*;
 use rango_orm_core::related::{row_key, sql_value_key};
 
-impl<M> QueryBuilder<M>
+impl<'a, M> QueryBuilder<'a, M>
 where
     M: Model + ModelValues + FromRow,
 {
@@ -24,16 +21,18 @@ where
     /// Returns `Vec<WithRelated<M>>` — each item derefs to `M`, and related
     /// objects are accessible via `.related::<R>()` / `.prefetched::<R>()`.
     #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "postgresql", db.operation = "SELECT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
-    pub async fn all(self) -> Result<Vec<WithRelated<M>>> {
-        self.ensure_valid()?;
-        let (sql, binds) = self.select_sql();
+    pub async fn all(mut self) -> Result<Vec<WithRelated<M>>> {
+        self.f.ensure_valid()?;
+        let (sql, binds) = self.f.select_sql();
 
         // One connection for the main query and every prefetch query: one pool round-trip.
-        let mut conn = self.pool.acquire().await.map_err(db_err)?;
+        let mut source = std::mem::take(&mut self.conn);
+        let mut conn = source.acquire().await?;
         let rows = bind_and_fetch_all(&mut *conn, &sql, binds).await?;
+        self.warn_if_capped(rows.len());
         tracing::Span::current().record("db.rows", rows.len());
         let mut results: Vec<WithRelated<M>> = Vec::with_capacity(rows.len());
-        if self.select_related.is_empty() {
+        if self.f.select_related_specs().is_empty() {
             for row in rows {
                 results.push(WithRelated::new(M::from_row(&PgRangoRow(row))?));
             }
@@ -41,7 +40,7 @@ where
             // ── select_related: R's columns came back in the same row (LEFT JOIN) ──
             for row in &rows {
                 let mut wr = WithRelated::new(M::from_row(&PgRangoRow2::new(row))?);
-                for (i, spec) in self.select_related.iter().enumerate() {
+                for (i, spec) in self.f.select_related_specs().iter().enumerate() {
                     let r_row = PgPrefixedRow::new(row, format!("__r{i}_"));
                     // NULL primary key: no matching R (NULL or dangling FK).
                     if r_row.is_null(spec.pk_col) {
@@ -61,7 +60,7 @@ where
         }
 
         // ── prefetch_related: FK on R, bulk-fetch and group by M PK ──────────
-        for spec in &self.prefetch_related {
+        for spec in self.f.prefetch_specs() {
             let indexed_pks: Vec<(usize, SqlValue)> = results
                 .iter()
                 .enumerate()
@@ -115,45 +114,36 @@ where
 
     /// Fetch the first matching row (no relation population).
     #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "postgresql", db.operation = "SELECT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
-    pub async fn one(mut self) -> Result<Option<WithRelated<M>>> {
-        self.ensure_valid()?;
+    pub async fn one(mut self) -> Result<Option<M>> {
+        self.f.ensure_valid()?;
         // Same SQL as `all()` (filters, ordering, offset), capped at one row.
-        self.limit = Some(1);
-        self.explicit_limit = true;
-        let (sql, binds) = self.select_sql();
+        self = self.limit(1);
+        let (sql, binds) = self.f.select_sql();
 
-        let rows = bind_and_fetch_all(&self.pool, &sql, binds).await?;
+        let rows = self.conn.fetch_all(&sql, binds).await?;
         match rows.into_iter().next() {
-            Some(r) => Ok(Some(
-                M::from_row(&PgRangoRow(r))
-                    .map(WithRelated::new)
-                    .map_err(Error::from)?,
-            )),
+            Some(r) => Ok(Some(M::from_row(&PgRangoRow(r)).map_err(Error::from)?)),
             None => Ok(None),
         }
     }
 
     /// Count matching rows.
     #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "postgresql", db.operation = "SELECT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
-    pub async fn count(self) -> Result<i64> {
-        self.ensure_valid()?;
-        let table = M::table_name();
-        let (where_clause, binds) = self.build_where();
+    pub async fn count(mut self) -> Result<i64> {
+        self.f.ensure_valid()?;
+        let (sql, binds) = self.f.count_sql();
 
-        let mut sql = format!("SELECT COUNT(*) FROM {}", quote_ident(table));
-        if !where_clause.is_empty() {
-            sql.push(' ');
-            sql.push_str(&where_clause);
-        }
-
-        let row = bind_and_fetch_one(&self.pool, &sql, binds).await?;
+        let row = self.conn.fetch_one(&sql, binds).await?;
         Ok(row.try_get::<i64, _>(0).unwrap_or(0))
     }
 
     /// Check if any matching row exists.
-    pub async fn exists(self) -> Result<bool> {
-        self.ensure_valid()?;
-        Ok(self.count().await? > 0)
+    pub async fn exists(mut self) -> Result<bool> {
+        self.f.ensure_valid()?;
+        use sqlx::Row;
+        let (sql, binds) = self.f.exists_sql();
+        let row = self.conn.fetch_one(&sql, binds).await?;
+        row.try_get::<bool, _>(0).map_err(crate::error::db_err)
     }
 
     /// SELECT only the specified columns — returns raw rows as `Vec<HashMap<String, SqlValue>>`.
@@ -173,44 +163,20 @@ where
     /// ```
     #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "postgresql", db.operation = "SELECT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
     pub async fn values(
-        self,
+        mut self,
         cols: &[&str],
     ) -> Result<Vec<std::collections::HashMap<String, SqlValue>>> {
-        self.ensure_valid()?;
+        self.f.ensure_valid()?;
         for c in cols {
             if let Some(msg) = rango_orm_core::unknown_column::<M>(c) {
                 return Err(Error::Invalid(msg));
             }
         }
         use sqlx::Row;
-        let table = M::table_name();
-        let (where_clause, binds) = self.build_where();
+        let (sql, binds) = self.f.values_sql(cols);
 
-        let col_list = cols
-            .iter()
-            .map(|c| quote_ident(c))
-            .collect::<Vec<_>>()
-            .join(", ");
-
-        let mut sql = format!("SELECT {} FROM {}", col_list, quote_ident(table));
-        if !where_clause.is_empty() {
-            sql.push(' ');
-            sql.push_str(&where_clause);
-        }
-        let clauses = self.order_clauses();
-        if !clauses.is_empty() {
-            sql.push_str(&format!(" ORDER BY {}", clauses.join(", ")));
-        }
-        if !self.explicit_limit {
-            sql.push_str(&format!(" LIMIT {}", DEFAULT_QUERY_LIMIT));
-        } else if let Some(l) = self.limit {
-            sql.push_str(&format!(" LIMIT {}", l));
-        }
-        if let Some(o) = self.offset {
-            sql.push_str(&format!(" OFFSET {}", o));
-        }
-
-        let rows = bind_and_fetch_all(&self.pool, &sql, binds).await?;
+        let rows = self.conn.fetch_all(&sql, binds).await?;
+        self.warn_if_capped(rows.len());
 
         rows.into_iter()
             .map(|row| {
@@ -283,45 +249,25 @@ where
 
     /// SELECT SUM(col) FROM ... WHERE ... — returns None if the table is empty or all values are NULL.
     #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "postgresql", db.operation = "SELECT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
-    pub async fn sum(self, col: impl ColumnRef<M>) -> Result<Option<f64>> {
-        self.ensure_valid()?;
+    pub async fn sum(mut self, col: impl ColumnRef<M>) -> Result<Option<f64>> {
+        self.f.ensure_valid()?;
         if let Some(msg) = rango_orm_core::unknown_column::<M>(col.column_name()) {
             return Err(Error::Invalid(msg));
         }
-        let table = M::table_name();
-        let (where_clause, binds) = self.build_where();
-        let mut sql = format!(
-            "SELECT SUM({})::float8 FROM {}",
-            quote_ident(col.column_name()),
-            quote_ident(table)
-        );
-        if !where_clause.is_empty() {
-            sql.push(' ');
-            sql.push_str(&where_clause);
-        }
-        let row = bind_and_fetch_one(&self.pool, &sql, binds).await?;
+        let (sql, binds) = self.f.aggregate_sql("SUM", col.column_name());
+        let row = self.conn.fetch_one(&sql, binds).await?;
         Ok(row.try_get::<Option<f64>, _>(0).unwrap_or(None))
     }
 
     /// SELECT AVG(col) FROM ... WHERE ... — returns None if the table is empty or all values are NULL.
     #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "postgresql", db.operation = "SELECT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
-    pub async fn avg(self, col: impl ColumnRef<M>) -> Result<Option<f64>> {
-        self.ensure_valid()?;
+    pub async fn avg(mut self, col: impl ColumnRef<M>) -> Result<Option<f64>> {
+        self.f.ensure_valid()?;
         if let Some(msg) = rango_orm_core::unknown_column::<M>(col.column_name()) {
             return Err(Error::Invalid(msg));
         }
-        let table = M::table_name();
-        let (where_clause, binds) = self.build_where();
-        let mut sql = format!(
-            "SELECT AVG({})::float8 FROM {}",
-            quote_ident(col.column_name()),
-            quote_ident(table)
-        );
-        if !where_clause.is_empty() {
-            sql.push(' ');
-            sql.push_str(&where_clause);
-        }
-        let row = bind_and_fetch_one(&self.pool, &sql, binds).await?;
+        let (sql, binds) = self.f.aggregate_sql("AVG", col.column_name());
+        let row = self.conn.fetch_one(&sql, binds).await?;
         Ok(row.try_get::<Option<f64>, _>(0).unwrap_or(None))
     }
 
@@ -336,26 +282,16 @@ where
     /// let lowest: Option<f64>       = Order::filter(&pool).min::<f64>("price").await?;
     /// ```
     #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "postgresql", db.operation = "SELECT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
-    pub async fn min<T>(self, col: impl ColumnRef<M>) -> Result<Option<T>>
+    pub async fn min<T>(mut self, col: impl ColumnRef<M>) -> Result<Option<T>>
     where
         T: for<'r> sqlx::Decode<'r, Postgres> + sqlx::Type<Postgres>,
     {
-        self.ensure_valid()?;
+        self.f.ensure_valid()?;
         if let Some(msg) = rango_orm_core::unknown_column::<M>(col.column_name()) {
             return Err(Error::Invalid(msg));
         }
-        let table = M::table_name();
-        let (where_clause, binds) = self.build_where();
-        let mut sql = format!(
-            "SELECT MIN({}) FROM {}",
-            quote_ident(col.column_name()),
-            quote_ident(table)
-        );
-        if !where_clause.is_empty() {
-            sql.push(' ');
-            sql.push_str(&where_clause);
-        }
-        let row = bind_and_fetch_one(&self.pool, &sql, binds).await?;
+        let (sql, binds) = self.f.aggregate_sql("MIN", col.column_name());
+        let row = self.conn.fetch_one(&sql, binds).await?;
         Ok(row.try_get::<Option<T>, _>(0).unwrap_or(None))
     }
 
@@ -370,48 +306,28 @@ where
     /// let highest: Option<f64>          = Order::filter(&pool).max::<f64>("price").await?;
     /// ```
     #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "postgresql", db.operation = "SELECT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
-    pub async fn max<T>(self, col: impl ColumnRef<M>) -> Result<Option<T>>
+    pub async fn max<T>(mut self, col: impl ColumnRef<M>) -> Result<Option<T>>
     where
         T: for<'r> sqlx::Decode<'r, Postgres> + sqlx::Type<Postgres>,
     {
-        self.ensure_valid()?;
+        self.f.ensure_valid()?;
         if let Some(msg) = rango_orm_core::unknown_column::<M>(col.column_name()) {
             return Err(Error::Invalid(msg));
         }
-        let table = M::table_name();
-        let (where_clause, binds) = self.build_where();
-        let mut sql = format!(
-            "SELECT MAX({}) FROM {}",
-            quote_ident(col.column_name()),
-            quote_ident(table)
-        );
-        if !where_clause.is_empty() {
-            sql.push(' ');
-            sql.push_str(&where_clause);
-        }
-        let row = bind_and_fetch_one(&self.pool, &sql, binds).await?;
+        let (sql, binds) = self.f.aggregate_sql("MAX", col.column_name());
+        let row = self.conn.fetch_one(&sql, binds).await?;
         Ok(row.try_get::<Option<T>, _>(0).unwrap_or(None))
-    }
-
-    /// Execute a closure within a transaction, using this builder's pool.
-    pub async fn transaction<F, T>(&self, f: F) -> Result<T>
-    where
-        F: for<'c> FnOnce(
-            &'c mut crate::transaction::RangoTransaction<'_>,
-        ) -> crate::transaction::TxFuture<'c, T>,
-    {
-        crate::transaction::atomic(&self.pool, f).await
     }
 }
 
-impl<M> QueryBuilder<M>
+impl<'a, M> QueryBuilder<'a, M>
 where
     M: Model + ModelValues + FromRow,
 {
     /// Select only the columns of the `#[derive(Partial)]` struct `P`.
     ///
     /// Same filters, ordering and limits as `.all()`; relations are not supported.
-    pub fn select_as<P: Partial<Model = M>>(self) -> SelectAs<M, P> {
+    pub fn select_as<P: Partial<Model = M>>(self) -> SelectAs<'a, M, P> {
         SelectAs {
             qb: self,
             _phantom: std::marker::PhantomData,
@@ -420,27 +336,33 @@ where
 }
 
 /// A query selecting a partial struct, built by `QueryBuilder::select_as`.
-pub struct SelectAs<M, P> {
-    qb: QueryBuilder<M>,
+pub struct SelectAs<'a, M, P> {
+    qb: QueryBuilder<'a, M>,
     _phantom: std::marker::PhantomData<P>,
 }
 
-impl<M, P> SelectAs<M, P>
+impl<M, P> SelectAs<'_, M, P>
 where
     M: Model + ModelValues + FromRow,
     P: Partial<Model = M>,
 {
     /// Fetch all matching rows as `P`.
-    pub async fn all(self) -> Result<Vec<P>> {
-        self.qb.ensure_valid()?;
-        if !self.qb.select_related.is_empty() || !self.qb.prefetch_related.is_empty() {
+    #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "postgresql", db.operation = "SELECT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
+    pub async fn all(mut self) -> Result<Vec<P>> {
+        self.qb.f.ensure_valid()?;
+        if !self.qb.f.select_related_specs().is_empty() || !self.qb.f.prefetch_specs().is_empty() {
             return Err(Error::Invalid(
                 "select_related / prefetch_related are not supported with select_as".into(),
             ));
         }
-        let cols: Vec<String> = P::columns().iter().map(|c| quote_ident(c)).collect();
-        let (sql, binds) = self.qb.select_sql_cols(&cols.join(", "));
-        let rows = bind_and_fetch_all(&self.qb.pool, &sql, binds).await?;
+        let cols: Vec<String> = P::columns()
+            .iter()
+            .map(|c| rango_orm_core::quote_ident(c))
+            .collect();
+        let (sql, binds) = self.qb.f.select_sql_cols(&cols.join(", "));
+        let rows = self.qb.conn.fetch_all(&sql, binds).await?;
+        self.qb.warn_if_capped(rows.len());
+        tracing::Span::current().record("db.rows", rows.len());
         decode_all::<P>(rows)
     }
 
@@ -448,5 +370,30 @@ where
     pub async fn one(self) -> Result<Option<P>> {
         let rows = self.qb.limit(1).select_as::<P>().all().await?;
         Ok(rows.into_iter().next())
+    }
+}
+
+impl<'a, M> QueryBuilder<'a, M>
+where
+    M: Model + ModelValues + FromRow,
+{
+    #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "postgresql", db.operation = "EXPLAIN", db.sql.table = M::table_name(), otel.kind = "client"))]
+    /// Runs the `.all()` query under `EXPLAIN ANALYZE` and returns the plan with timings.
+    /// The query is executed (its rows are discarded): wrap writes-in-functions in a rolled-back transaction.
+    pub async fn explain_analyze(&mut self) -> Result<String> {
+        self.f.ensure_valid()?;
+        let (sql, binds) = self.f.select_sql();
+        let rows = self
+            .conn
+            .fetch_all(&format!("EXPLAIN ANALYZE {sql}"), binds)
+            .await?;
+        let lines = rows
+            .iter()
+            .map(|r| {
+                r.try_get::<String, _>(0)
+                    .map_err(|e| Error::Decode(e.to_string()))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        Ok(lines.join("\n"))
     }
 }

@@ -131,10 +131,13 @@ fn random_graph(seed: u64) -> Vec<TableSchema> {
             uuid_tables[rng.below(uuid_tables.len())],
         );
         if seen.insert((a, b)) {
-            tables.push(generate_pivot_table(&M2MRelation {
-                from_table: name(a),
-                to_table: name(b),
-            }));
+            tables.push(generate_pivot_table(
+                &M2MRelation {
+                    from_table: name(a),
+                    to_table: name(b),
+                },
+                &[],
+            ));
         }
     }
     tables
@@ -235,7 +238,7 @@ async fn random_graphs_apply_on_sqlite() {
             .await
             .unwrap();
         let sql = sql_for(&g, BackendKind::Sqlite);
-        sqlx::raw_sql(&sql)
+        sqlx::raw_sql(sqlx::AssertSqlSafe(&*sql))
             .execute(&pool)
             .await
             .unwrap_or_else(|e| panic!("{what}: {e}\n{sql}"));
@@ -255,10 +258,18 @@ async fn random_graphs_apply_on_postgres() {
                 .map(|t| format!("DROP TABLE IF EXISTS \"{}\" CASCADE;", t.table_name))
                 .collect::<String>()
         };
-        sqlx::raw_sql(&drop()).execute(&pool).await.unwrap();
+        sqlx::raw_sql(sqlx::AssertSqlSafe(&*drop()))
+            .execute(&pool)
+            .await
+            .unwrap();
         let sql = sql_for(&g, BackendKind::Postgres);
-        let res = sqlx::raw_sql(&sql).execute(&pool).await;
-        sqlx::raw_sql(&drop()).execute(&pool).await.unwrap();
+        let res = sqlx::raw_sql(sqlx::AssertSqlSafe(&*sql))
+            .execute(&pool)
+            .await;
+        sqlx::raw_sql(sqlx::AssertSqlSafe(&*drop()))
+            .execute(&pool)
+            .await
+            .unwrap();
         res.unwrap_or_else(|e| panic!("{what}: {e}\n{sql}"));
     }
     pool.close().await;
@@ -278,10 +289,18 @@ async fn random_graphs_apply_on_mysql() {
                 .collect();
             format!("SET FOREIGN_KEY_CHECKS = 0; {drops} SET FOREIGN_KEY_CHECKS = 1;")
         };
-        sqlx::raw_sql(&drop()).execute(&pool).await.unwrap();
+        sqlx::raw_sql(sqlx::AssertSqlSafe(&*drop()))
+            .execute(&pool)
+            .await
+            .unwrap();
         let sql = sql_for(&g, BackendKind::Mysql);
-        let res = sqlx::raw_sql(&sql).execute(&pool).await;
-        sqlx::raw_sql(&drop()).execute(&pool).await.unwrap();
+        let res = sqlx::raw_sql(sqlx::AssertSqlSafe(&*sql))
+            .execute(&pool)
+            .await;
+        sqlx::raw_sql(sqlx::AssertSqlSafe(&*drop()))
+            .execute(&pool)
+            .await
+            .unwrap();
         res.unwrap_or_else(|e| panic!("{what}: {e}\n{sql}"));
     }
     pool.close().await;

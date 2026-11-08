@@ -1,9 +1,7 @@
-use crate::error::db_err;
 use crate::row::{decode_all, MySqlPrefixedRow, MySqlRangoRow, MySqlRowRef};
 use rango_orm_core::related::{row_key, sql_value_key};
 use rango_orm_core::{
-    quote_ident_mysql as quote_ident, ColumnRef, Error, FromRow, Model, ModelValues, Partial,
-    RangoRow, Result, SqlValue, WithRelated,
+    ColumnRef, Error, FromRow, Model, ModelValues, Partial, RangoRow, Result, SqlValue, WithRelated,
 };
 use std::any::Any;
 use std::collections::{HashMap, HashSet};
@@ -12,7 +10,7 @@ use super::*;
 
 const PREFETCH_CHUNK: usize = 900; // keeps statements small; MySQL allows 65 535 params.
 
-impl<M> QueryBuilder<M>
+impl<'a, M> QueryBuilder<'a, M>
 where
     M: Model + ModelValues + FromRow,
 {
@@ -21,24 +19,26 @@ where
     /// Returns `Vec<WithRelated<M>>` — each item derefs to `M`, and related
     /// objects are accessible via `.related::<R>()` / `.prefetched::<R>()`.
     #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "mysql", db.operation = "SELECT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
-    pub async fn all(self) -> Result<Vec<WithRelated<M>>> {
-        self.ensure_valid()?;
-        let (sql, binds) = self.select_sql();
+    pub async fn all(mut self) -> Result<Vec<WithRelated<M>>> {
+        self.f.ensure_valid()?;
+        let (sql, binds) = self.f.select_sql();
 
         // One connection for the main query and every prefetch query.
-        let mut conn = self.pool.acquire().await.map_err(db_err)?;
+        let mut source = std::mem::take(&mut self.conn);
+        let mut conn = source.acquire().await?;
         let rows = bind_and_fetch_all(&mut *conn, &sql, binds).await?;
+        self.warn_if_capped(rows.len());
         tracing::Span::current().record("db.rows", rows.len());
         let mut results: Vec<WithRelated<M>> = Vec::with_capacity(rows.len());
 
-        if self.select_related.is_empty() {
+        if self.f.select_related_specs().is_empty() {
             let models = decode_all::<M>(rows)?;
             results.extend(models.into_iter().map(WithRelated::new));
         } else {
             // ── select_related: R's columns came back in the same row (LEFT JOIN) ──
             for row in &rows {
                 let mut wr = WithRelated::new(M::from_row(&MySqlRowRef(row))?);
-                for (i, spec) in self.select_related.iter().enumerate() {
+                for (i, spec) in self.f.select_related_specs().iter().enumerate() {
                     let r_row = MySqlPrefixedRow::new(row, format!("__r{i}_"));
                     // NULL primary key: no matching R (NULL or dangling FK).
                     if r_row.is_null(spec.pk_col) {
@@ -58,7 +58,7 @@ where
         }
 
         // ── prefetch_related: FK on R, bulk-fetch and group by M PK ──────────
-        for spec in &self.prefetch_related {
+        for spec in self.f.prefetch_specs() {
             let indexed_pks: Vec<(usize, SqlValue)> = results
                 .iter()
                 .enumerate()
@@ -115,13 +115,12 @@ where
     /// Fetch the first matching row (no relation population).
     #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "mysql", db.operation = "SELECT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
     pub async fn one(mut self) -> Result<Option<M>> {
-        self.ensure_valid()?;
+        self.f.ensure_valid()?;
         // Same SQL as `all()` (filters, ordering, offset), capped at one row.
-        self.limit = Some(1);
-        self.explicit_limit = true;
-        let (sql, binds) = self.select_sql();
+        self = self.limit(1);
+        let (sql, binds) = self.f.select_sql();
 
-        let rows = bind_and_fetch_all(&self.pool, &sql, binds).await?;
+        let rows = self.conn.fetch_all(&sql, binds).await?;
         match rows.into_iter().next() {
             Some(r) => Ok(Some(M::from_row(&MySqlRangoRow(r)).map_err(Error::from)?)),
             None => Ok(None),
@@ -130,75 +129,74 @@ where
 
     /// Count matching rows.
     #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "mysql", db.operation = "SELECT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
-    pub async fn count(self) -> Result<i64> {
-        self.ensure_valid()?;
+    pub async fn count(mut self) -> Result<i64> {
+        self.f.ensure_valid()?;
         use sqlx::Row;
-        let table = M::table_name();
-        let (where_clause, binds) = self.build_where();
+        let (sql, binds) = self.f.count_sql();
 
-        let mut sql = format!("SELECT COUNT(*) FROM {}", quote_ident(table));
-        if !where_clause.is_empty() {
-            sql.push(' ');
-            sql.push_str(&where_clause);
-        }
-
-        let row = bind_and_fetch_one(&self.pool, &sql, binds).await?;
+        let row = self.conn.fetch_one(&sql, binds).await?;
         Ok(row.try_get::<i64, _>(0).unwrap_or(0))
     }
 
     /// Check if any matching row exists.
-    pub async fn exists(self) -> Result<bool> {
-        self.ensure_valid()?;
-        Ok(self.count().await? > 0)
+    pub async fn exists(mut self) -> Result<bool> {
+        self.f.ensure_valid()?;
+        use sqlx::Row;
+        let (sql, binds) = self.f.exists_sql();
+        let row = self.conn.fetch_one(&sql, binds).await?;
+        row.try_get::<i64, _>(0)
+            .map(|n| n != 0)
+            .map_err(crate::error::db_err)
     }
 
     /// SELECT only the specified columns — returns raw rows as `Vec<HashMap<String, SqlValue>>`.
     #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "mysql", db.operation = "SELECT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
     pub async fn values(
-        self,
+        mut self,
         cols: &[&str],
     ) -> Result<Vec<std::collections::HashMap<String, SqlValue>>> {
-        self.ensure_valid()?;
+        self.f.ensure_valid()?;
         for c in cols {
             if let Some(msg) = rango_orm_core::unknown_column::<M>(c) {
                 return Err(Error::Invalid(msg));
             }
         }
         use sqlx::Row;
-        let table = M::table_name();
-        let (where_clause, binds) = self.build_where();
+        let (sql, binds) = self.f.values_sql(cols);
 
-        let col_list = cols
-            .iter()
-            .map(|c| quote_ident(c))
-            .collect::<Vec<_>>()
-            .join(", ");
+        let rows = self.conn.fetch_all(&sql, binds).await?;
+        self.warn_if_capped(rows.len());
 
-        let mut sql = format!("SELECT {} FROM {}", col_list, quote_ident(table));
-        if !where_clause.is_empty() {
-            sql.push(' ');
-            sql.push_str(&where_clause);
-        }
-        let clauses = self.order_clauses();
-        if !clauses.is_empty() {
-            sql.push_str(&format!(" ORDER BY {}", clauses.join(", ")));
-        }
-        if !self.explicit_limit {
-            sql.push_str(&format!(" LIMIT {}", DEFAULT_QUERY_LIMIT));
-        } else if let Some(l) = self.limit {
-            sql.push_str(&format!(" LIMIT {}", l));
-        }
-        if let Some(o) = self.offset {
-            sql.push_str(&format!(" OFFSET {}", o));
-        }
-
-        let rows = bind_and_fetch_all(&self.pool, &sql, binds).await?;
-
+        // DECIMAL columns are decoded by schema type: the driver type is ambiguous (SQLite
+        // NUMERIC may come back as an integer, MySQL's is not an i64/f64/String).
+        let schema = M::schema();
+        let scale_of = |col: &str| {
+            schema
+                .columns
+                .iter()
+                .find(|c| c.name == col)
+                .and_then(|c| match c.col_type {
+                    rango_orm_core::ColumnType::Decimal { scale, .. } => Some(scale),
+                    _ => None,
+                })
+        };
         rows.into_iter()
             .map(|row| {
                 let mut map = std::collections::HashMap::new();
                 for &col in cols {
-                    let val: SqlValue = if let Ok(Some(v)) = row.try_get::<Option<i64>, _>(col) {
+                    let val: SqlValue = if let Some(scale) = scale_of(col) {
+                        if row
+                            .try_get_raw(col)
+                            .map(|v| sqlx::ValueRef::is_null(&v))
+                            .unwrap_or(true)
+                        {
+                            SqlValue::NullDecimal
+                        } else {
+                            let mut d = crate::row::MySqlRowRef(&row).get_decimal(col)?;
+                            d.rescale(u32::from(scale));
+                            SqlValue::Decimal(d)
+                        }
+                    } else if let Ok(Some(v)) = row.try_get::<Option<i64>, _>(col) {
                         SqlValue::BigInt(v)
                     } else if let Ok(Some(v)) = row.try_get::<Option<f64>, _>(col) {
                         SqlValue::Double(v)
@@ -216,51 +214,29 @@ where
 
     /// SELECT SUM(col) FROM ... WHERE ... — returns None if the table is empty or all values are NULL.
     #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "mysql", db.operation = "SELECT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
-    pub async fn sum(self, col: impl ColumnRef<M>) -> Result<Option<f64>> {
-        self.ensure_valid()?;
+    pub async fn sum(mut self, col: impl ColumnRef<M>) -> Result<Option<f64>> {
+        self.f.ensure_valid()?;
         if let Some(msg) = rango_orm_core::unknown_column::<M>(col.column_name()) {
             return Err(Error::Invalid(msg));
         }
         use sqlx::Row;
-        let table = M::table_name();
-        let (where_clause, binds) = self.build_where();
+        let (sql, binds) = self.f.aggregate_sql("SUM", col.column_name());
 
-        let mut sql = format!(
-            "SELECT CAST(SUM({}) AS DOUBLE) FROM {}",
-            quote_ident(col.column_name()),
-            quote_ident(table)
-        );
-        if !where_clause.is_empty() {
-            sql.push(' ');
-            sql.push_str(&where_clause);
-        }
-
-        let row = bind_and_fetch_one(&self.pool, &sql, binds).await?;
+        let row = self.conn.fetch_one(&sql, binds).await?;
         Ok(row.try_get::<Option<f64>, _>(0).unwrap_or(None))
     }
 
     /// SELECT AVG(col) FROM ... WHERE ... — returns None if the table is empty or all values are NULL.
     #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "mysql", db.operation = "SELECT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
-    pub async fn avg(self, col: impl ColumnRef<M>) -> Result<Option<f64>> {
-        self.ensure_valid()?;
+    pub async fn avg(mut self, col: impl ColumnRef<M>) -> Result<Option<f64>> {
+        self.f.ensure_valid()?;
         if let Some(msg) = rango_orm_core::unknown_column::<M>(col.column_name()) {
             return Err(Error::Invalid(msg));
         }
         use sqlx::Row;
-        let table = M::table_name();
-        let (where_clause, binds) = self.build_where();
+        let (sql, binds) = self.f.aggregate_sql("AVG", col.column_name());
 
-        let mut sql = format!(
-            "SELECT CAST(AVG({}) AS DOUBLE) FROM {}",
-            quote_ident(col.column_name()),
-            quote_ident(table)
-        );
-        if !where_clause.is_empty() {
-            sql.push(' ');
-            sql.push_str(&where_clause);
-        }
-
-        let row = bind_and_fetch_one(&self.pool, &sql, binds).await?;
+        let row = self.conn.fetch_one(&sql, binds).await?;
         Ok(row.try_get::<Option<f64>, _>(0).unwrap_or(None))
     }
 
@@ -269,29 +245,18 @@ where
     /// Generic over the return type — works for numbers, strings, dates, etc.
     /// Returns `None` if the table is empty or all values are NULL.
     #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "mysql", db.operation = "SELECT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
-    pub async fn min<T>(self, col: impl ColumnRef<M>) -> Result<Option<T>>
+    pub async fn min<T>(mut self, col: impl ColumnRef<M>) -> Result<Option<T>>
     where
         T: for<'r> sqlx::Decode<'r, sqlx::MySql> + sqlx::Type<sqlx::MySql>,
     {
-        self.ensure_valid()?;
+        self.f.ensure_valid()?;
         if let Some(msg) = rango_orm_core::unknown_column::<M>(col.column_name()) {
             return Err(Error::Invalid(msg));
         }
         use sqlx::Row;
-        let table = M::table_name();
-        let (where_clause, binds) = self.build_where();
+        let (sql, binds) = self.f.aggregate_sql("MIN", col.column_name());
 
-        let mut sql = format!(
-            "SELECT MIN({}) FROM {}",
-            quote_ident(col.column_name()),
-            quote_ident(table)
-        );
-        if !where_clause.is_empty() {
-            sql.push(' ');
-            sql.push_str(&where_clause);
-        }
-
-        let row = bind_and_fetch_one(&self.pool, &sql, binds).await?;
+        let row = self.conn.fetch_one(&sql, binds).await?;
         Ok(row.try_get::<Option<T>, _>(0).unwrap_or(None))
     }
 
@@ -300,41 +265,30 @@ where
     /// Generic over the return type — works for numbers, strings, dates, etc.
     /// Returns `None` if the table is empty or all values are NULL.
     #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "mysql", db.operation = "SELECT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
-    pub async fn max<T>(self, col: impl ColumnRef<M>) -> Result<Option<T>>
+    pub async fn max<T>(mut self, col: impl ColumnRef<M>) -> Result<Option<T>>
     where
         T: for<'r> sqlx::Decode<'r, sqlx::MySql> + sqlx::Type<sqlx::MySql>,
     {
-        self.ensure_valid()?;
+        self.f.ensure_valid()?;
         if let Some(msg) = rango_orm_core::unknown_column::<M>(col.column_name()) {
             return Err(Error::Invalid(msg));
         }
         use sqlx::Row;
-        let table = M::table_name();
-        let (where_clause, binds) = self.build_where();
+        let (sql, binds) = self.f.aggregate_sql("MAX", col.column_name());
 
-        let mut sql = format!(
-            "SELECT MAX({}) FROM {}",
-            quote_ident(col.column_name()),
-            quote_ident(table)
-        );
-        if !where_clause.is_empty() {
-            sql.push(' ');
-            sql.push_str(&where_clause);
-        }
-
-        let row = bind_and_fetch_one(&self.pool, &sql, binds).await?;
+        let row = self.conn.fetch_one(&sql, binds).await?;
         Ok(row.try_get::<Option<T>, _>(0).unwrap_or(None))
     }
 }
 
-impl<M> QueryBuilder<M>
+impl<'a, M> QueryBuilder<'a, M>
 where
     M: Model + ModelValues + FromRow,
 {
     /// Select only the columns of the `#[derive(Partial)]` struct `P`.
     ///
     /// Same filters, ordering and limits as `.all()`; relations are not supported.
-    pub fn select_as<P: Partial<Model = M>>(self) -> SelectAs<M, P> {
+    pub fn select_as<P: Partial<Model = M>>(self) -> SelectAs<'a, M, P> {
         SelectAs {
             qb: self,
             _phantom: std::marker::PhantomData,
@@ -343,27 +297,33 @@ where
 }
 
 /// A query selecting a partial struct, built by `QueryBuilder::select_as`.
-pub struct SelectAs<M, P> {
-    qb: QueryBuilder<M>,
+pub struct SelectAs<'a, M, P> {
+    qb: QueryBuilder<'a, M>,
     _phantom: std::marker::PhantomData<P>,
 }
 
-impl<M, P> SelectAs<M, P>
+impl<M, P> SelectAs<'_, M, P>
 where
     M: Model + ModelValues + FromRow,
     P: Partial<Model = M>,
 {
     /// Fetch all matching rows as `P`.
-    pub async fn all(self) -> Result<Vec<P>> {
-        self.qb.ensure_valid()?;
-        if !self.qb.select_related.is_empty() || !self.qb.prefetch_related.is_empty() {
+    #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "mysql", db.operation = "SELECT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
+    pub async fn all(mut self) -> Result<Vec<P>> {
+        self.qb.f.ensure_valid()?;
+        if !self.qb.f.select_related_specs().is_empty() || !self.qb.f.prefetch_specs().is_empty() {
             return Err(Error::Invalid(
                 "select_related / prefetch_related are not supported with select_as".into(),
             ));
         }
-        let cols: Vec<String> = P::columns().iter().map(|c| quote_ident(c)).collect();
-        let (sql, binds) = self.qb.select_sql_cols(&cols.join(", "));
-        let rows = bind_and_fetch_all(&self.qb.pool, &sql, binds).await?;
+        let cols: Vec<String> = P::columns()
+            .iter()
+            .map(|c| rango_orm_core::quote_ident_mysql(c))
+            .collect();
+        let (sql, binds) = self.qb.f.select_sql_cols(&cols.join(", "));
+        let rows = self.qb.conn.fetch_all(&sql, binds).await?;
+        self.qb.warn_if_capped(rows.len());
+        tracing::Span::current().record("db.rows", rows.len());
         decode_all::<P>(rows)
     }
 
@@ -371,5 +331,44 @@ where
     pub async fn one(self) -> Result<Option<P>> {
         let rows = self.qb.limit(1).select_as::<P>().all().await?;
         Ok(rows.into_iter().next())
+    }
+}
+
+impl<'a, M> QueryBuilder<'a, M>
+where
+    M: Model + ModelValues + FromRow,
+{
+    #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "mysql", db.operation = "EXPLAIN", db.sql.table = M::table_name(), otel.kind = "client"))]
+    /// Runs the `.all()` query under the engine's profiler and returns the plan with timings:
+    /// `EXPLAIN ANALYZE` on MySQL 8.0.18+, `ANALYZE FORMAT=JSON` on MariaDB.
+    /// The query is executed (its rows are discarded).
+    pub async fn explain_analyze(&mut self) -> Result<String> {
+        use sqlx::Row;
+        self.f.ensure_valid()?;
+        let (sql, binds) = self.f.select_sql();
+        let mut conn = self.conn.acquire().await?;
+        let version = bind_and_fetch_all(&mut *conn, "SELECT VERSION()", Vec::new()).await?;
+        let mariadb = version
+            .first()
+            .and_then(|r| r.try_get::<String, _>(0).ok())
+            .is_some_and(|v| v.contains("MariaDB"));
+        let prefix = if mariadb {
+            "ANALYZE FORMAT=JSON"
+        } else {
+            "EXPLAIN ANALYZE"
+        };
+        let rows = bind_and_fetch_all(&mut *conn, &format!("{prefix} {sql}"), binds).await?;
+        let lines = rows
+            .iter()
+            .map(|r| {
+                // Some servers type the plan column as a blob.
+                r.try_get::<String, _>(0).or_else(|_| {
+                    r.try_get::<Vec<u8>, _>(0)
+                        .map(|b| String::from_utf8_lossy(&b).into_owned())
+                        .map_err(|e| Error::Decode(e.to_string()))
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        Ok(lines.join("\n"))
     }
 }

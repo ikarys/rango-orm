@@ -30,26 +30,23 @@ where
         return Ok(0);
     }
 
-    let mut conn = executor.acquire().await.map_err(db_err)?;
-
     // One statement, one array parameter per column; falls back for unsupported types.
     if let Some((sql, cols)) = build_bulk_create_unnest_sql::<M>(models) {
-        let q = cols.into_iter().fold(sqlx::query(&sql), |q, c| c.bind(q));
+        let q = cols
+            .into_iter()
+            .fold(sqlx::query(sqlx::AssertSqlSafe(&*sql)), |q, c| c.bind(q));
+        // One statement: already atomic, no transaction.
+        let mut conn = executor.acquire().await.map_err(db_err)?;
         let result = q.execute(&mut *conn).await.map_err(db_err)?;
         return Ok(result.rows_affected() as usize);
     }
 
     let n_cols = rango_orm_core::insert_values(&models[0]).len();
     let chunk_size = (65535 / n_cols).max(1);
-    let mut total = 0usize;
-
-    for chunk in models.chunks(chunk_size) {
-        let (sql, values) = build_bulk_create_sql::<M>(chunk);
-        let q = bind_sql_values(sqlx::query(&sql), values);
-        let result = q.execute(&mut *conn).await.map_err(db_err)?;
-        total += result.rows_affected() as usize;
-    }
-    Ok(total)
+    run_chunks(executor, models, chunk_size, |chunk| {
+        build_bulk_create_sql::<M>(chunk)
+    })
+    .await
 }
 
 /// UPDATE multiple rows using a single `UPDATE … FROM (VALUES …)` query.
@@ -68,23 +65,26 @@ where
     A: Acquire<'a, Database = Postgres>,
     M: Model + ModelValues,
 {
+    for f in fields {
+        if let Some(msg) = rango_orm_core::unknown_column::<M>(f) {
+            return Err(rango_orm_core::Error::Invalid(msg));
+        }
+        if *f == M::pk_column() {
+            return Err(rango_orm_core::Error::Invalid(format!(
+                "`{f}` is the primary key and cannot be updated"
+            )));
+        }
+    }
     if models.is_empty() || fields.is_empty() {
         return Ok(0);
     }
 
-    let mut conn = executor.acquire().await.map_err(db_err)?;
-
     let n_cols = fields.len() + 1; // +1 for pk
     let chunk_size = (65535 / n_cols).max(1);
-    let mut total = 0usize;
-
-    for chunk in models.chunks(chunk_size) {
-        let (sql, values) = build_bulk_update_sql::<M>(chunk, fields);
-        let q = bind_sql_values(sqlx::query(&sql), values);
-        let result = q.execute(&mut *conn).await.map_err(db_err)?;
-        total += result.rows_affected() as usize;
-    }
-    Ok(total)
+    run_chunks(executor, models, chunk_size, |chunk| {
+        build_bulk_update_sql::<M>(chunk, fields)
+    })
+    .await
 }
 
 /// INSERT multiple rows with `ON CONFLICT … DO UPDATE`.
@@ -107,20 +107,14 @@ where
     if models.is_empty() {
         return Ok(0);
     }
-
-    let mut conn = executor.acquire().await.map_err(db_err)?;
+    rango_orm_core::check_columns::<M>(conflict_on.iter().copied())?;
 
     let n_cols = 1 + models[0].field_values().len();
     let chunk_size = (65535 / n_cols).max(1);
-    let mut total = 0usize;
-
-    for chunk in models.chunks(chunk_size) {
-        let (sql, values) = build_bulk_upsert_sql::<M>(chunk, conflict_on);
-        let q = bind_sql_values(sqlx::query(&sql), values);
-        let result = q.execute(&mut *conn).await.map_err(db_err)?;
-        total += result.rows_affected() as usize;
-    }
-    Ok(total)
+    run_chunks(executor, models, chunk_size, |chunk| {
+        build_bulk_upsert_sql::<M>(chunk, conflict_on)
+    })
+    .await
 }
 
 // ─── Bulk SQL builders ────────────────────────────────────────────────────────
@@ -402,6 +396,36 @@ fn build_bulk_upsert_sql<M: Model + ModelValues>(
         )
     };
     (sql, all_values)
+}
+
+/// Runs one statement per chunk. A single chunk is one statement, already atomic: no
+/// transaction. Several chunks share one transaction (a savepoint when `executor` is already
+/// a transaction), so a later failure does not leave the earlier rows behind.
+async fn run_chunks<'a, A, M>(
+    executor: A,
+    models: &[M],
+    chunk_size: usize,
+    build: impl Fn(&[M]) -> (String, Vec<SqlValue>),
+) -> Result<usize>
+where
+    A: Acquire<'a, Database = Postgres>,
+{
+    let run = |sql: String, values| bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(sql)), values);
+    if models.len() <= chunk_size {
+        let mut conn = executor.acquire().await.map_err(db_err)?;
+        let (sql, values) = build(models);
+        let result = run(sql, values).execute(&mut *conn).await.map_err(db_err)?;
+        return Ok(result.rows_affected() as usize);
+    }
+    let mut total = 0usize;
+    let mut tx = executor.begin().await.map_err(db_err)?;
+    for chunk in models.chunks(chunk_size) {
+        let (sql, values) = build(chunk);
+        let result = run(sql, values).execute(&mut *tx).await.map_err(db_err)?;
+        total += result.rows_affected() as usize;
+    }
+    tx.commit().await.map_err(db_err)?;
+    Ok(total)
 }
 
 #[cfg(test)]

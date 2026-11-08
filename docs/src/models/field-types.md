@@ -23,14 +23,48 @@ All field types live in `rango::prelude::*`.
 | `FieldVarchar<MIN, MAX>` | `VARCHAR(MAX)` | `TEXT` | Compile-time length bounds |
 | `FieldEmail` | `VARCHAR(254)` | `TEXT` | |
 | `FieldUrl` | `VARCHAR(2048)` | `TEXT` | |
-| `FieldPassword<MIN, MAX>` | `VARCHAR(MAX)` | `TEXT` | |
+| `FieldPassword<MIN, MAX>` | `TEXT` | `TEXT` | MIN / MAX bound the plain password, which is stored as an argon2id hash: the column is always `TEXT` (`LONGTEXT` on MySQL / MariaDB) |
+
+`FieldPassword::new(plain)` checks the bounds and hashes. `verify(&self, candidate)` checks a candidate against the stored hash. `hash()` returns the hash string and `from_hash(hash)` wraps a hash you already have.
+
+`FieldPassword` hashes with argon2id on every write. This is deliberately slow (about 200 ms per value in a debug build, much less in release), so a bulk insert of users pays it per row.
 
 ## Numeric types
 
-| Rust type | SQL (Postgres) | SQL (SQLite) | Notes |
-|---|---|---|---|
-| `FieldDecimal<P, S>` | `NUMERIC(P, S)` | `NUMERIC` | P = precision, S = scale. Wraps `rango::Decimal` (exact). SQLite is exact up to 15 digits through the numeric column, beyond that the digits are kept as text |
-| `FieldRange<MIN, MAX>` | `BIGINT` | `INTEGER` | Compile-time range check |
+| Rust type | SQL (Postgres) | SQL (SQLite) | SQL (MySQL / MariaDB) | Notes |
+|---|---|---|---|---|
+| `FieldDecimal<P, S>` | `NUMERIC` | `NUMERIC` | `DECIMAL(P, S)` | P = precision, S = scale. Wraps `rango::Decimal` (exact). Only MySQL / MariaDB enforce P and S in the column; on Postgres and SQLite the column is a plain `NUMERIC`, and `FieldDecimal::from_decimal` rescales the value to S in Rust. SQLite is exact up to 15 digits through the numeric column, beyond that the digits are kept as text |
+| `FieldRange<MIN, MAX>` | `BIGINT` | `INTEGER` | `BIGINT` | Checked when built (`FieldRange::new`) |
+
+### Working with decimals
+
+`rango::Decimal` is `rust_decimal::Decimal`. Build one from an integer and a scale, or wrap it in the field with `FieldDecimal::from_decimal`, which rescales to `S`:
+
+```rust
+use rango::prelude::*;
+
+let price = FieldDecimal::<10, 2>::from_decimal(Decimal::new(1250, 2)); // 12.50
+
+// Filters take a plain `Decimal`, typed column or string name.
+let pricey = Product::filter(&pool).gte(Product::PRICE, Decimal::new(2000, 2)).all().await?; // >= 20.00
+let exact = Product::filter(&pool).eq("price", Decimal::new(1999, 2)).all().await?;         // = 19.99
+```
+
+`sum()` and `avg()` return `Result<Option<f64>>` on every backend (the database casts the result to a float), so they are not exact. For an exact decimal aggregate the rule depends on the backend:
+
+| Backend | `min::<Decimal>` / `max::<Decimal>` | Exact `sum` |
+|---|---|---|
+| PostgreSQL, MySQL / MariaDB | Compile and return an exact `Decimal` | Read the rows and add the `Decimal`s in Rust |
+| SQLite | Do not compile: `Decimal` cannot be decoded from SQLite | Same |
+
+The portable way to get the exact extreme is to read the row that holds it:
+
+```rust
+let priciest = Product::filter(&pool).order_by("-fee").limit(1).one().await?; // Option<Product>
+let max_fee: Option<Decimal> = priciest.map(|p| p.fee.0);
+```
+
+`values()` works too when you do not want the whole model. On SQLite a value with more than 15 significant digits is kept as text and sorts after the numbers. See [Aggregations](../querying/aggregations.md).
 
 ## Date/time types
 
@@ -52,8 +86,8 @@ All field types live in `rango::prelude::*`.
 
 | Rust type | Description |
 |---|---|
-| `ForeignKey<M>` | Foreign key to model `M` — stored as UUID |
-| `ManyToMany<M>` | Many-to-many relation — pivot table auto-generated |
+| `ForeignKey<M>` | Foreign key to model `M`; the column has the type of `M`'s primary key (`UUID`, `INTEGER` or `BIGINT`). `M` needs a `FieldUuid`, `FieldInt`, `FieldAutoInt`, `FieldBigInt` or `FieldAutoBigInt` key |
+| `ManyToMany<M>` | Many-to-many relation: pivot table auto-generated, its key columns follow both primary key types. Same target key types as `ForeignKey` |
 
 ## Nullable
 
