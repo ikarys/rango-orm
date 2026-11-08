@@ -1376,7 +1376,6 @@ dependencies = [
  "rango-orm-mysql",
  "rango-orm-postgres",
  "rango-orm-sqlite",
- "sqlx",
  "tokio",
  "trybuild",
  "uuid",
