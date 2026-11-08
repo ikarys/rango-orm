@@ -195,6 +195,30 @@ fn check_not_null_additions(diffs: &[SchemaDiff]) -> Result<()> {
             && column.default.is_none()
             && !column.primary_key
         {
+            let dropped: Vec<&str> = diffs
+                .iter()
+                .filter_map(|d| match d {
+                    SchemaDiff::DropColumn { table: t, column } if t == table => {
+                        Some(column.as_str())
+                    }
+                    _ => None,
+                })
+                .collect();
+            if !dropped.is_empty() {
+                bail!(
+                    "Column \"{table}\".\"{}\" was added while {} dropped: this may be a rename \
+                     of \"{}\", which needs confirmation. Run `rango makemigrations` in a terminal and \
+                     answer `y`, or pass `--yes` to confirm every rename and drop non-interactively \
+                     (review the SQL with `--dry-run`). Otherwise add #[field(default = \"...\")] or make it Option<T>.",
+                    column.name,
+                    if dropped.len() == 1 {
+                        "another column was"
+                    } else {
+                        "other columns were"
+                    },
+                    dropped.join("\", \""),
+                );
+            }
             bail!(
                 "Cannot add NOT NULL column \"{}\".\"{}\" without a default: existing rows would violate it. Add #[field(default = \"...\")] or make it Option<T>.",
                 table,
@@ -366,6 +390,23 @@ mod tests {
             column: text_col("title"),
         }];
         assert!(check_not_null_additions(&diffs).is_err());
+    }
+
+    #[test]
+    fn unconfirmed_rename_error_mentions_rename_and_yes() {
+        let diffs = vec![
+            SchemaDiff::DropColumn {
+                table: "t".to_string(),
+                column: "name".to_string(),
+            },
+            SchemaDiff::AddColumn {
+                table: "t".to_string(),
+                column: text_col("title"),
+            },
+        ];
+        let msg = check_not_null_additions(&diffs).unwrap_err().to_string();
+        assert!(msg.contains("may be a rename of \"name\""), "{msg}");
+        assert!(msg.contains("--yes"), "{msg}");
     }
 
     #[test]
