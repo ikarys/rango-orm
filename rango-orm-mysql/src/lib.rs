@@ -29,6 +29,42 @@ mod query_builder;
 mod row;
 mod transaction;
 
+/// Parse the URL; remote hosts get `ssl-mode=REQUIRED` unless the URL sets a mode.
+fn tls_default(url: &str) -> rango_orm_core::Result<MySqlConnectOptions> {
+    let mut opts = MySqlConnectOptions::from_str(url).map_err(db_err)?;
+    let explicit_ssl = url.contains("ssl-mode=") || url.contains("sslmode=");
+    if !explicit_ssl && opts.get_socket().is_none() && !is_local_host(opts.get_host()) {
+        opts = opts.ssl_mode(MySqlSslMode::Required);
+    }
+    Ok(opts)
+}
+
+#[cfg(test)]
+mod tls_tests {
+    use super::*;
+
+    #[test]
+    fn remote_hosts_require_tls_unless_the_url_says_otherwise() {
+        let mode = |url| tls_default(url).unwrap().get_ssl_mode();
+        assert!(matches!(
+            mode("mysql://u:p@db.example.com/d"),
+            MySqlSslMode::Required
+        ));
+        assert!(matches!(
+            mode("mysql://u:p@localhost/d"),
+            MySqlSslMode::Preferred
+        ));
+        assert!(matches!(
+            mode("mysql://u:p@127.0.0.1/d"),
+            MySqlSslMode::Preferred
+        ));
+        assert!(matches!(
+            mode("mysql://u:p@db.example.com/d?ssl-mode=disabled"),
+            MySqlSslMode::Disabled
+        ));
+    }
+}
+
 /// Connect to MySQL 8.0+ / MariaDB 10.6+. The session runs in UTC (`DATETIME` has no time zone)
 /// with strict SQL mode, so invalid values are rejected instead of silently truncated.
 /// `mariadb://` URLs are accepted as an alias of `mysql://`.
@@ -41,11 +77,7 @@ pub async fn connect(url: &str) -> rango_orm_core::Result<MySqlPool> {
         Some(rest) => format!("mysql://{rest}"),
         None => url.to_string(),
     };
-    let mut opts = MySqlConnectOptions::from_str(&url).map_err(db_err)?;
-    let explicit_ssl = url.contains("ssl-mode=") || url.contains("sslmode=");
-    if !explicit_ssl && opts.get_socket().is_none() && !is_local_host(opts.get_host()) {
-        opts = opts.ssl_mode(MySqlSslMode::Required);
-    }
+    let opts = tls_default(&url)?;
     let opts = opts
         .charset("utf8mb4")
         .timezone(Some("+00:00".to_string()))
