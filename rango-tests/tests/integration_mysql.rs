@@ -705,7 +705,7 @@ async fn test_mysql_unique_violation_is_typed() {
     insert(&pool, user("dup@mysql.com")).await.unwrap();
     let err = insert(&pool, user("dup@mysql.com")).await.unwrap_err();
     assert!(
-        matches!(err, rango_orm_core::Error::UniqueViolation { .. }),
+        matches!(&err, rango_orm_core::Error::UniqueViolation { constraint: Some(c) } if c == "email"),
         "{err:?}"
     );
 }
