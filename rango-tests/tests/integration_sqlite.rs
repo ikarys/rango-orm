@@ -2035,3 +2035,35 @@ async fn test_sqlite_bulk_update_mixed_types_over_several_chunks() {
     counters.sort_by_key(|c| c.id.0);
     assert_eq!(stored, counters);
 }
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-sqlite"), ignore)]
+async fn test_sqlite_decimal_filter_and_aggregates() {
+    let pool = pool().await;
+    for ddl in [
+        r#"DROP TABLE IF EXISTS "bulk_mix""#,
+        r#"CREATE TABLE "bulk_mix" ("id" TEXT PRIMARY KEY, "flag" INTEGER NOT NULL, "n" INTEGER, "big" INTEGER NOT NULL, "price" NUMERIC NOT NULL, "at" TEXT NOT NULL, "nick" TEXT, "meta" TEXT NOT NULL)"#,
+    ] {
+        sqlx::query(ddl).execute(&pool).await.unwrap();
+    }
+    // Prices 0.00, 1.25, 2.50, 3.75.
+    let rows: Vec<BulkMix> = (0..4).map(bulk_mix).collect();
+    bulk_create(&pool, &rows).await.unwrap();
+
+    let at_least_two = BulkMix::filter(&pool)
+        .gte(BulkMix::PRICE, Decimal::new(200, 2))
+        .count()
+        .await
+        .unwrap();
+    assert_eq!(at_least_two, 2);
+    let exact = BulkMix::filter(&pool)
+        .eq("price", Decimal::new(125, 2))
+        .count()
+        .await
+        .unwrap();
+    assert_eq!(exact, 1);
+    let sum: Option<f64> = BulkMix::filter(&pool).sum("price").await.unwrap();
+    assert_eq!(sum, Some(7.5));
+    let avg: Option<f64> = BulkMix::filter(&pool).avg("price").await.unwrap();
+    assert_eq!(avg, Some(1.875));
+}
