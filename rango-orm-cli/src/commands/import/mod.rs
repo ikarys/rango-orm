@@ -141,3 +141,11 @@ mod sqlite;
 pub(crate) use binary::{decode_binary, encode_binary};
 pub(crate) use order::order_by_dependencies;
 pub(crate) use postgres::{binary_columns_postgres, columns_of_type_postgres, fk_edges_postgres};
+
+/// Columns of a row to insert: every key except the `__table` marker.
+fn insert_columns(row: &serde_json::Map<String, serde_json::Value>) -> Vec<&str> {
+    row.keys()
+        .filter(|k| *k != "__table")
+        .map(String::as_str)
+        .collect()
+}

@@ -81,15 +81,11 @@ async fn run_postgres(
         .execute(&mut *conn)
         .await;
 
-    if let Err(err) = unlock
-        && result.is_ok()
-    {
-        return Err(
-            anyhow::Error::from(err).context("Failed to release the migration advisory lock")
-        );
-    }
-
-    result
+    finish(
+        result,
+        unlock,
+        "Failed to release the migration advisory lock",
+    )
 }
 
 // ─── SQLite ───────────────────────────────────────────────────────────────────
@@ -136,13 +132,7 @@ async fn run_sqlite(database_url: &str, migrations_dir: &str) -> Result<()> {
         .execute(&mut *conn)
         .await;
 
-    if let Err(err) = enable
-        && result.is_ok()
-    {
-        return Err(anyhow::Error::from(err).context("Failed to re-enable foreign key checks"));
-    }
-
-    result
+    finish(result, enable, "Failed to re-enable foreign key checks")
 }
 
 // ─── MySQL ────────────────────────────────────────────────────────────────────
@@ -195,16 +185,23 @@ async fn run_mysql(database_url: &str, migrations_dir: &str) -> Result<()> {
         .execute(&mut *conn)
         .await;
 
-    if let Err(err) = unlock
-        && result.is_ok()
-    {
-        return Err(anyhow::Error::from(err).context("Failed to release the migration lock"));
-    }
-
-    result
+    finish(result, unlock, "Failed to release the migration lock")
 }
 
 // ─── Shared logic ─────────────────────────────────────────────────────────────
+
+/// Result of the migrations, or the cleanup error (unlock, re-enable FKs) when they succeeded:
+/// a migration error is never masked by a failed cleanup.
+fn finish<T>(
+    result: Result<()>,
+    cleanup: std::result::Result<T, sqlx::Error>,
+    what: &str,
+) -> Result<()> {
+    match cleanup {
+        Err(err) if result.is_ok() => Err(anyhow::Error::from(err).context(what.to_string())),
+        _ => result,
+    }
+}
 
 /// Apply every pending migration, each in its own transaction. Backend-agnostic.
 async fn apply_pending<DB: sqlx::Database>(
