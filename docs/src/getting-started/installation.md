@@ -28,8 +28,6 @@ chrono = "0.4"
 serde_json = "1"
 ```
 
-Rango 0.2 is in beta (`0.2.0-beta.1`). Until `0.2.0` is out, Cargo does not pick a pre-release for `"0.2"`: write `version = "0.2.0-beta.1"` in `Cargo.toml` (the snippets above show the final form).
-
 ### Several backends at once
 
 You can enable more than one feature. `use rango::prelude::*` then holds the backend-agnostic items (models, field types, `Error`, ...), the `connect_*` functions and the pool types of every enabled backend, plus the ops (`insert`, `get`, `atomic`, `QueryBuilder`, ...) of **one** backend, chosen by priority: PostgreSQL if enabled, else SQLite, else MySQL.
@@ -47,7 +45,7 @@ let q = <Item as rango::sqlite::RangoFilterExt>::filter(&sqlite_pool);
 ## Install the CLI
 
 ```bash
-cargo install rango-orm-cli --version 0.2.0-beta.1
+cargo install rango-orm-cli
 ```
 
 This installs the `rango` binary.
