@@ -21,9 +21,9 @@ use super::*;
 /// let user = rango::insert(&pool, user).await?;
 ///
 /// // Inside rango::atomic()
-/// let user = rango::atomic(&pool, |tx| async move {
-///     let user = rango::insert(tx, user).await?;
-///     rango::insert(tx, profile).await?;
+/// let user = rango::atomic(&pool, async |tx| {
+///     let user = rango::insert(&mut **tx, user).await?;
+///     rango::insert(&mut **tx, profile).await?;
 ///     Ok(user)
 /// }).await?;
 /// ```
@@ -125,8 +125,8 @@ where
 /// let (user, created) = rango::get_or_create(&pool, lookup, defaults).await?;
 ///
 /// // Inside a transaction
-/// let (user, created) = rango::atomic(&pool, |tx| async move {
-///     rango::get_or_create(&mut *tx, lookup, defaults).await
+/// let (user, created) = rango::atomic(&pool, async |tx| {
+///     rango::get_or_create(&mut **tx, lookup, defaults).await
 /// }).await?;
 /// ```
 #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "postgresql", db.operation = "INSERT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]

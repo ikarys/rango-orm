@@ -138,7 +138,7 @@ Design rules:
 | **prefetch_related** ✅ | Reverse FK (`Comment::POST_ID`) and M2M (`Article::TAGS`, one `INNER JOIN` on the pivot); `= ANY($1)` on Postgres, `IN (...)` in batches of 900 elsewhere |
 | **values** ✅ | `.values(&["id", "email"])` → `Vec<HashMap<String, SqlValue>>` |
 | **Aggregations** ✅ | `.count()` `.exists()` `.sum()` `.avg()` `.min()` `.max()` |
-| **Transactions** ✅ | `rango::atomic/transaction(&pool, \|tx\| async { ... }).await?`; crud, `filter`, M2M and bulk ops accept a pool or a transaction (`&mut **tx`) on all three backends; `get_or_create` is atomic (`INSERT … ON CONFLICT DO NOTHING RETURNING *` on Postgres); `update_or_create` on every backend; `atomic_retry` on Postgres |
+| **Transactions** ✅ | `rango::atomic/transaction(&pool, async \|tx\| { ... }).await?` (async closure, `Send` future); crud, `filter`, M2M and bulk ops accept a pool or a transaction (`&mut **tx`) on all three backends; `get_or_create` is atomic (`INSERT … ON CONFLICT DO NOTHING RETURNING *` on Postgres); `update_or_create` on every backend; `atomic_retry` on Postgres |
 | **Bulk ops** ✅ | `rango::bulk_create/update/upsert(&pool, &models, ...)`: multi-row `INSERT`, `UPDATE … FROM (VALUES …)` (per-row `UPDATE` in one transaction on SQLite and MySQL), upsert; all three backends; atomic (savepoint inside a transaction); auto-chunked under the parameter limit; pool or transaction |
 | **Raw SQL escape hatch** ✅ | `rango::raw` / `raw_scalar` / `raw_execute(&pool, "SELECT ...", params)`, values always bound |
 | **Auto-increment PK** ✅ | `FieldAutoInt` / `FieldAutoBigInt`, id assigned by the database |

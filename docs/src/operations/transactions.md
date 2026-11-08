@@ -5,15 +5,15 @@
 Wrap multiple operations in a transaction. Automatically commits on success, rolls back on error.
 
 ```rust
-atomic(&pool, |tx| Box::pin(async move {
+atomic(&pool, async |tx| {
     let user = insert(&mut **tx, new_user).await?;
     let profile = insert(&mut **tx, Profile { user_id: ForeignKey::new(user.id.0), ..profile }).await?;
     Ok((user, profile))
-}))
+})
 .await?;
 ```
 
-The body is wrapped in `Box::pin` because the future borrows `tx` (same pattern as sqlx's `Connection::transaction`).
+The body is an async closure (`async |tx| { ... }`, Rust 1.85+). The future it returns is `Send`, so `tokio::spawn(async move { atomic(&pool, async |tx| { ... }).await })` works.
 
 If any operation returns `Err`, the entire transaction is rolled back. To abort on a business rule, return `Err(Error::abort("insufficient funds"))`.
 
@@ -22,11 +22,11 @@ If any operation returns `Err`, the entire transaction is rolled back. To abort 
 Use `atomic_retry()` for `SERIALIZABLE` / `REPEATABLE READ` workloads and deadlocks. It retries only `Error::Conflict`; other errors are returned immediately.
 
 ```rust
-atomic_retry(&pool, 3, |tx| Box::pin(async move {
+atomic_retry(&pool, 3, async |tx| {
     raw_execute(&mut **tx, "SET TRANSACTION ISOLATION LEVEL SERIALIZABLE", vec![]).await?;
     // ...
     Ok(())
-}))
+})
 .await?;
 ```
 
@@ -51,12 +51,12 @@ tx.commit().await?;
 `filter`, the `M2M` operations and the bulk operations take a pool or a transaction, on every backend. Inside `atomic()` pass `&mut **tx`:
 
 ```rust
-atomic(&pool, |tx| Box::pin(async move {
+atomic(&pool, async |tx| {
     bulk_create(&mut **tx, &users).await?;
     let n = User::filter(&mut **tx).eq("active", true).count().await?; // sees the writes above
     M2M::<Article, Tag>::add(&mut **tx, &article, &tag).await?;
     Ok(n)
-}))
+})
 .await?;
 ```
 

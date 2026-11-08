@@ -64,10 +64,10 @@ Every bulk operation is all-or-nothing. When it needs several statements (chunke
 `bulk_create`, `bulk_update` and `bulk_upsert` take a pool or a transaction on all three backends (`&mut **tx` is the connection behind the transaction).
 
 ```rust
-atomic(&pool, |tx| Box::pin(async move {
+atomic(&pool, async |tx| {
     bulk_create(&mut **tx, &users).await?;
     bulk_create(&mut **tx, &posts).await?;
     bulk_update(&mut **tx, &users, &["active"]).await?;
     Ok(())
-})).await?;
+}).await?;
 ```
