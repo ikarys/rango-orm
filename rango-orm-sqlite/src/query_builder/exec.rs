@@ -144,7 +144,9 @@ where
         use sqlx::Row;
         let (sql, binds) = self.f.exists_sql();
         let row = self.conn.fetch_one(&sql, binds).await?;
-        row.try_get::<i64, _>(0).map(|n| n != 0).map_err(crate::error::db_err)
+        row.try_get::<i64, _>(0)
+            .map(|n| n != 0)
+            .map_err(crate::error::db_err)
     }
 
     /// SELECT only the specified columns — returns raw rows as `Vec<HashMap<String, SqlValue>>`.
