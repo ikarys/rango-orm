@@ -4,11 +4,11 @@
 //!
 //! Add to `Cargo.toml`:
 //! ```toml
-//! rango-orm = "0.1"                                                     # postgres (default)
+//! rango-orm = "0.2"                                                     # postgres (default)
 //! # or
-//! rango-orm = { version = "0.1", default-features = false, features = ["sqlite"] }
+//! rango-orm = { version = "0.2", default-features = false, features = ["sqlite"] }
 //! # or MySQL / MariaDB:
-//! rango-orm = { version = "0.1", default-features = false, features = ["mysql"] }
+//! rango-orm = { version = "0.2", default-features = false, features = ["mysql"] }
 //! ```
 //!
 //! Rango does not re-export `uuid` or `chrono`: add them to your own

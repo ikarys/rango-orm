@@ -657,12 +657,16 @@ async fn dump_restore_round_trip() {
     // Restoring over existing data fails and changes nothing.
     let out = project.run_cli(&["restore", "d.json"]);
     assert_failure(&out, "restore over existing rows");
-    assert!(String::from_utf8_lossy(&out.stderr).contains("e2e_dump_person"));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("Failed to insert into"));
     assert_eq!(dump_state(&pool).await, before);
 
     drop_dump_tables(&pool).await;
     assert_success(&project.run_cli(&["restore", "d.json"]), "restore");
     assert_eq!(dump_state(&pool).await, before);
+    // The ledger came back with the schema: `migrate` is a no-op.
+    let out = project.migrate();
+    assert_success(&out, "migrate after restore");
+    assert!(String::from_utf8_lossy(&out.stdout).contains("Nothing to apply"));
 
     // A backup is restorable too.
     assert_success(&project.run_cli(&["backup", "--dir", "bk"]), "backup");

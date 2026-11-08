@@ -18,18 +18,10 @@ where
     }
     let n_cols = rango_orm_core::insert_values(&models[0]).len();
     let chunk_size = (65_535 / n_cols).max(1); // MySQL limit: 65 535 placeholders per statement
-    let mut total = 0usize;
-    // One transaction for all chunks (a savepoint when `executor` is already a transaction):
-    // a failure in a later chunk must not leave the earlier rows behind.
-    let mut tx = executor.begin().await.map_err(db_err)?;
-    for chunk in models.chunks(chunk_size) {
-        let (sql, values) = build_bulk_create_sql::<M>(chunk);
-        let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*sql)), values);
-        let result = q.execute(&mut *tx).await.map_err(db_err)?;
-        total += result.rows_affected() as usize;
-    }
-    tx.commit().await.map_err(db_err)?;
-    Ok(total)
+    run_chunks(executor, models, chunk_size, |chunk| {
+        build_bulk_create_sql::<M>(chunk)
+    })
+    .await
 }
 
 /// Columns come from the first model: give every model a PK, or none (auto-increment).
@@ -59,7 +51,7 @@ fn build_bulk_create_sql<M: Model + ModelValues>(models: &[M]) -> (String, Vec<S
 const MAX_UPDATE_CHUNK: usize = 100;
 
 /// UPDATE multiple rows by primary key: one `UPDATE ... SET c = CASE pk WHEN ? THEN ? ... END
-/// WHERE pk IN (...)` per chunk, all chunks in one transaction (a savepoint inside `atomic`).
+/// WHERE pk IN (...)` per chunk; several chunks run in one transaction (a savepoint inside `atomic`), a single chunk in none (one statement is atomic).
 ///
 /// `fields` lists the columns to update (never the PK, it is the join key). `CASE` is used instead of a derived table because MySQL and MariaDB infer the types and collations of a `VALUES` table differently; here every bound value is converted by the target column. Auto-chunked (100 rows, or the placeholder limit). sqlx sets `CLIENT_FOUND_ROWS`, so unchanged rows still count.
 /// Returns the number of rows matched; unknown columns fail with `Error::Invalid` before
@@ -87,15 +79,10 @@ where
     // A `CASE` is scanned linearly for every row, so the cost per chunk is quadratic: capping the
     // chunk at 100 rows was ~7x faster than filling the placeholder limit (measured, 5000 rows).
     let chunk_size = (65_535 / (2 * fields.len() + 1)).clamp(1, MAX_UPDATE_CHUNK);
-    let mut total = 0usize;
-    let mut tx = executor.begin().await.map_err(db_err)?;
-    for chunk in models.chunks(chunk_size) {
-        let (sql, values) = build_bulk_update_sql::<M>(chunk, fields);
-        let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*sql)), values);
-        total += q.execute(&mut *tx).await.map_err(db_err)?.rows_affected() as usize;
-    }
-    tx.commit().await.map_err(db_err)?;
-    Ok(total)
+    run_chunks(executor, models, chunk_size, |chunk| {
+        build_bulk_update_sql::<M>(chunk, fields)
+    })
+    .await
 }
 
 /// `UPDATE t SET c1 = CASE pk WHEN ? THEN ? .. END, .. WHERE pk IN (?, ..)`
@@ -132,7 +119,7 @@ fn build_bulk_update_sql<M: Model + ModelValues>(
 
 /// INSERT multiple rows with `ON DUPLICATE KEY UPDATE`.
 ///
-/// MySQL fires on a duplicate of any unique index or the PK, whatever `conflict_on` says: the argument only lists columns that are not overwritten. Auto-chunked under the placeholder limit, in one transaction. Returns the number
+/// MySQL fires on a duplicate of any unique index or the PK, whatever `conflict_on` says: the argument only lists columns that are not overwritten. Auto-chunked under the placeholder limit; several chunks share one transaction, a single chunk needs none. Returns the number
 /// of rows affected.
 #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "mysql", db.operation = "INSERT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
 pub async fn bulk_upsert<'a, A, M>(executor: A, models: &[M], conflict_on: &[&str]) -> Result<usize>
@@ -151,15 +138,10 @@ where
     check_upsert_keys::<M>(conflict_on)?;
     let n_cols = rango_orm_core::insert_values(&models[0]).len();
     let chunk_size = (65_535 / n_cols).max(1);
-    let mut total = 0usize;
-    let mut tx = executor.begin().await.map_err(db_err)?;
-    for chunk in models.chunks(chunk_size) {
-        let (sql, values) = build_bulk_upsert_sql::<M>(chunk, conflict_on);
-        let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*sql)), values);
-        total += q.execute(&mut *tx).await.map_err(db_err)?.rows_affected() as usize;
-    }
-    tx.commit().await.map_err(db_err)?;
-    Ok(total)
+    run_chunks(executor, models, chunk_size, |chunk| {
+        build_bulk_upsert_sql::<M>(chunk, conflict_on)
+    })
+    .await
 }
 
 /// `ON DUPLICATE KEY UPDATE` fires on any unique key and cannot name its target, so
@@ -228,4 +210,34 @@ fn build_bulk_upsert_sql<M: Model + ModelValues>(
         ),
         values,
     )
+}
+
+/// Runs one statement per chunk. A single chunk is one statement, already atomic: no
+/// transaction. Several chunks share one transaction (a savepoint when `executor` is already
+/// a transaction), so a later failure does not leave the earlier rows behind.
+async fn run_chunks<'a, A, M>(
+    executor: A,
+    models: &[M],
+    chunk_size: usize,
+    build: impl Fn(&[M]) -> (String, Vec<SqlValue>),
+) -> Result<usize>
+where
+    A: Acquire<'a, Database = MySql>,
+{
+    let run = |sql: String, values| bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(sql)), values);
+    if models.len() <= chunk_size {
+        let mut conn = executor.acquire().await.map_err(db_err)?;
+        let (sql, values) = build(models);
+        let result = run(sql, values).execute(&mut *conn).await.map_err(db_err)?;
+        return Ok(result.rows_affected() as usize);
+    }
+    let mut total = 0usize;
+    let mut tx = executor.begin().await.map_err(db_err)?;
+    for chunk in models.chunks(chunk_size) {
+        let (sql, values) = build(chunk);
+        let result = run(sql, values).execute(&mut *tx).await.map_err(db_err)?;
+        total += result.rows_affected() as usize;
+    }
+    tx.commit().await.map_err(db_err)?;
+    Ok(total)
 }

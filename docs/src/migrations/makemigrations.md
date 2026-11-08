@@ -19,6 +19,8 @@ Found 3 model(s):
 📸 Snapshot updated.
 ```
 
+The file is named `NNNN_<tables>.sql`: the number is the next free one, followed by the tables the migration touches in alphabetical order.
+
 ## Options
 
 ```bash
@@ -33,7 +35,24 @@ rango makemigrations src/models
 
 # Custom output directory
 rango makemigrations --output db/migrations
+
+# Confirm every rename and drop without asking
+rango makemigrations --yes
 ```
+
+## Renames
+
+Renaming a field looks like a dropped column plus an added one. When a table has both in the same run, Rango pairs them (columns of the same type first) and asks:
+
+```
+Did you rename "user"."name" to "full_name"? [y/N]
+```
+
+Answer `y` and the migration contains `ALTER TABLE "user" RENAME COLUMN "name" TO "full_name";`, so the data is kept. Answer anything else and it stays a drop plus an add.
+
+- `--yes` answers `y` to every rename question (and to the destructive-changes confirmation), for scripts. Review the SQL first with `--dry-run`.
+- Without a terminal (CI, pipes) Rango cannot ask, so each question counts as "no". If the new column is `NOT NULL` without a default, the command stops with an error that mentions the possible rename and `--yes`. Otherwise a drop that needs confirmation aborts with `Aborted: destructive changes need confirmation (interactive, or --yes)`.
+- With `--check`, renames are never confirmed: the run only reports whether migrations are pending.
 
 ## How it works
 
