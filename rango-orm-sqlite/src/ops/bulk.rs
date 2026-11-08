@@ -55,9 +55,10 @@ fn build_bulk_create_sql<M: Model + ModelValues>(models: &[M]) -> (String, Vec<S
     (sql, all_values)
 }
 
-/// UPDATE multiple rows by primary key, in one transaction (a savepoint inside `atomic`).
+/// UPDATE multiple rows by primary key: one `UPDATE ... FROM (VALUES ...)` per chunk, all chunks in
+/// one transaction (a savepoint inside `atomic`).
 ///
-/// `fields` lists the columns to update (never the PK, it is the join key). SQLite has no `UPDATE ... FROM (VALUES ...)` with column aliases usable everywhere, so this runs one prepared `UPDATE` per row (in-process, cheap).
+/// `fields` lists the columns to update (never the PK, it is the join key). Auto-chunked under the placeholder limit.
 /// Returns the number of rows matched; unknown columns fail with `Error::Invalid` before
 /// anything runs.
 #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "sqlite", db.operation = "UPDATE", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
@@ -79,35 +80,49 @@ where
             )));
         }
     }
-    let sql = format!(
-        "UPDATE {} SET {} WHERE {} = ?",
-        quote_ident(M::table_name()),
-        fields
-            .iter()
-            .map(|f| format!("{} = ?", quote_ident(f)))
-            .collect::<Vec<_>>()
-            .join(", "),
-        quote_ident(M::pk_column())
-    );
+    let chunk_size = (999 / (fields.len() + 1)).max(1);
     let mut total = 0usize;
     let mut tx = executor.begin().await.map_err(db_err)?;
-    for model in models {
-        let all = model.field_values();
-        let mut values: Vec<SqlValue> = fields
-            .iter()
-            .map(|f| {
-                all.iter()
-                    .find(|(c, _)| c == f)
-                    .map(|(_, v)| v.clone())
-                    .unwrap_or(SqlValue::NullText)
-            })
-            .collect();
-        values.push(model.pk_value());
+    for chunk in models.chunks(chunk_size) {
+        let (sql, values) = build_bulk_update_sql::<M>(chunk, fields);
         let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*sql)), values);
         total += q.execute(&mut *tx).await.map_err(db_err)?.rows_affected() as usize;
     }
     tx.commit().await.map_err(db_err)?;
     Ok(total)
+}
+
+/// `WITH v(pk, c1, ..) AS (VALUES (?, ?, ..), ..) UPDATE t SET c1 = v.c1, .. FROM v WHERE t.pk = v.pk`
+fn build_bulk_update_sql<M: Model + ModelValues>(
+    models: &[M],
+    fields: &[&str],
+) -> (String, Vec<SqlValue>) {
+    let mut values: Vec<SqlValue> = Vec::with_capacity(models.len() * (fields.len() + 1));
+    for model in models {
+        let all = model.field_values();
+        values.push(model.pk_value());
+        values.extend(fields.iter().map(|f| {
+            all.iter()
+                .find(|(c, _)| c == f)
+                .map(|(_, v)| v.clone())
+                .unwrap_or(SqlValue::NullText)
+        }));
+    }
+    let row = format!("({})", vec!["?"; fields.len() + 1].join(", "));
+    let pk = quote_ident(M::pk_column());
+    let table = quote_ident(M::table_name());
+    let cols = fields.iter().map(|f| quote_ident(f)).collect::<Vec<_>>();
+    let sql = format!(
+        "WITH v({pk}, {cols}) AS (VALUES {rows}) UPDATE {table} SET {set} FROM v WHERE {table}.{pk} = v.{pk}",
+        cols = cols.join(", "),
+        rows = vec![row; models.len()].join(", "),
+        set = cols
+            .iter()
+            .map(|c| format!("{c} = v.{c}"))
+            .collect::<Vec<_>>()
+            .join(", "),
+    );
+    (sql, values)
 }
 
 /// INSERT multiple rows with `ON CONFLICT ... DO UPDATE`.
