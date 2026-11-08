@@ -4,6 +4,8 @@
 
 First beta of the 0.2 cycle. The API may still change between betas: pin the tag.
 
+- Feat: `atomic_retry` on MySQL / MariaDB: retries on InnoDB deadlock (1213) and lock wait timeout (1205), both now mapped to `Error::Conflict` (they were `Error::Timeout`; Postgres `lock_timeout` is unchanged).
+- Breaking: MySQL `bulk_upsert` returns `Error::Invalid` before any SQL when the table has a unique key (column or non-partial `UniqueConstraint`) other than `conflict_on`, since `ON DUPLICATE KEY UPDATE` fires on any unique key and cannot target one. The primary key is exempt, but upserting on it is rejected when another unique key exists.
 - Breaking: `atomic`, `transaction` and `atomic_retry` take an async closure: `atomic(&pool, async |tx| { ... }).await?` instead of `|tx| Box::pin(async move { ... })`. The returned future is `Send`. `TxFuture` is removed.
 - Breaking: the Postgres `QueryBuilder` fields `explicit_limit`, `select_related_specs` and `prefetch_specs` are no longer public (nothing outside the crate used them; the SQLite and MySQL builders never exposed fields).
 - Breaking: `rango::prelude` no longer glob-exports every enabled backend (two backends gave ambiguous names). It holds the backend-agnostic items, the `connect_*` functions, the pool types and the ops of ONE backend: postgres if enabled, else sqlite, else mysql. New `rango::postgres` module next to `rango::sqlite` / `rango::mysql`; each lists that backend's ops, pool and `*QueryExt`. `just check-features` builds every feature combination.

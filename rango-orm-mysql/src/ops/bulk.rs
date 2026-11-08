@@ -128,6 +128,7 @@ where
             return Err(Error::Invalid(msg));
         }
     }
+    check_upsert_keys::<M>(conflict_on)?;
     let n_cols = rango_orm_core::insert_values(&models[0]).len();
     let chunk_size = (65_535 / n_cols).max(1);
     let mut total = 0usize;
@@ -139,6 +140,49 @@ where
     }
     tx.commit().await.map_err(db_err)?;
     Ok(total)
+}
+
+/// `ON DUPLICATE KEY UPDATE` fires on any unique key and cannot name its target, so
+/// reject tables with a unique key other than `conflict_on` (the PK is exempt: a PK
+/// collision is the same row). Partial unique constraints are not created on MySQL.
+fn check_upsert_keys<M: Model>(conflict_on: &[&str]) -> Result<()> {
+    use rango_orm_core::Constraint;
+    let schema = M::schema();
+    let mut wanted: Vec<&str> = conflict_on.to_vec();
+    wanted.sort_unstable();
+    wanted.dedup();
+    let single = schema
+        .columns
+        .iter()
+        .filter(|c| c.unique && !c.primary_key)
+        .map(|c| vec![c.name.as_str()]);
+    let composite = schema.constraints.iter().filter_map(|c| match c {
+        Constraint::Unique(u) if u.condition.is_none() => {
+            Some(u.fields.iter().map(String::as_str).collect())
+        }
+        _ => None,
+    });
+    let others: Vec<String> = single
+        .chain(composite)
+        .filter(|k: &Vec<&str>| {
+            let mut k = k.clone();
+            k.sort_unstable();
+            k.dedup();
+            k != wanted
+        })
+        .map(|k| format!("({})", k.join(", ")))
+        .collect();
+    if others.is_empty() {
+        return Ok(());
+    }
+    Err(Error::Invalid(format!(
+        "bulk_upsert on `{}`: MySQL `ON DUPLICATE KEY UPDATE` fires on any unique key and cannot \
+         target ({}), but the table also has unique key(s) {}; use another approach (e.g. \
+         update_or_create) or a model with a single unique key",
+        M::table_name(),
+        conflict_on.join(", "),
+        others.join(", ")
+    )))
 }
 
 fn build_bulk_upsert_sql<M: Model + ModelValues>(
