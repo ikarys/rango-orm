@@ -1823,9 +1823,10 @@ async fn test_mysql_atomic_retry_recovers_from_deadlock() {
     let worker = |first: &'static str, second: &'static str| {
         let (pool, barrier, runs) = (pool.clone(), barrier.clone(), runs.clone());
         async move {
-            let mut attempt = 0;
+            let attempt = AtomicU32::new(0);
+            let attempt = &attempt;
             atomic_retry(&pool, 5, async |tx| {
-                attempt += 1;
+                let attempt = attempt.fetch_add(1, Ordering::SeqCst) + 1;
                 runs.fetch_add(1, Ordering::SeqCst);
                 let sql = "UPDATE `test_user` SET `score` = 1 WHERE `email` = ?";
                 raw_execute(&mut **tx, sql, vec![SqlValue::Text(first.into())]).await?;
@@ -1839,7 +1840,7 @@ async fn test_mysql_atomic_retry_recovers_from_deadlock() {
             .await
         }
     };
-    // Same task, interleaved by `join!` (async closures are not `Send`-inferable for `spawn`).
+    // Same task, interleaved by `join!`.
     let (r1, r2) = tokio::join!(
         worker("dl_a@t.com", "dl_b@t.com"),
         worker("dl_b@t.com", "dl_a@t.com")
