@@ -16,15 +16,17 @@ rango-orm-sqlite   = { path = "../rango-orm-sqlite" }
 rango-orm-mysql    = { path = "../rango-orm-mysql" }
 rango-orm-core     = { path = "../rango-orm-core" }
 rango-orm-derive   = { path = "../rango-orm-derive" }
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync"] }
 uuid = { version = "1", features = ["v4"] }
 anyhow = "1"
 serde_json = "1"
 chrono = "0.4"
 tracing = "0.1"
-sqlx = { version = "0.8", features = ["postgres", "sqlite", "mysql", "runtime-tokio"] }
+sqlx = { version = "0.9", features = ["postgres", "sqlite", "mysql", "runtime-tokio"] }
 
 [features]
 integration = []
 integration-sqlite = []
 integration-mysql = []
+# On-demand, end-to-end scenario suite (`just scenarios`). Not enabled in CI.
+integration-scenarios = []

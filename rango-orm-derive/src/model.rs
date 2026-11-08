@@ -4,6 +4,8 @@ use syn::{
     Data, DeriveInput, Field, Fields, Lit, Meta, Result, Token, Type, punctuated::Punctuated,
 };
 
+use rango_orm_core::{ColumnType, type_map};
+
 use crate::rango_core_path;
 use crate::utils::to_snake_case;
 
@@ -27,6 +29,7 @@ struct ModelAttr {
     table: Option<String>,
     comment: Option<String>,
     managed: Option<bool>,
+    hooks: bool,
     ordering: Vec<syn::Expr>,
     constraints: Vec<syn::Expr>,
 }
@@ -77,6 +80,7 @@ pub fn expand(input: DeriveInput) -> Result<TokenStream> {
     let mut pk_col_name = "id".to_string();
     let mut pk_found = false;
     let mut set_pk_body = quote! { let _ = id; };
+    let mut pk_type = quote! { #core::UnsupportedPk };
 
     // ManyToMany fields are never read by generated code, so `dead_code` would flag them
     // in every model that declares one; this read silences it.
@@ -107,7 +111,14 @@ pub fn expand(input: DeriveInput) -> Result<TokenStream> {
             let ty = &f.ty;
             let ty_str = quote!(#ty).to_string().replace(' ', "");
             // Path-qualified types too (`#[rango::model]` injects `rango_core::FieldAutoBigInt`).
-            match ty_str.rsplit("::").next().unwrap_or("") {
+            let last = ty_str.rsplit("::").next().unwrap_or("");
+            if matches!(
+                last,
+                "FieldUuid" | "FieldInt" | "FieldBigInt" | "FieldAutoInt" | "FieldAutoBigInt"
+            ) {
+                pk_type = quote! { <#ty as #core::PrimaryKeyField>::Pk };
+            }
+            match last {
                 "FieldAutoInt" => {
                     set_pk_body =
                         quote! { self.#fname = #core::FieldAutoInt(i32::try_from(id).ok()); };
@@ -188,8 +199,17 @@ pub fn expand(input: DeriveInput) -> Result<TokenStream> {
     };
 
     let core2 = rango_core_path();
+    let default_hooks = if model_attr.hooks {
+        quote! {}
+    } else {
+        quote! { impl #core2::ModelHooks for #struct_name {} }
+    };
     Ok(quote! {
+        #default_hooks
+
         impl #core2::Model for #struct_name {
+            type Pk = #pk_type;
+
             fn table_name() -> &'static str {
                 #table_name
             }
@@ -278,6 +298,7 @@ fn parse_model_attr(input: &DeriveInput) -> Result<ModelAttr> {
                         attr.comment = Some(s.value());
                     }
                 }
+                Meta::Path(p) if p.is_ident("hooks") => attr.hooks = true,
                 Meta::NameValue(nv) if nv.path.is_ident("managed") => {
                     if let syn::Expr::Lit(expr_lit) = &nv.value
                         && let Lit::Bool(b) = &expr_lit.lit
@@ -464,8 +485,8 @@ pub(crate) fn field_type_to_getter(
         "FieldFloat" => quote! { row.get_f32(#col).map(#core::FieldFloat)? },
         "FieldDouble" => quote! { row.get_f64(#col).map(#core::FieldDouble)? },
         "FieldText" => quote! { row.get_string(#col).map(#core::FieldText)? },
-        "FieldEmail" => quote! { row.get_string(#col).map(#core::FieldEmail)? },
-        "FieldUrl" => quote! { row.get_string(#col).map(#core::FieldUrl)? },
+        "FieldEmail" => quote! { row.get_string(#col).map(#core::FieldEmail::from_db)? },
+        "FieldUrl" => quote! { row.get_string(#col).map(#core::FieldUrl::from_db)? },
         "FieldBytes" => quote! { row.get_bytes(#col).map(#core::FieldBytes)? },
         "FieldUuid" => quote! { row.get_uuid(#col).map(#core::FieldUuid)? },
         "FieldDateTime" => quote! { row.get_datetime(#col).map(#core::FieldDateTime)? },
@@ -473,14 +494,14 @@ pub(crate) fn field_type_to_getter(
         "FieldTime" => quote! { row.get_time(#col).map(#core::FieldTime)? },
         "FieldJson" => quote! { row.get_json(#col).map(#core::FieldJson)? },
         s if s.starts_with("ForeignKey<") => {
-            // Extract the type parameter — not used at runtime, only for type safety
-            quote! { row.get_uuid(#col).map(|id| #core::ForeignKey::new(id))? }
+            let target = fk_target(s);
+            quote! { <<#target as #core::Model>::Pk as #core::PrimaryKey>::from_row(row, #col).map(#core::ForeignKey::<#target>::new)? }
         }
         s if s.starts_with("FieldVarchar<") => {
             let (min, max) = parse_two_generics(s, "FieldVarchar");
             let min_lit = proc_macro2::Literal::usize_unsuffixed(min);
             let max_lit = proc_macro2::Literal::usize_unsuffixed(max);
-            quote! { row.get_string(#col).map(|s| #core::FieldVarchar::<#min_lit, #max_lit>(s))? }
+            quote! { row.get_string(#col).map(#core::FieldVarchar::<#min_lit, #max_lit>::from_db)? }
         }
         s if s.starts_with("FieldPassword<") => {
             let (min, max) = parse_two_generics(s, "FieldPassword");
@@ -498,7 +519,7 @@ pub(crate) fn field_type_to_getter(
             let (min, max) = parse_two_generics_i64(s, "FieldRange");
             let min_lit = proc_macro2::Literal::i64_unsuffixed(min);
             let max_lit = proc_macro2::Literal::i64_unsuffixed(max);
-            quote! { row.get_i64(#col).map(|v| #core::FieldRange::<#min_lit, #max_lit>(v))? }
+            quote! { row.get_i64(#col).map(#core::FieldRange::<#min_lit, #max_lit>::from_db)? }
         }
         _ => quote! { compile_error!("Unknown field type in FromRow") },
     };
@@ -521,7 +542,7 @@ pub(crate) fn field_type_to_getter(
                 quote! { if row.is_null(#col) { None } else { Some(row.get_string(#col).map(#core::FieldText)?) } }
             }
             "FieldEmail" => {
-                quote! { if row.is_null(#col) { None } else { Some(row.get_string(#col).map(#core::FieldEmail)?) } }
+                quote! { if row.is_null(#col) { None } else { Some(row.get_string(#col).map(#core::FieldEmail::from_db)?) } }
             }
             "FieldUuid" => {
                 quote! { if row.is_null(#col) { None } else { Some(row.get_uuid(#col).map(#core::FieldUuid)?) } }
@@ -533,13 +554,14 @@ pub(crate) fn field_type_to_getter(
                 quote! { if row.is_null(#col) { None } else { Some(row.get_json(#col).map(#core::FieldJson)?) } }
             }
             s if s.starts_with("ForeignKey<") => {
-                quote! { if row.is_null(#col) { None } else { Some(row.get_uuid(#col).map(|id| #core::ForeignKey::new(id))?) } }
+                let target = fk_target(s);
+                quote! { if row.is_null(#col) { None } else { Some(<<#target as #core::Model>::Pk as #core::PrimaryKey>::from_row(row, #col).map(#core::ForeignKey::<#target>::new)?) } }
             }
             s if s.starts_with("FieldVarchar<") => {
                 let (min, max) = parse_two_generics(s, "FieldVarchar");
                 let min_lit = proc_macro2::Literal::usize_unsuffixed(min);
                 let max_lit = proc_macro2::Literal::usize_unsuffixed(max);
-                quote! { if row.is_null(#col) { None } else { Some(row.get_string(#col).map(|s| #core::FieldVarchar::<#min_lit, #max_lit>(s))?) } }
+                quote! { if row.is_null(#col) { None } else { Some(row.get_string(#col).map(#core::FieldVarchar::<#min_lit, #max_lit>::from_db)?) } }
             }
             _ => quote! { if row.is_null(#col) { None } else { Some(#getter) } },
         }
@@ -588,6 +610,15 @@ fn first_generic(ty: &Type) -> Option<&Type> {
     })
 }
 
+/// The target model of a `ForeignKey<Target>` type text (as built by [`type_name`]).
+fn fk_target(type_str: &str) -> TokenStream {
+    let inner = type_str
+        .strip_prefix("ForeignKey<")
+        .and_then(|t| t.strip_suffix('>'))
+        .unwrap_or("");
+    inner.parse().unwrap_or_else(|_| quote! { () })
+}
+
 /// Type text without its module path: `rango::FieldVarchar<1, 100>` → `FieldVarchar<1,100>`,
 /// so field types match whether they are imported or written with a path.
 pub(crate) fn type_name(ty: &Type) -> String {
@@ -620,82 +651,54 @@ pub(crate) fn extract_option(ty: &Type) -> (bool, &Type) {
     (false, ty)
 }
 
-/// Map a Rango field type path to a `ColumnType` token.
+/// Map a Rango field type path to a `ColumnType` token (the table lives in `rango_orm_core::type_map`).
 fn map_field_type(ty: &Type, core: &TokenStream) -> Result<TokenStream> {
     let type_str = type_name(ty);
+    if type_str.starts_with("ForeignKey<") {
+        let target = first_generic(ty)
+            .ok_or_else(|| syn::Error::new_spanned(ty, "expected ForeignKey<Model>"))?;
+        return Ok(quote! { <<#target as #core::Model>::Pk as #core::PrimaryKey>::COLUMN_TYPE });
+    }
+    match type_map::column_type(&type_str) {
+        Ok(ct) => Ok(column_type_tokens(&ct, core)),
+        Err(type_map::TypeMapError::Unknown) => Err(unsupported_type(ty, &type_str)),
+        Err(type_map::TypeMapError::Invalid(name)) => Err(syn::Error::new(
+            proc_macro2::Span::call_site(),
+            format!("Invalid {name} syntax: `{type_str}`"),
+        )),
+    }
+}
 
-    let col_type = match type_str.as_str() {
-        "FieldBool" => quote! { #core::ColumnType::Bool },
-        "FieldSmallInt" => quote! { #core::ColumnType::SmallInt },
-        "FieldInt" => quote! { #core::ColumnType::Int },
-        "FieldBigInt" => quote! { #core::ColumnType::BigInt },
-        "FieldAutoInt" => quote! { #core::ColumnType::AutoInt },
-        "FieldAutoBigInt" => quote! { #core::ColumnType::AutoBigInt },
-        "FieldFloat" => quote! { #core::ColumnType::Float },
-        "FieldDouble" => quote! { #core::ColumnType::Double },
-        "FieldText" => quote! { #core::ColumnType::Text },
-        "FieldEmail" => quote! { #core::ColumnType::Varchar(254) },
-        "FieldUrl" => quote! { #core::ColumnType::Varchar(2048) },
-        "FieldBytes" => quote! { #core::ColumnType::Bytea },
-        "FieldUuid" => quote! { #core::ColumnType::Uuid },
-        "FieldDate" => quote! { #core::ColumnType::Date },
-        "FieldTime" => quote! { #core::ColumnType::Time },
-        "FieldDateTime" => quote! { #core::ColumnType::DateTime },
-        "FieldJson" => quote! { #core::ColumnType::Jsonb },
-        s if s.starts_with("ForeignKey<") => quote! { #core::ColumnType::Uuid },
-        s if s.starts_with("FieldVarchar<") => parse_varchar(s, core)?,
-        s if s.starts_with("FieldDecimal<") => parse_decimal(s, core)?,
-        s if s.starts_with("FieldPassword<") => parse_password(s, core)?,
-        s if s.starts_with("FieldRange<") => quote! { #core::ColumnType::BigInt },
-        _ => {
-            return Err(syn::Error::new(
-                proc_macro2::Span::call_site(),
-                format!(
-                    "Unknown Rango field type: `{}`. Use a FieldXxx type.",
-                    type_str
-                ),
-            ));
+fn column_type_tokens(ct: &ColumnType, core: &TokenStream) -> TokenStream {
+    match ct {
+        ColumnType::Bool => quote! { #core::ColumnType::Bool },
+        ColumnType::SmallInt => quote! { #core::ColumnType::SmallInt },
+        ColumnType::Int => quote! { #core::ColumnType::Int },
+        ColumnType::BigInt => quote! { #core::ColumnType::BigInt },
+        ColumnType::AutoInt => quote! { #core::ColumnType::AutoInt },
+        ColumnType::AutoBigInt => quote! { #core::ColumnType::AutoBigInt },
+        ColumnType::Float => quote! { #core::ColumnType::Float },
+        ColumnType::Double => quote! { #core::ColumnType::Double },
+        ColumnType::Text => quote! { #core::ColumnType::Text },
+        ColumnType::Bytea => quote! { #core::ColumnType::Bytea },
+        ColumnType::Uuid => quote! { #core::ColumnType::Uuid },
+        ColumnType::Date => quote! { #core::ColumnType::Date },
+        ColumnType::Time => quote! { #core::ColumnType::Time },
+        ColumnType::DateTime => quote! { #core::ColumnType::DateTime },
+        ColumnType::Json => quote! { #core::ColumnType::Json },
+        ColumnType::Jsonb => quote! { #core::ColumnType::Jsonb },
+        ColumnType::Varchar(n) => quote! { #core::ColumnType::Varchar(#n) },
+        ColumnType::Decimal { precision, scale } => {
+            quote! { #core::ColumnType::Decimal { precision: #precision, scale: #scale } }
         }
-    };
-    Ok(col_type)
+    }
 }
 
-fn parse_varchar(s: &str, core: &TokenStream) -> Result<TokenStream> {
-    let inner = s.trim_start_matches("FieldVarchar<").trim_end_matches('>');
-    let parts: Vec<&str> = inner.split(',').collect();
-    if parts.len() == 2
-        && let Ok(max) = parts[1].trim().parse::<u32>()
-    {
-        return Ok(quote! { #core::ColumnType::Varchar(#max) });
-    }
-    Err(syn::Error::new(
-        proc_macro2::Span::call_site(),
-        format!("Invalid FieldVarchar syntax: `{}`", s),
-    ))
-}
-
-fn parse_decimal(s: &str, core: &TokenStream) -> Result<TokenStream> {
-    let inner = s.trim_start_matches("FieldDecimal<").trim_end_matches('>');
-    let parts: Vec<&str> = inner.split(',').collect();
-    if parts.len() == 2
-        && let (Ok(p), Ok(sc)) = (parts[0].trim().parse::<u8>(), parts[1].trim().parse::<u8>())
-    {
-        return Ok(quote! { #core::ColumnType::Decimal { precision: #p, scale: #sc } });
-    }
-    Err(syn::Error::new(
-        proc_macro2::Span::call_site(),
-        format!("Invalid FieldDecimal syntax: `{}`", s),
-    ))
-}
-
-fn parse_password(s: &str, core: &TokenStream) -> Result<TokenStream> {
-    let inner = s.trim_start_matches("FieldPassword<").trim_end_matches('>');
-    let parts: Vec<&str> = inner.split(',').collect();
-    if parts.len() == 2 && parts[1].trim().parse::<u32>().is_ok() {
-        return Ok(quote! { #core::ColumnType::Text });
-    }
-    Err(syn::Error::new(
-        proc_macro2::Span::call_site(),
-        format!("Invalid FieldPassword syntax: `{}`", s),
-    ))
+/// Error on the field type itself, naming the Rango replacement for common Rust types.
+fn unsupported_type(ty: &Type, type_str: &str) -> syn::Error {
+    let hint = type_map::rango_type_hint(type_str);
+    syn::Error::new_spanned(
+        ty,
+        format!("`{type_str}` is not a Rango field type: {hint}."),
+    )
 }

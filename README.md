@@ -4,7 +4,7 @@ A Django-inspired async ORM for Rust: define a struct, Rango generates the schem
 
 [![CI](https://github.com/ikarys/rango-orm/actions/workflows/ci.yml/badge.svg)](https://github.com/ikarys/rango-orm/actions/workflows/ci.yml) [![codecov](https://codecov.io/gh/ikarys/rango-orm/graph/badge.svg)](https://codecov.io/gh/ikarys/rango-orm)
 
-> `0.1.0`, on crates.io as [`rango-orm`](https://crates.io/crates/rango-orm). Pre-1.0: a `0.x` minor release may still break the API.
+> `0.2.0` is the latest release on crates.io as [`rango-orm`](https://crates.io/crates/rango-orm). Pre-1.0: a `0.x` minor release may still break the API.
 
 ## Why Rango
 
@@ -53,10 +53,10 @@ let adults = User::filter(&pool)
 // User::filter(&pool).eq(User::AGE, "eighteen");
 
 let user: Option<User> = rango::get(&pool, &SqlValue::from(id)).await?;
-rango::atomic(&pool, |tx| Box::pin(async move {
-    rango::insert(&mut *tx, post).await?;
+rango::atomic(&pool, async |tx| {
+    rango::insert(&mut **tx, post).await?;
     Ok(())
-})).await?;
+}).await?;
 ```
 
 ```bash
@@ -71,19 +71,28 @@ Rango is pre-1.0: a `0.x` minor release may still break the API. The package is 
 
 ```toml
 [dependencies]
-rango-orm = "0.1" # PostgreSQL, default
+rango-orm = "0.2" # PostgreSQL, default
 # SQLite variant:
-# rango-orm = { version = "0.1", default-features = false, features = ["sqlite"] }
+# rango-orm = { version = "0.2", default-features = false, features = ["sqlite"] }
 # MySQL / MariaDB variant:
-# rango-orm = { version = "0.1", default-features = false, features = ["mysql"] }
+# rango-orm = { version = "0.2", default-features = false, features = ["mysql"] }
 tokio = { version = "1", features = ["full"] }
 ```
 
 ```bash
-cargo install rango-orm-cli --version 0.1.0
+cargo install rango-orm-cli
 ```
 
 In production, pass the URL via `DATABASE_URL`; never put credentials in `rango.toml`.
+
+### Supported databases
+
+| Database | Supported | Tested in CI | Why this minimum |
+|---|---|---|---|
+| PostgreSQL | 14+ | 14, 18 | `gen_random_uuid()` is built in from 13; 13 is end-of-life |
+| MySQL | 8.0+ | 8.0, 8.4 | oldest version tested |
+| MariaDB | 10.6+ | 10.6, 11.4 | oldest version tested |
+| SQLite | 3.35+ | bundled 3.46 | `RETURNING` (3.35), `UPDATE … FROM` (3.33); sqlx bundles SQLite, so nothing to install |
 
 ## Features
 
@@ -101,7 +110,7 @@ In production, pass the URL via `DATABASE_URL`; never put credentials in `rango.
 | Raw SQL escape hatch | ✅ |
 | `export` / `import` CLI | ✅ |
 | PostgreSQL backend | ✅ |
-| SQLite backend | ✅ (ALTER via table rebuild 🚧) |
+| SQLite backend | ✅ (ALTER via table rebuild) |
 | MySQL 8.0+ / MariaDB 10.6+ backend | ✅ (no `RETURNING`, non-transactional DDL) |
 | Keyset pagination, optimistic locking | 📋 planned |
 
@@ -141,6 +150,7 @@ The user guide is an mdBook in `docs/` (`mdbook serve docs`).
 - [Filtering and typed columns](docs/src/querying/filter.md)
 - [Generating migrations](docs/src/migrations/makemigrations.md)
 - [Security model](docs/src/security/sql-injection.md)
+- [How Rango is built and verified](docs/src/trust/how-rango-is-built.md): AI-assisted, and every claim comes with the check that backs it
 
 ## Workspace layout
 

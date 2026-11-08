@@ -19,6 +19,8 @@ Found 3 model(s):
 📸 Snapshot updated.
 ```
 
+The file is named `NNNN_<label>.sql`. `NNNN` is the next free number (highest existing prefix plus one, four digits). `<label>` is the names of the tables the migration touches (including M2M pivot tables), sorted alphabetically and joined with `_`, for example `0002_event.sql` or `0001_post_tag_user.sql`. When that joined string is longer than 40 characters (typically when many tables change at once) the label is `auto`, for example `0001_auto.sql`.
+
 ## Options
 
 ```bash
@@ -33,7 +35,24 @@ rango makemigrations src/models
 
 # Custom output directory
 rango makemigrations --output db/migrations
+
+# Confirm every rename and drop without asking
+rango makemigrations --yes
 ```
+
+## Renames
+
+Renaming a field looks like a dropped column plus an added one. When a table has both in the same run, Rango pairs them (columns of the same type first) and asks:
+
+```
+Did you rename "user"."name" to "full_name"? [y/N]
+```
+
+Answer `y` and the migration contains `ALTER TABLE "user" RENAME COLUMN "name" TO "full_name";`, so the data is kept. Answer anything else and it stays a drop plus an add.
+
+- `--yes` answers `y` to every rename question (and to the destructive-changes confirmation), for scripts. Review the SQL first with `--dry-run`.
+- Without a terminal (CI, pipes) Rango cannot ask, so each question counts as "no". If the new column is `NOT NULL` without a default, the command stops with an error that mentions the possible rename and `--yes`. Otherwise a drop that needs confirmation aborts with `Aborted: destructive changes need confirmation (interactive, or --yes)`.
+- With `--check`, renames are never confirmed: the run only reports whether migrations are pending.
 
 ## How it works
 
@@ -57,15 +76,30 @@ The snapshot (`migrations/snapshot.json`) tracks the current known state of your
 | Removed field | `ALTER TABLE ... DROP COLUMN ...` |
 | Field type changed | `ALTER TABLE ... ALTER COLUMN ... TYPE ...` |
 | Nullable changed | `ALTER TABLE ... ALTER COLUMN ... SET/DROP NOT NULL` |
+| Field renamed (confirmed at the prompt or with `--yes`) | `ALTER TABLE ... RENAME COLUMN ... TO ...` |
+| `#[field(unique)]` added or removed | `ALTER TABLE ... ADD CONSTRAINT ... UNIQUE`, or the backend's drop (SQLite: table rebuild) |
+| Index added or removed (`#[field(index)]`, foreign keys) | `CREATE INDEX IF NOT EXISTS ...` / `DROP INDEX ...` |
+| Foreign key target or `on_delete` changed | `DROP CONSTRAINT` + `ADD CONSTRAINT ... REFERENCES ...` (SQLite: table rebuild) |
+| `CheckConstraint` / `UniqueConstraint` added, removed, or its SQL / columns changed under the same name | `ALTER TABLE ... ADD/DROP CONSTRAINT ...` (SQLite: table rebuild) |
+| Partial unique constraint (`.condition(..)`) added, removed or its condition changed | `CREATE UNIQUE INDEX ... WHERE ...` / `DROP INDEX` (Postgres and SQLite; skipped with a comment on MySQL / MariaDB) |
 
 ## SQLite limitations
 
-SQLite does not support `ALTER COLUMN TYPE` or `SET/DROP NOT NULL`.
-Rango emits a comment in the migration file explaining what to do manually:
+SQLite cannot change a column's type, nullability, FK or uniqueness, nor add or drop a
+constraint, in place. For those changes Rango rebuilds the table instead:
 
 ```sql
--- SQLite does not support ALTER COLUMN TYPE on "user"."score" → recreate the table manually.
+-- SQLite cannot alter columns or constraints in place: rebuild "user".
+CREATE TABLE "_rango_new_user" (...);
+INSERT INTO "_rango_new_user" ("id", "name", ...) SELECT "id", "name", ... FROM "user";
+DROP TABLE "user";
+ALTER TABLE "_rango_new_user" RENAME TO "user";
+CREATE INDEX ...;
 ```
+
+`rango migrate` runs it with foreign keys off, so dropping the old table never cascades
+into child tables, then runs `PRAGMA foreign_key_check` before committing. A migration that
+leaves a dangling FK, or copies a `NULL` into a new `NOT NULL` column, is rolled back.
 
 ## CI guard
 

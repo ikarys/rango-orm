@@ -13,6 +13,10 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 pub enum Error {
     /// The query expected a row and found none.
     NotFound,
+    /// The table does not exist: migrations were not generated or applied.
+    TableMissing {
+        table: String,
+    },
     UniqueViolation {
         constraint: Option<String>,
     },
@@ -42,6 +46,8 @@ pub enum Error {
     },
     /// User code aborted the operation (e.g. inside `atomic`), which rolls it back.
     Aborted(Box<dyn std::error::Error + Send + Sync>),
+    /// A `ModelHooks` hook returned an error.
+    Hook(Box<dyn std::error::Error + Send + Sync>),
 }
 
 impl Error {
@@ -62,6 +68,10 @@ impl fmt::Display for Error {
             |c: &Option<String>| c.as_deref().map(|c| format!(" ({c})")).unwrap_or_default();
         match self {
             Error::NotFound => write!(f, "row not found"),
+            Error::TableMissing { table } => write!(
+                f,
+                "table `{table}` does not exist — run `rango makemigrations` and `rango migrate`"
+            ),
             Error::UniqueViolation { constraint: c } => {
                 write!(f, "unique violation{}", constraint(c))
             }
@@ -91,6 +101,7 @@ impl fmt::Display for Error {
                 message,
             } => write!(f, "database error: {message}"),
             Error::Aborted(e) => write!(f, "aborted: {e}"),
+            Error::Hook(e) => write!(f, "hook failed: {e}"),
         }
     }
 }
@@ -98,7 +109,7 @@ impl fmt::Display for Error {
 impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Error::Aborted(e) => Some(e.as_ref()),
+            Error::Aborted(e) | Error::Hook(e) => Some(e.as_ref()),
             _ => None,
         }
     }
@@ -106,7 +117,13 @@ impl std::error::Error for Error {
 
 impl From<crate::RowError> for Error {
     fn from(e: crate::RowError) -> Self {
-        Error::Decode(e.0)
+        Error::Decode(e.to_string())
+    }
+}
+
+impl From<crate::FieldError> for Error {
+    fn from(e: crate::FieldError) -> Self {
+        Error::Invalid(e.0)
     }
 }
 
@@ -115,13 +132,29 @@ mod tests {
     use super::Error;
 
     #[test]
+    fn field_error_converts_with_question_mark() {
+        fn f() -> super::Result<crate::FieldVarchar<1, 3>> {
+            Ok(crate::FieldVarchar::new("too long")?)
+        }
+        assert!(matches!(f(), Err(Error::Invalid(m)) if m.contains("too long")));
+    }
+
+    #[test]
     fn display_and_retryable() {
         let e = Error::UniqueViolation {
             constraint: Some("user_email_key".into()),
         };
         assert_eq!(e.to_string(), "unique violation (user_email_key)");
+        assert_eq!(
+            Error::TableMissing {
+                table: "user".into()
+            }
+            .to_string(),
+            "table `user` does not exist — run `rango makemigrations` and `rango migrate`"
+        );
         assert!(Error::Conflict.is_retryable());
         assert!(!Error::NotFound.is_retryable());
         assert_eq!(Error::abort("no funds").to_string(), "aborted: no funds");
+        assert_eq!(Error::Hook("nope".into()).to_string(), "hook failed: nope");
     }
 }

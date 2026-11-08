@@ -67,7 +67,7 @@ where
     fn array_contains(self, col: impl ColumnRef<M>, values: Vec<String>) -> Self;
 }
 
-impl<M> PgQueryExt<M> for QueryBuilder<M>
+impl<M> PgQueryExt<M> for QueryBuilder<'_, M>
 where
     M: Model + ModelValues + FromRow,
 {
@@ -162,10 +162,13 @@ impl Pg {
             quote_ident(col.column_name()),
             DEFAULT_QUERY_LIMIT
         );
-        let rows = bind_sql_values(sqlx::query(&sql), vec![SqlValue::Text(query.to_string())])
-            .fetch_all(pool)
-            .await
-            .map_err(db_err)?;
+        let rows = bind_sql_values(
+            sqlx::query(sqlx::AssertSqlSafe(&*sql)),
+            vec![SqlValue::Text(query.to_string())],
+        )
+        .fetch_all(pool)
+        .await
+        .map_err(db_err)?;
         Ok(decode_all::<M>(rows)?
             .into_iter()
             .map(WithRelated::new)
@@ -189,7 +192,7 @@ impl Pg {
             quote_ident(M::pk_column())
         );
         let row = bind_sql_values(
-            sqlx::query(&sql),
+            sqlx::query(sqlx::AssertSqlSafe(&*sql)),
             vec![SqlValue::Text(key.to_string()), pk.clone()],
         )
         .fetch_optional(pool)

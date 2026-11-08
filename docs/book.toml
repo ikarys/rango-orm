@@ -6,7 +6,7 @@ language = "en"
 src = "src"
 
 [output.html]
-site-url = "/rango-orm/"
+site-url = "/rango-orm/docs/"
 git-repository-url = "https://github.com/ikarys/rango-orm"
 # git-repository-icon = "fa-github"  # requires FontAwesome
 edit-url-template = "https://github.com/ikarys/rango-orm/edit/main/docs/src/{path}"

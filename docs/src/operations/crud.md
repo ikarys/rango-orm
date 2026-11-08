@@ -7,8 +7,8 @@ use rango::prelude::*;
 
 let user = User {
     id: FieldUuid(uuid::Uuid::new_v4()),
-    email: FieldEmail("alice@example.com".into()),
-    name: FieldVarchar("Alice".into()),
+    email: FieldEmail::new("alice@example.com")?,
+    name: FieldVarchar::new("Alice")?,
     active: FieldBool(true),
     created_at: FieldDateTime(chrono::Utc::now()),
 };
@@ -23,7 +23,7 @@ let inserted = insert(&pool, user).await?;
 let user = get::<_, User>(&pool, &SqlValue::Uuid(user_id)).await?;
 
 match user {
-    Some(u) => println!("Found: {}", u.email.0),
+    Some(u) => println!("Found: {}", u.email),
     None    => println!("Not found"),
 }
 ```
@@ -32,7 +32,7 @@ match user {
 
 ```rust
 let mut user = get::<_, User>(&pool, &id).await?.unwrap();
-user.name = FieldVarchar("Alice Updated".into());
+user.name = FieldVarchar::new("Alice Updated")?;
 let updated = update(&pool, user).await?;
 ```
 
@@ -41,6 +41,8 @@ let updated = update(&pool, user).await?;
 ```rust
 delete(&pool, &user).await?;
 ```
+
+Delete is idempotent: deleting a row that does not exist (already deleted, or never inserted) is not an error and returns `Ok(())`. `update` of a missing row returns `Error::NotFound`.
 
 ## get_or_create
 
@@ -67,8 +69,10 @@ Uses `INSERT ... ON CONFLICT DO NOTHING RETURNING *` in a single round-trip.
 let lookup = vec![("email", SqlValue::Text("alice@example.com".into()))];
 let values = User { /* ... */ };
 
-let user = update_or_create(&mut pool, lookup, values).await?;
+let user = update_or_create(&pool, lookup, values).await?;
 ```
+
+Updates the row matching `lookup` (update hooks fire; the whole row is overwritten from the values of `values`, only the primary key is kept, so fields you did not mean to change are reset too) or inserts `values` (create hooks fire). It takes a pool or a transaction (`&mut **tx`) on every backend. The lookup and the write are two statements: wrap the call in `atomic()` to make them one unit.
 
 ## all()
 

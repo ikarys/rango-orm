@@ -44,7 +44,10 @@ pub struct Book {
             "INSERT INTO t_author (id, name) VALUES ('a1', 'Ada'), ('a2', 'Bob')",
             "INSERT INTO t_book (id, title, author) VALUES ('b1', 'Notes', 'a1')",
         ] {
-            sqlx::query(sql).execute(&mut c).await.unwrap();
+            sqlx::query(sqlx::AssertSqlSafe(sql))
+                .execute(&mut c)
+                .await
+                .unwrap();
         }
         p
     }
@@ -75,10 +78,12 @@ pub struct Book {
     /// Row count, or `None` when the table does not exist.
     async fn count(&self, db: &str, table: &str) -> Option<i64> {
         let mut c = self.conn(db).await;
-        sqlx::query_scalar(&format!("SELECT count(*) FROM \"{table}\""))
-            .fetch_one(&mut c)
-            .await
-            .ok()
+        sqlx::query_scalar(sqlx::AssertSqlSafe(&*format!(
+            "SELECT count(*) FROM \"{table}\""
+        )))
+        .fetch_one(&mut c)
+        .await
+        .ok()
     }
 }
 
@@ -129,9 +134,15 @@ async fn dump_then_restore_round_trips_rows() {
         .collect();
     assert_eq!(names, ["t_author", "t_book"], "parents first, no ledger");
 
+    assert_eq!(dump["migrations"].as_array().unwrap().len(), 1);
+
     assert_ok(&p.cli("b.db", &["restore", "d.json"]));
     assert_eq!(p.count("b.db", "t_author").await, Some(2));
     assert_eq!(p.count("b.db", "t_book").await, Some(1));
+    // The restored database knows its migrations: `migrate` has nothing to replay.
+    let out = p.cli("b.db", &["migrate"]);
+    assert_ok(&out);
+    assert!(String::from_utf8_lossy(&out.stdout).contains("Nothing to apply"));
     let mut c = p.conn("b.db").await;
     let title: String = sqlx::query_scalar("SELECT title FROM t_book WHERE author = 'a1'")
         .fetch_one(&mut c)
@@ -280,8 +291,145 @@ async fn restore_fails_on_conflict_instead_of_dropping_rows() {
     assert_ok(&p.cli("a.db", &["dump", "-o", "d.json"]));
     // Restoring into the database it came from collides on every primary key.
     let err = failure_stderr(&p.cli("a.db", &["restore", "d.json"]));
-    // Table order is not fixed: whichever collides first is named.
-    assert!(err.contains("Failed to insert into t_"), "{err}");
+    // Table order is not fixed (the ledger may collide first): any table may be named.
+    assert!(err.contains("Failed to insert into "), "{err}");
     assert_eq!(p.count("a.db", "t_author").await, Some(2));
     assert_eq!(p.count("a.db", "t_book").await, Some(1));
+}
+
+#[tokio::test]
+async fn restore_of_a_dump_without_migrations_warns() {
+    let p = Project::new("old_dump").await;
+    assert_ok(&p.cli("a.db", &["dump", "-o", "d.json"]));
+    let mut dump: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(p.dir.join("d.json")).unwrap()).unwrap();
+    dump.as_object_mut().unwrap().remove("migrations");
+    let f = p.write("old.json", &dump.to_string());
+    let out = p.cli("b.db", &["restore", &f]);
+    assert_ok(&out);
+    assert!(String::from_utf8_lossy(&out.stderr).contains("does not list applied migrations"));
+    assert_eq!(p.count("b.db", "t_author").await, Some(2));
+}
+
+/// Hostile names in models (migration DDL) and in the database catalog (dump) stay identifiers.
+#[tokio::test]
+async fn hostile_table_and_column_names_stay_identifiers() {
+    let p = Project::new("evil_ddl").await;
+    let table = "ev\"il; DROP TABLE t_book; --";
+    let column = "na\"me); DROP TABLE t_book; --";
+
+    // DDL: makemigrations + migrate create exactly one table with that literal name.
+    let mut models = std::fs::read_to_string(p.dir.join("src/models.rs")).unwrap();
+    models.push_str(&format!(
+        "\n#[derive(Model)]\n#[model(table = {table:?})]\npub struct Evil {{\n    pub id: FieldUuid,\n    #[field(column = {column:?})]\n    pub name: FieldText,\n}}\n"
+    ));
+    std::fs::write(p.dir.join("src/models.rs"), models).unwrap();
+    assert_ok(&p.cli("a.db", &["makemigrations", "src", "--yes"]));
+    assert_ok(&p.cli("a.db", &["migrate"]));
+    assert_eq!(p.count("a.db", "t_book").await, Some(1));
+    let mut c = p.conn("a.db").await;
+    let found: i64 = sqlx::query_scalar("SELECT count(*) FROM sqlite_master WHERE name = ?")
+        .bind(table)
+        .fetch_one(&mut c)
+        .await
+        .unwrap();
+    assert_eq!(found, 1);
+
+    // Catalog: dump reads the table and column names back from the database and must not
+    // run them as SQL; the rows survive a restore into a fresh database.
+    let ins = format!(
+        "INSERT INTO \"{}\" (id, \"{}\") VALUES ('e1', 'v')",
+        table.replace('"', "\"\""),
+        column.replace('"', "\"\"")
+    );
+    sqlx::query(sqlx::AssertSqlSafe(ins))
+        .execute(&mut c)
+        .await
+        .unwrap();
+    assert_ok(&p.cli("a.db", &["dump", "-o", "d.json"]));
+    let dump = std::fs::read_to_string(p.dir.join("d.json")).unwrap();
+    assert!(
+        dump.contains("DROP TABLE t_book"),
+        "hostile rows not dumped"
+    );
+    assert_ok(&p.cli("b.db", &["restore", "d.json"]));
+    assert_eq!(p.count("b.db", "t_book").await, Some(1));
+    assert_eq!(p.count("b.db", &table.replace('"', "\"\"")).await, Some(1));
+}
+
+fn stdout(o: &Output) -> String {
+    String::from_utf8_lossy(&o.stdout).into_owned()
+}
+
+#[tokio::test]
+async fn restore_works_on_a_database_migrate_already_prepared() {
+    let p = Project::new("migrated_first").await;
+    assert_ok(&p.cli("a.db", &["dump", "-o", "d.json"]));
+    // `migrate` first writes the ledger row; restore must skip it, not collide on it.
+    assert_ok(&p.cli("b.db", &["migrate"]));
+    let out = p.cli("b.db", &["restore", "d.json"]);
+    assert_ok(&out);
+    assert_eq!(p.count("b.db", "t_author").await, Some(2));
+    assert_eq!(p.count("b.db", "_rango_migrations").await, Some(1));
+    // The warning names the migrations that were recorded without being run.
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains("0001_") && err.contains("NOT reproduced"),
+        "{err}"
+    );
+}
+
+#[tokio::test]
+async fn database_url_scheme_overrides_the_configured_backend() {
+    let p = Project::new("scheme").await;
+    assert_ok(&p.cli("a.db", &["dump", "-o", "d.json"]));
+    // rango.toml says sqlite; the URL says postgres (nothing listens there).
+    let err = failure_stderr(&p.cli(
+        "a.db",
+        &["restore", "d.json", "-d", "postgres://u:p@127.0.0.1:1/x"],
+    ));
+    assert!(err.contains("Postgres"), "{err}");
+}
+
+#[tokio::test]
+async fn import_of_a_single_table_export_asks_for_table() {
+    let p = Project::new("import_table").await;
+    assert_ok(&p.cli("a.db", &["export", "-t", "t_author", "-o", "a.json"]));
+    let err = failure_stderr(&p.cli("b.db", &["import", "a.json"]));
+    assert!(err.contains("--table"), "{err}");
+    assert_ok(&p.cli("a.db", &["import", "a.json", "-t", "t_author"]));
+}
+
+#[tokio::test]
+async fn schema_only_dump_reports_the_schema_tables() {
+    let p = Project::new("schema_count").await;
+    let out = p.cli("a.db", &["dump", "--schema-only", "-o", "s.json"]);
+    assert_ok(&out);
+    assert!(
+        stdout(&out).contains("Dumped 2 table(s)"),
+        "{}",
+        stdout(&out)
+    );
+}
+
+#[tokio::test]
+async fn makemigrations_honors_models_src_from_rango_toml() {
+    let p = Project::new("models_src").await;
+    std::fs::rename(p.dir.join("src"), p.dir.join("app")).unwrap();
+    std::fs::remove_dir_all(p.dir.join("migrations")).unwrap();
+    std::fs::write(
+        p.dir.join("rango.toml"),
+        "[database]\nbackend = \"sqlite\"\n[models]\nsrc = \"app\"\n",
+    )
+    .unwrap();
+    let out = p.cli("a.db", &["makemigrations", "--yes"]);
+    assert_ok(&out);
+    assert!(
+        stdout(&out).contains("Found 2 model(s)"),
+        "{}",
+        stdout(&out)
+    );
+    // A positional directory still wins.
+    let out = p.cli("a.db", &["makemigrations", "nowhere", "--yes"]);
+    assert!(!stdout(&out).contains("Found 2 model(s)"));
 }

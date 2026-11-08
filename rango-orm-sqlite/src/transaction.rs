@@ -4,14 +4,10 @@ use sqlx::{Sqlite, SqlitePool};
 
 pub type SqliteTransaction<'a> = sqlx::Transaction<'a, Sqlite>;
 
-/// Future returned by an [`atomic`] closure: wrap the body in `Box::pin(async move { ... })`.
-pub type TxFuture<'c, T> =
-    std::pin::Pin<Box<dyn std::future::Future<Output = Result<T>> + Send + 'c>>;
-
 /// Run `f` in a transaction: commit on `Ok`, roll back on `Err`.
 pub async fn atomic<F, T>(pool: &SqlitePool, f: F) -> Result<T>
 where
-    F: for<'c> FnOnce(&'c mut SqliteTransaction<'_>) -> TxFuture<'c, T>,
+    F: AsyncFnOnce(&mut SqliteTransaction<'_>) -> Result<T>,
 {
     let mut tx = pool.begin().await.map_err(db_err)?;
     match f(&mut tx).await {
@@ -24,4 +20,12 @@ where
             Err(e)
         }
     }
+}
+
+/// Alias for [`atomic`] — same semantics, alternative name.
+pub async fn transaction<F, T>(pool: &SqlitePool, f: F) -> Result<T>
+where
+    F: AsyncFnOnce(&mut SqliteTransaction<'_>) -> Result<T>,
+{
+    atomic(pool, f).await
 }

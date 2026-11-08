@@ -30,4 +30,10 @@ rango-orm-derive   = { workspace = true }
 rango-orm-postgres = { workspace = true, optional = true }
 rango-orm-sqlite   = { workspace = true, optional = true }
 rango-orm-mysql    = { workspace = true, optional = true }
-sqlx = { version = "0.8", default-features = false }
+
+[dev-dependencies]
+# Standard tool for testing compiler diagnostics (derive error messages).
+trybuild = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+uuid = { version = "1", features = ["v4"] }
+chrono = "0.4"

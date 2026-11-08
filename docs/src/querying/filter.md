@@ -128,6 +128,19 @@ let posts = Post::filter(&pool)
 
 Both compose with `.or()`, `.not()` and `.group()` like any other filter. For "has none", use `.not().where_exists(...)` rather than `.not().in_subquery(...)`: `NOT IN` matches nothing as soon as the subquery returns a `NULL`.
 
+### When to use a subquery, a JOIN, or a prefetch
+
+Rango does not pick between these for you — you express the intent, and each maps to the cheapest shape for that intent:
+
+| You want… | Use | Why it is the cheap shape |
+|---|---|---|
+| Keep/drop rows based on **whether** a related row exists | `where_exists` (correlated `EXISTS`) | The DB stops scanning the inner table at the first matching row; no row multiplication, no `DISTINCT`, no `JOIN` to clean up |
+| Compare a column against a **set of values** from another query | `in_subquery` (`IN (SELECT …)`) | One subquery, values stay bound; avoids loading them into Rust |
+| **Select columns from** a related table alongside the row | `select_related` (single `JOIN`) | You need the related columns in the result, so a `JOIN` is the right tool — a subquery would drop them |
+| **Load the related rows themselves** to iterate them | `prefetch_related` (one batched `IN` / `= ANY`) | One extra query for the whole page, which is what avoids the N+1 of a per-row lookup |
+
+The rule of thumb: a subquery answers *"does it exist?"* or *"is it in this set?"* without touching the related rows; a `JOIN` or `prefetch` is only for when you actually need the related data in hand. Reaching for a `JOIN` just to filter (then `DISTINCT`-ing the duplicates) is the N+1-adjacent anti-pattern `where_exists` exists to replace.
+
 ## Ordering, limit, offset
 
 ```rust
@@ -142,7 +155,7 @@ User::filter(&pool)
 
 ## Default limit
 
-By default, `.all()` returns at most **1000 rows**.
+By default, `.all()` returns at most **1000 rows**. This is a safety cap, not a pagination boundary: when exactly 1000 rows come back and you set neither `.limit(n)` nor `.unlimited()`, Rango logs a `tracing` `WARN` naming the table, because rows may have been cut off.
 
 Override with `.limit(n)` or remove with `.unlimited()`:
 
@@ -151,15 +164,20 @@ User::filter(&pool).limit(5000).all().await?  // explicit limit
 User::filter(&pool).unlimited().all().await?   // no limit
 ```
 
+The cap applies to the query builder only (`all()`, `values()`, `select_as::<P>().all()`). The plain `rango::all::<M>(&pool)` function has no cap and returns every row of the table.
+
 ## Terminal methods
+
+`WithRelated<M>` derefs to `M`; call `.into_inner()` to get the owned `M` (models can `#[derive(Model, Clone, Debug)]`).
 
 | Method | Returns |
 |---|---|
 | `.all()` | `Vec<WithRelated<M>>` |
-| `.one()` | `Option<WithRelated<M>>` |
+| `.one()` | `Option<M>` (no relation loading) |
 | `.count()` | `i64` |
 | `.exists()` | `bool` |
 | `.explain()` | `String` — the SQL that would run |
+| `.explain_analyze()` | `String` — the plan with real timings (runs the query) |
 
 ## Inspecting the SQL
 
@@ -171,5 +189,16 @@ let sql = User::filter(&pool)
     .explain();
 
 println!("{}", sql);
-// SELECT * FROM "myapp_user" WHERE "active" = $1 ORDER BY "name" ASC LIMIT 10
+// SELECT * FROM "user" WHERE "active" = $1 ORDER BY "name" ASC LIMIT 10
 ```
+
+A query builder takes `&pool` or `&mut **tx` (inside `atomic()`). `.explain_analyze().await?` (it takes `&mut self`, so the builder stays usable afterwards) runs the query under the engine's profiler and returns the plan:
+
+| Backend | Statement | Executes the query |
+|---|---|---|
+| Postgres | `EXPLAIN ANALYZE` | yes |
+| MySQL 8.0.18+ | `EXPLAIN ANALYZE` | yes |
+| MariaDB | `ANALYZE FORMAT=JSON` | yes |
+| SQLite | `EXPLAIN QUERY PLAN` (no timings) | no |
+
+The rows are discarded, but the query does run: keep it for debugging, not hot paths.

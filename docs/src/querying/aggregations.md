@@ -2,7 +2,7 @@
 
 ## sum / avg
 
-Return `Option<f64>` — `None` if the table is empty or all values are NULL.
+Return `Result<Option<f64>>`: `None` if the table is empty or all values are NULL. The database casts the result to a float (`float8` / `DOUBLE` / `REAL`), so a `FieldDecimal` column loses its exactness here.
 
 ```rust
 let total = Order::filter(&pool).sum("amount").await?;
@@ -18,6 +18,19 @@ let avg_active = User::filter(&pool)
 ## min / max
 
 Generic over the return type — works for numbers, strings, dates.
+
+### Exact decimals
+
+`FieldDecimal` columns: `min::<Decimal>` and `max::<Decimal>` compile on PostgreSQL and MySQL / MariaDB only. On SQLite `Decimal` cannot be decoded, so they do not compile. `sum` and `avg` return `f64` on every backend, never an exact decimal.
+
+The portable way to get an exact extreme is to read the row:
+
+```rust
+let priciest = Order::filter(&pool).order_by("-fee").limit(1).one().await?; // Option<Order>
+let max_fee: Option<Decimal> = priciest.map(|o| o.fee.0);
+```
+
+For an exact total, read the rows (or `values()`) and add the `Decimal`s in Rust.
 
 ```rust
 // Numeric

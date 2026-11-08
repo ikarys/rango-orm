@@ -7,7 +7,11 @@ pub(crate) fn db_err(e: sqlx::Error) -> Error {
         sqlx::Error::RowNotFound => Error::NotFound,
         sqlx::Error::PoolTimedOut => Error::Timeout,
         sqlx::Error::Database(db) => {
-            let constraint = db.constraint().map(str::to_owned);
+            // "UNIQUE constraint failed: user.email" gives the constraint "user.email"
+            let constraint = db.constraint().map(str::to_owned).or_else(|| {
+                let (_, cols) = db.message().split_once(" constraint failed: ")?;
+                Some(cols.to_owned())
+            });
             match db.kind() {
                 ErrorKind::UniqueViolation => return Error::UniqueViolation { constraint },
                 ErrorKind::ForeignKeyViolation => return Error::ForeignKeyViolation { constraint },
@@ -16,6 +20,11 @@ pub(crate) fn db_err(e: sqlx::Error) -> Error {
                 _ => {}
             }
             let code = db.code().map(|c| c.into_owned());
+            if let Some(table) = db.message().strip_prefix("no such table: ") {
+                return Error::TableMissing {
+                    table: table.to_owned(),
+                };
+            }
             match code.as_deref() {
                 // SQLITE_BUSY / SQLITE_LOCKED (+ extended codes): busy_timeout expired
                 Some("5" | "6" | "261" | "262" | "517") => Error::Timeout,

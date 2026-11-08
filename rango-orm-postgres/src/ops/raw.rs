@@ -23,7 +23,7 @@ where
     E: Executor<'e, Database = Postgres>,
     M: FromRow,
 {
-    let q = bind_sql_values(sqlx::query(sql), params);
+    let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(sql)), params);
     let rows = q.fetch_all(executor).await.map_err(db_err)?;
     tracing::Span::current().record("db.rows", rows.len());
     decode_all::<M>(rows)
@@ -37,7 +37,7 @@ where
     T: for<'r> sqlx::Decode<'r, Postgres> + sqlx::Type<Postgres>,
 {
     use sqlx::Row;
-    let q = bind_sql_values(sqlx::query(sql), params);
+    let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(sql)), params);
     let row = q.fetch_one(executor).await.map_err(db_err)?;
     row.try_get::<T, _>(0).map_err(db_err)
 }
@@ -48,7 +48,7 @@ pub async fn raw_execute<'e, E>(executor: E, sql: &str, params: Vec<SqlValue>) -
 where
     E: Executor<'e, Database = Postgres>,
 {
-    let q = bind_sql_values(sqlx::query(sql), params);
+    let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(sql)), params);
     q.execute(executor)
         .await
         .map(|r| r.rows_affected())

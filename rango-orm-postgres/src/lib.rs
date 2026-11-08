@@ -3,7 +3,6 @@
 //! Internal crate: depend on `rango-orm` (feature `postgres`, on by default).
 #![forbid(unsafe_code)]
 mod error;
-pub mod executor;
 pub mod m2m;
 mod ops;
 pub mod pg_ext;
@@ -20,24 +19,24 @@ use sqlx::{
 };
 use std::time::Duration;
 
-pub use executor::RangoExecutor;
 pub use m2m::M2M;
 pub use ops::{
     all, bulk_create, bulk_update, bulk_upsert, delete, get, get_or_create, insert, raw,
     raw_execute, raw_scalar, update, update_or_create,
 };
 pub use pg_ext::{Pg, PgQueryExt};
-pub use query_builder::{QueryBuilder, SelectAs};
+pub use query_builder::{Conn, QueryBuilder, SelectAs};
 pub use rango_orm_core::WithRelated;
 pub use sqlx::PgPool;
-pub use transaction::{RangoTransaction, TxFuture, atomic, atomic_retry, transaction};
+pub use transaction::{RangoTransaction, atomic, atomic_retry, transaction};
 
 use rango_orm_core::{Filterable, FromRow, Model, ModelValues};
 
 /// Extension trait — adds .filter(&pool) to any Model.
 pub trait RangoFilterExt: Model + ModelValues + FromRow + Filterable + Sized {
-    fn filter(pool: &PgPool) -> QueryBuilder<Self> {
-        QueryBuilder::new(pool)
+    /// `&pool`, or `&mut **tx` inside `atomic`.
+    fn filter<'a>(conn: impl Into<Conn<'a>>) -> QueryBuilder<'a, Self> {
+        QueryBuilder::new(conn)
     }
 }
 
@@ -45,6 +44,15 @@ pub trait RangoFilterExt: Model + ModelValues + FromRow + Filterable + Sized {
 impl<M> RangoFilterExt for M where M: Model + ModelValues + FromRow + Filterable {}
 
 pub use self::RangoFilterExt as FilterExt;
+
+/// Parse the URL; remote hosts get `sslmode=require` unless the URL or `PGSSLMODE` sets one.
+fn tls_default(url: &str, env_sslmode: bool) -> rango_orm_core::Result<PgConnectOptions> {
+    let mut opts: PgConnectOptions = url.parse().map_err(error::db_err)?;
+    if !(url.contains("sslmode=") || env_sslmode) && !is_local_host(opts.get_host()) {
+        opts = opts.ssl_mode(PgSslMode::Require);
+    }
+    Ok(opts)
+}
 
 /// Connect to a PostgreSQL database and return a connection pool.
 /// Applies `after_connect` SQL statements on every new connection if configured.
@@ -69,18 +77,14 @@ pub async fn connect(config: &DatabaseConfig) -> rango_orm_core::Result<PgPool> 
             let stmts = after_connect.clone();
             Box::pin(async move {
                 for stmt in &stmts {
-                    conn.execute(stmt.as_str()).await?;
+                    conn.execute(sqlx::AssertSqlSafe(stmt.as_str())).await?;
                 }
                 Ok(())
             })
         });
     }
 
-    let mut connect_opts: PgConnectOptions = config.url.parse().map_err(error::db_err)?;
-    let explicit_ssl = config.url.contains("sslmode=") || std::env::var_os("PGSSLMODE").is_some();
-    if !explicit_ssl && !is_local_host(connect_opts.get_host()) {
-        connect_opts = connect_opts.ssl_mode(PgSslMode::Require);
-    }
+    let mut connect_opts = tls_default(&config.url, std::env::var_os("PGSSLMODE").is_some())?;
 
     connect_opts = connect_opts.log_slow_statements(
         log::LevelFilter::Warn,
@@ -95,4 +99,34 @@ pub async fn connect(config: &DatabaseConfig) -> rango_orm_core::Result<PgPool> 
     }
 
     opts.connect_with(connect_opts).await.map_err(error::db_err)
+}
+
+#[cfg(test)]
+mod tls_tests {
+    use super::*;
+
+    #[test]
+    fn remote_hosts_require_tls_unless_the_url_says_otherwise() {
+        let mode = |url, env| tls_default(url, env).unwrap().get_ssl_mode();
+        assert!(matches!(
+            mode("postgres://u:p@db.example.com/d", false),
+            PgSslMode::Require
+        ));
+        assert!(matches!(
+            mode("postgres://u:p@localhost/d", false),
+            PgSslMode::Prefer
+        ));
+        assert!(matches!(
+            mode("postgres://u:p@127.0.0.1/d", false),
+            PgSslMode::Prefer
+        ));
+        assert!(matches!(
+            mode("postgres://u:p@db.example.com/d?sslmode=disable", false),
+            PgSslMode::Disable
+        ));
+        assert!(matches!(
+            mode("postgres://u:p@db.example.com/d", true),
+            PgSslMode::Prefer
+        ));
+    }
 }

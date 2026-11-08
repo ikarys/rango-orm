@@ -4,12 +4,15 @@
 //!
 //! Add to `Cargo.toml`:
 //! ```toml
-//! rango-orm = "0.1"                                                     # postgres (default)
+//! rango-orm = "0.2"                                                     # postgres (default)
 //! # or
-//! rango-orm = { version = "0.1", default-features = false, features = ["sqlite"] }
+//! rango-orm = { version = "0.2", default-features = false, features = ["sqlite"] }
 //! # or MySQL / MariaDB:
-//! rango-orm = { version = "0.1", default-features = false, features = ["mysql"] }
+//! rango-orm = { version = "0.2", default-features = false, features = ["mysql"] }
 //! ```
+//!
+//! Rango does not re-export `uuid` or `chrono`: add them to your own
+//! `Cargo.toml` to build `FieldUuid` / `FieldDateTime` values.
 //!
 //! Then:
 //! ```rust,ignore
@@ -109,11 +112,21 @@ pub use rango_orm_derive::model;
 pub use rango_orm_postgres::PgPool;
 #[cfg(feature = "postgres")]
 pub use rango_orm_postgres::{
-    M2M, Pg, PgQueryExt, QueryBuilder, RangoExecutor, RangoFilterExt, RangoTransaction, SelectAs,
-    TxFuture, WithRelated, all, atomic, atomic_retry, bulk_create, bulk_update, bulk_upsert,
-    delete, get, get_or_create, insert, raw, raw_execute, raw_scalar, transaction, update,
-    update_or_create,
+    Conn, M2M, Pg, PgQueryExt, QueryBuilder, RangoFilterExt, RangoTransaction, SelectAs,
+    WithRelated, all, atomic, atomic_retry, bulk_create, bulk_update, bulk_upsert, delete, get,
+    get_or_create, insert, raw, raw_execute, raw_scalar, transaction, update, update_or_create,
 };
+
+/// PostgreSQL ops, always reachable by this path whatever the other features.
+#[cfg(feature = "postgres")]
+pub mod postgres {
+    pub use rango_orm_postgres::{
+        Conn, M2M, Pg, PgPool, PgQueryExt, QueryBuilder, RangoFilterExt, RangoTransaction,
+        SelectAs, WithRelated, all, atomic, atomic_retry, bulk_create, bulk_update, bulk_upsert,
+        delete, get, get_or_create, insert, raw, raw_execute, raw_scalar, transaction, update,
+        update_or_create,
+    };
+}
 
 #[cfg(feature = "postgres")]
 pub async fn connect_postgres(config: &DatabaseConfig) -> Result<PgPool> {
@@ -125,13 +138,14 @@ pub async fn connect_postgres(config: &DatabaseConfig) -> Result<PgPool> {
 #[cfg(feature = "sqlite")]
 pub use rango_orm_sqlite::SqlitePool;
 
-/// SQLite-specific ops — use these when working with a SqlitePool.
-/// Parallel to the postgres ops but for SQLite.
+/// SQLite ops, always reachable by this path whatever the other features.
 #[cfg(feature = "sqlite")]
 pub mod sqlite {
     pub use rango_orm_sqlite::{
-        M2M, QueryBuilder, RangoFilterExt, SelectAs, SqliteTransaction, TxFuture, all, atomic,
-        bulk_create, delete, get, get_or_create, insert, raw, raw_execute, raw_scalar, update,
+        Conn, M2M, QueryBuilder, RangoFilterExt, SelectAs, SqlitePool, SqliteQueryExt,
+        SqliteTransaction, WithRelated, all, atomic, bulk_create, bulk_update, bulk_upsert, delete,
+        get, get_or_create, insert, raw, raw_execute, raw_scalar, transaction, update,
+        update_or_create,
     };
 }
 
@@ -145,12 +159,13 @@ pub async fn connect_sqlite(url: &str) -> Result<SqlitePool> {
 #[cfg(feature = "mysql")]
 pub use rango_orm_mysql::MySqlPool;
 
-/// MySQL 8.0+ / MariaDB 10.6+ ops — use these when working with a MySqlPool.
+/// MySQL 8.0+ / MariaDB 10.6+ ops, always reachable by this path whatever the other features.
 #[cfg(feature = "mysql")]
 pub mod mysql {
     pub use rango_orm_mysql::{
-        M2M, MySqlTransaction, QueryBuilder, RangoFilterExt, SelectAs, TxFuture, all, atomic,
-        bulk_create, delete, get, get_or_create, insert, raw, raw_execute, raw_scalar, update,
+        Conn, M2M, MySqlPool, MySqlTransaction, QueryBuilder, RangoFilterExt, SelectAs,
+        WithRelated, all, atomic, atomic_retry, bulk_create, bulk_update, bulk_upsert, delete, get,
+        get_or_create, insert, raw, raw_execute, raw_scalar, transaction, update, update_or_create,
     };
 }
 
@@ -161,26 +176,25 @@ pub async fn connect_mysql(url: &str) -> Result<MySqlPool> {
 
 // ─── Prelude ──────────────────────────────────────────────────────────────────
 
+/// Backend-agnostic items, the connect functions and pool types of every enabled
+/// backend, plus the ops (`insert`, `get`, `atomic`, `QueryBuilder`, ...) of exactly
+/// ONE backend: postgres if enabled, else sqlite, else mysql. The other backends'
+/// ops stay reachable as `rango::sqlite::*` / `rango::mysql::*` / `rango::postgres::*`.
 pub mod prelude {
+    #[cfg(feature = "mysql")]
+    pub use crate::{MySqlPool, connect_mysql};
+    #[cfg(feature = "postgres")]
+    pub use crate::{PgPool, connect_postgres};
+    #[cfg(feature = "sqlite")]
+    pub use crate::{SqlitePool, connect_sqlite, sqlite::SqliteQueryExt};
     pub use rango_orm_core::ModelHooks;
     pub use rango_orm_core::*;
     pub use rango_orm_derive::{Model, ModelMixin, Partial};
 
-    #[cfg(feature = "postgres")]
-    pub use rango_orm_postgres::{
-        M2M, Pg, PgPool, PgQueryExt, QueryBuilder, RangoExecutor, RangoFilterExt, RangoTransaction,
-        SelectAs, TxFuture, WithRelated, all, atomic, atomic_retry, bulk_create, bulk_update,
-        bulk_upsert, delete, get, get_or_create, insert, raw, raw_execute, raw_scalar, transaction,
-        update, update_or_create,
-    };
-
-    #[cfg(feature = "sqlite")]
-    pub use crate::sqlite::*;
-    #[cfg(feature = "sqlite")]
-    pub use rango_orm_sqlite::{SqlitePool, SqliteQueryExt};
-
-    #[cfg(feature = "mysql")]
+    #[cfg(all(feature = "mysql", not(any(feature = "postgres", feature = "sqlite"))))]
     pub use crate::mysql::*;
-    #[cfg(feature = "mysql")]
-    pub use rango_orm_mysql::MySqlPool;
+    #[cfg(feature = "postgres")]
+    pub use crate::postgres::*;
+    #[cfg(all(feature = "sqlite", not(feature = "postgres")))]
+    pub use crate::sqlite::*;
 }
