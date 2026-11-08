@@ -76,6 +76,12 @@ The snapshot (`migrations/snapshot.json`) tracks the current known state of your
 | Removed field | `ALTER TABLE ... DROP COLUMN ...` |
 | Field type changed | `ALTER TABLE ... ALTER COLUMN ... TYPE ...` |
 | Nullable changed | `ALTER TABLE ... ALTER COLUMN ... SET/DROP NOT NULL` |
+| Field renamed (confirmed at the prompt or with `--yes`) | `ALTER TABLE ... RENAME COLUMN ... TO ...` |
+| `#[field(unique)]` added or removed | `ALTER TABLE ... ADD CONSTRAINT ... UNIQUE`, or the backend's drop (SQLite: table rebuild) |
+| Index added or removed (`#[field(index)]`, foreign keys) | `CREATE INDEX IF NOT EXISTS ...` / `DROP INDEX ...` |
+| Foreign key target or `on_delete` changed | `DROP CONSTRAINT` + `ADD CONSTRAINT ... REFERENCES ...` (SQLite: table rebuild) |
+| `CheckConstraint` / `UniqueConstraint` added or removed | `ALTER TABLE ... ADD/DROP CONSTRAINT ...` (SQLite: table rebuild) |
+| Partial unique constraint (`.condition(..)`) added or removed | `CREATE UNIQUE INDEX ... WHERE ...` / `DROP INDEX` (Postgres and SQLite; skipped with a comment on MySQL / MariaDB) |
 
 ## SQLite limitations
 
