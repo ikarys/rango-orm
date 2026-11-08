@@ -1067,7 +1067,20 @@ impl tracing::Subscriber for SpanLog {
     }
     fn record(&self, _: &tracing::span::Id, _: &tracing::span::Record<'_>) {}
     fn record_follows_from(&self, _: &tracing::span::Id, _: &tracing::span::Id) {}
-    fn event(&self, _: &tracing::Event<'_>) {}
+    fn event(&self, ev: &tracing::Event<'_>) {
+        struct V(Vec<String>);
+        impl tracing::field::Visit for V {
+            fn record_debug(&mut self, f: &tracing::field::Field, v: &dyn std::fmt::Debug) {
+                self.0.push(format!("{}={:?}", f.name(), v));
+            }
+        }
+        let mut v = V(vec![]);
+        ev.record(&mut v);
+        self.0
+            .lock()
+            .unwrap()
+            .push((format!("event:{}", ev.metadata().level()), v.0));
+    }
     fn enter(&self, _: &tracing::span::Id) {}
     fn exit(&self, _: &tracing::span::Id) {}
 }
@@ -1377,4 +1390,55 @@ async fn test_sqlite_in_values_empty_list() {
         .await
         .unwrap();
     assert_eq!(all.len(), 2);
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-sqlite"), ignore)]
+async fn test_sqlite_all_warns_when_default_cap_is_hit() {
+    let pool = pool().await;
+    setup(&pool).await;
+    let users: Vec<TestUser> = (0..1001)
+        .map(|i| user(&format!("cap{i}@test.com")))
+        .collect();
+    bulk_create(&pool, &users).await.unwrap();
+
+    let warned = |log: &SpanLog| {
+        log.0
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(n, f)| n == "event:WARN" && f.iter().any(|x| x.contains("test_user")))
+    };
+    let log = SpanLog::default();
+    {
+        let _guard = tracing::subscriber::set_default(log.clone());
+        let rows = TestUser::filter(&pool).all().await.unwrap();
+        assert_eq!(rows.len(), 1000);
+    }
+    assert!(warned(&log));
+
+    // Explicit cap or unlimited: no warning.
+    let log2 = SpanLog::default();
+    {
+        let _guard = tracing::subscriber::set_default(log2.clone());
+        assert_eq!(
+            TestUser::filter(&pool)
+                .unlimited()
+                .all()
+                .await
+                .unwrap()
+                .len(),
+            1001
+        );
+        assert_eq!(
+            TestUser::filter(&pool)
+                .limit(1000)
+                .all()
+                .await
+                .unwrap()
+                .len(),
+            1000
+        );
+    }
+    assert!(!warned(&log2));
 }

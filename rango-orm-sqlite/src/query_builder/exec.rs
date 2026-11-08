@@ -28,6 +28,7 @@ where
         // One connection for the main query and every prefetch query.
         let mut conn = self.pool.acquire().await.map_err(db_err)?;
         let rows = bind_and_fetch_all(&mut *conn, &sql, binds).await?;
+        self.warn_if_capped(rows.len());
         tracing::Span::current().record("db.rows", rows.len());
         let mut results: Vec<WithRelated<M>> = Vec::with_capacity(rows.len());
 
@@ -207,6 +208,7 @@ where
         }
 
         let rows = bind_and_fetch_all(&self.pool, &sql, binds).await?;
+        self.warn_if_capped(rows.len());
 
         rows.into_iter()
             .map(|row| {
@@ -382,6 +384,7 @@ where
         let cols: Vec<String> = P::columns().iter().map(|c| quote_ident(c)).collect();
         let (sql, binds) = self.qb.select_sql_cols(&cols.join(", "));
         let rows = bind_and_fetch_all(&self.qb.pool, &sql, binds).await?;
+        self.qb.warn_if_capped(rows.len());
         decode_all::<P>(rows)
     }
 

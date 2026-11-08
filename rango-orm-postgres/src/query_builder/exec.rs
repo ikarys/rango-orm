@@ -31,6 +31,7 @@ where
         // One connection for the main query and every prefetch query: one pool round-trip.
         let mut conn = self.pool.acquire().await.map_err(db_err)?;
         let rows = bind_and_fetch_all(&mut *conn, &sql, binds).await?;
+        self.warn_if_capped(rows.len());
         tracing::Span::current().record("db.rows", rows.len());
         let mut results: Vec<WithRelated<M>> = Vec::with_capacity(rows.len());
         if self.select_related.is_empty() {
@@ -115,7 +116,7 @@ where
 
     /// Fetch the first matching row (no relation population).
     #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "postgresql", db.operation = "SELECT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
-    pub async fn one(mut self) -> Result<Option<WithRelated<M>>> {
+    pub async fn one(mut self) -> Result<Option<M>> {
         self.ensure_valid()?;
         // Same SQL as `all()` (filters, ordering, offset), capped at one row.
         self.limit = Some(1);
@@ -124,11 +125,7 @@ where
 
         let rows = bind_and_fetch_all(&self.pool, &sql, binds).await?;
         match rows.into_iter().next() {
-            Some(r) => Ok(Some(
-                M::from_row(&PgRangoRow(r))
-                    .map(WithRelated::new)
-                    .map_err(Error::from)?,
-            )),
+            Some(r) => Ok(Some(M::from_row(&PgRangoRow(r)).map_err(Error::from)?)),
             None => Ok(None),
         }
     }
@@ -211,6 +208,7 @@ where
         }
 
         let rows = bind_and_fetch_all(&self.pool, &sql, binds).await?;
+        self.warn_if_capped(rows.len());
 
         rows.into_iter()
             .map(|row| {
@@ -441,6 +439,7 @@ where
         let cols: Vec<String> = P::columns().iter().map(|c| quote_ident(c)).collect();
         let (sql, binds) = self.qb.select_sql_cols(&cols.join(", "));
         let rows = bind_and_fetch_all(&self.qb.pool, &sql, binds).await?;
+        self.qb.warn_if_capped(rows.len());
         decode_all::<P>(rows)
     }
 

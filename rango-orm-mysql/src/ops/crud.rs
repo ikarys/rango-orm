@@ -88,6 +88,7 @@ where
     }
 }
 
+/// All rows of the table. Uncapped: unlike `QueryBuilder::all` (1000-row default cap), this returns every row.
 #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "mysql", db.operation = "SELECT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
 pub async fn all<'e, E, M>(executor: E) -> Result<Vec<M>>
 where

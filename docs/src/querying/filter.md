@@ -155,7 +155,7 @@ User::filter(&pool)
 
 ## Default limit
 
-By default, `.all()` returns at most **1000 rows**.
+By default, `.all()` returns at most **1000 rows**. This is a safety cap, not a pagination boundary: when exactly 1000 rows come back and you set neither `.limit(n)` nor `.unlimited()`, Rango logs a `tracing` `WARN` naming the table, because rows may have been cut off.
 
 Override with `.limit(n)` or remove with `.unlimited()`:
 
@@ -164,12 +164,14 @@ User::filter(&pool).limit(5000).all().await?  // explicit limit
 User::filter(&pool).unlimited().all().await?   // no limit
 ```
 
+The cap applies to the query builder only (`all()`, `values()`, `select_as::<P>().all()`). The plain `rango::all::<M>(&pool)` function has no cap and returns every row of the table.
+
 ## Terminal methods
 
 | Method | Returns |
 |---|---|
 | `.all()` | `Vec<WithRelated<M>>` |
-| `.one()` | `Option<WithRelated<M>>` |
+| `.one()` | `Option<M>` (no relation loading) |
 | `.count()` | `i64` |
 | `.exists()` | `bool` |
 | `.explain()` | `String` — the SQL that would run |

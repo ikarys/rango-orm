@@ -94,7 +94,7 @@ where
     }
 }
 
-/// GET ALL rows.
+/// GET ALL rows. Uncapped: unlike `QueryBuilder::all` (1000-row default cap), this returns every row of the table.
 /// Accepts `&PgPool`, `&mut Transaction<'_, Postgres>`, or any sqlx `Executor`.
 #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "postgresql", db.operation = "SELECT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
 pub async fn all<'e, E, M>(executor: E) -> Result<Vec<M>>

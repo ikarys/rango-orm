@@ -317,6 +317,19 @@ where
         self
     }
 
+    /// Warn when the implicit row cap may have hidden rows: no explicit `limit` /
+    /// `unlimited()` and exactly `DEFAULT_QUERY_LIMIT` rows came back.
+    pub(super) fn warn_if_capped(&self, rows: usize) {
+        if !self.explicit_limit && rows as i64 == DEFAULT_QUERY_LIMIT {
+            tracing::warn!(
+                table = M::table_name(),
+                cap = DEFAULT_QUERY_LIMIT,
+                "query returned exactly the default row cap, results may be truncated; \
+                 call .limit(n) to choose a cap or .unlimited() to fetch every row"
+            );
+        }
+    }
+
     pub(super) fn add(
         mut self,
         col: &str,
