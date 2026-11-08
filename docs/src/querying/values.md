@@ -33,7 +33,10 @@ for row in &rows {
 | `FLOAT4/FLOAT8` | `SqlValue::Double(f64)` |
 | `UUID` | `SqlValue::Uuid(Uuid)` |
 | `TEXT/VARCHAR/...` | `SqlValue::Text(String)` |
+| `NUMERIC` / `DECIMAL` | `SqlValue::Decimal(Decimal)`, at the column scale (`15.00`, not `15`); `SqlValue::NullDecimal` for NULL |
 | `NULL` | `SqlValue::NullText` (or typed null) |
+
+Decimal columns are decoded from the model's schema type, so SQLite, MySQL and MariaDB return the same `SqlValue::Decimal` as Postgres.
 
 ## With filters and ordering
 

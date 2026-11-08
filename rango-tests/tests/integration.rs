@@ -2303,3 +2303,48 @@ async fn test_pg_unknown_lookup_and_conflict_columns_are_invalid() {
         .unwrap_err();
     assert!(matches!(err, Error::Invalid(_)), "{err:?}");
 }
+
+#[derive(Model, Debug, Clone)]
+#[model(table = "dec_vals")]
+struct DecVals {
+    id: FieldUuid,
+    price: FieldDecimal<10, 2>,
+    opt: Option<FieldDecimal<10, 2>>,
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration"), ignore)]
+async fn test_pg_values_decodes_decimal_with_scale() {
+    let pool = pool().await;
+    sqlx::query("DROP TABLE IF EXISTS dec_vals")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("CREATE TABLE dec_vals (id UUID PRIMARY KEY, price NUMERIC(10,2) NOT NULL, opt NUMERIC(10,2))").execute(&pool).await.unwrap();
+    let row = DecVals {
+        id: FieldUuid(Uuid::new_v4()),
+        price: FieldDecimal::from_decimal(Decimal::new(1500, 2)),
+        opt: None,
+    };
+    insert(&pool, row).await.unwrap();
+    let rows = DecVals::filter(&pool)
+        .values(&["price", "opt"])
+        .await
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+    match &rows[0]["price"] {
+        SqlValue::Decimal(d) => {
+            assert_eq!(d.to_string(), "15.00");
+        }
+        other => panic!("expected Decimal, got {other:?}"),
+    }
+    assert!(
+        matches!(rows[0]["opt"], SqlValue::NullDecimal),
+        "{:?}",
+        rows[0]["opt"]
+    );
+    sqlx::query("DROP TABLE dec_vals")
+        .execute(&pool)
+        .await
+        .unwrap();
+}
