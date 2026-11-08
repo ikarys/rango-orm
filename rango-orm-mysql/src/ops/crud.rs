@@ -64,7 +64,10 @@ where
         quote_ident(M::table_name()),
         quote_ident(M::pk_column())
     );
-    let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*sql)), vec![model.pk_value()]);
+    let q = bind_sql_values(
+        sqlx::query(sqlx::AssertSqlSafe(&*sql)),
+        vec![model.pk_value()],
+    );
     q.execute(executor).await.map_err(db_err)?;
     after_delete(model).await
 }

@@ -23,7 +23,7 @@ let inserted = insert(&pool, user).await?;
 let user = get::<_, User>(&pool, &SqlValue::Uuid(user_id)).await?;
 
 match user {
-    Some(u) => println!("Found: {}", u.email.0),
+    Some(u) => println!("Found: {}", u.email),
     None    => println!("Not found"),
 }
 ```
