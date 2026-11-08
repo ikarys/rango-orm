@@ -63,6 +63,13 @@ migrations/       ← SQL migration files (generated)
 ## Requirements
 
 - Rust 1.94+ (edition 2024)
-- For PostgreSQL: a running Postgres instance
-- For MySQL / MariaDB: a running MySQL 8.0+ or MariaDB 10.6+ instance
-- For SQLite: nothing extra needed
+- A database server for PostgreSQL / MySQL / MariaDB (SQLite needs nothing extra)
+
+### Supported database versions
+
+| Database | Supported | Tested in CI | Why this minimum |
+|---|---|---|---|
+| PostgreSQL | 14+ | 14, 18 | `gen_random_uuid()` is built in from 13; 13 is end-of-life |
+| MySQL | 8.0+ | 8.0, 8.4 | oldest version tested |
+| MariaDB | 10.6+ | 10.6, 11.4 | oldest version tested |
+| SQLite | 3.35+ | bundled 3.46 | `RETURNING` (3.35), `UPDATE … FROM` (3.33); sqlx bundles SQLite, so nothing to install |

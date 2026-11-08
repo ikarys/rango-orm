@@ -183,9 +183,9 @@ let active_users = User::filter(&pool)
 
 | Backend | Crate | Status |
 |---|---|---|
-| PostgreSQL | `rango-orm-postgres` | ✅ backend + CLI (default backend) |
+| PostgreSQL | `rango-orm-postgres` | ✅ backend + CLI (default backend, PostgreSQL 14+) |
 | MySQL / MariaDB | `rango-orm-mysql` | ✅ backend + CLI (MySQL 8.0+, MariaDB 10.6+) |
-| SQLite | `rango-orm-sqlite` | ✅ |
+| SQLite | `rango-orm-sqlite` | ✅ (SQLite 3.35+, sqlx bundles 3.46) |
 | MSSQL | `rango-mssql` | 🔮 futur — SQLx a droppé le support MSSQL en 0.7, backend custom via `tiberius` |
 
 Note : PostgreSQL, MySQL, SQLite passent par SQLx. MSSQL nécessitera un backend séparé basé sur `tiberius`.
