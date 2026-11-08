@@ -87,21 +87,52 @@ SQLite has fewer native types than Postgres. Rango maps transparently:
 | Full-text search | `tsvector` | FTS5 (virtual table) |
 | `RETURNING *` | ✅ | ✅ (SQLite ≥ 3.35) |
 
+## Errors
+
+On SQLite a unique violation, including one on a partial unique index, reports the column names (`user.email`), not the index name, and a foreign key violation carries no constraint name. See [Errors](../operations/errors.md).
+
 ## Testing with in-memory SQLite
 
+Create the schema from the migration files `rango makemigrations` generated. Each file is plain SQL, and `raw_execute` runs a string with several statements on SQLite (give it no parameters).
+
 ```rust
+use rango::prelude::*;
+
+const MIGRATIONS: &[&str] = &[
+    include_str!("../migrations/0001_user.sql"),
+    include_str!("../migrations/0002_post.sql"),
+];
+
+async fn test_pool() -> SqlitePool {
+    let pool = connect_sqlite("sqlite::memory:").await.unwrap();
+    for sql in MIGRATIONS {
+        raw_execute(&pool, sql, vec![]).await.unwrap();
+    }
+    pool
+}
+
 #[tokio::test]
 async fn my_test() {
-    let pool = connect_sqlite("sqlite::memory:").await.unwrap();
-
-    // Create tables inline
-    sqlx::query("CREATE TABLE users (id TEXT PRIMARY KEY, email TEXT)")
-        .execute(&pool)
-        .await
-        .unwrap();
-
+    let pool = test_pool().await;
     // Test your logic...
 }
 ```
 
-No Docker, no external process — fast and isolated.
+List the files in order. A new migration means a new line here. No Docker, no external process: fast and isolated.
+
+## Production on PostgreSQL/MySQL, tests on SQLite
+
+`rango.toml` fixes one backend, and `makemigrations` writes SQL for that backend only. A migration folder made for PostgreSQL does not run on SQLite (types, `ALTER`, index syntax differ). The supported setup is a second set of migrations:
+
+1. Keep your main `rango.toml` (`backend = "postgres"`) and `migrations/`.
+2. Add a folder, for example `tests-sqlite/`, with its own `rango.toml` that says `backend = "sqlite"`.
+3. From that folder, generate the SQLite files from the same models: `cd tests-sqlite && rango makemigrations ../src --output migrations`. Commit them, and re-run after every model change.
+4. Load those files in the test helper above (`include_str!("../tests-sqlite/migrations/0001_user.sql")`).
+
+Limits:
+
+- You maintain two migration sets. `rango makemigrations --check` in each folder tells you when one is stale.
+- SQLite is not PostgreSQL. Tests do not see native UUID, `JSONB` operators, `DECIMAL` scale, `PgQueryExt` methods, or the locking and error details of the real server.
+- Decimal aggregates, partial unique indexes and constraint names behave differently (see above and [Field types](../models/field-types.md)).
+- Run a final test pass against the production engine before release.
+
