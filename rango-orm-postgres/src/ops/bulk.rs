@@ -108,6 +108,7 @@ where
     if models.is_empty() {
         return Ok(0);
     }
+    rango_orm_core::check_columns::<M>(conflict_on.iter().copied())?;
 
     let n_cols = 1 + models[0].field_values().len();
     let chunk_size = (65535 / n_cols).max(1);

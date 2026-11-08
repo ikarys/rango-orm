@@ -2283,3 +2283,23 @@ async fn test_pg_hostile_identifiers_are_quoted() {
     assert_eq!(TestUser::filter(&pool).count().await.unwrap(), 0); // rango_test_user still exists
     teardown(&pool).await;
 }
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration"), ignore)]
+async fn test_pg_unknown_lookup_and_conflict_columns_are_invalid() {
+    let pool = pool().await;
+    setup(&pool).await;
+    let bogus = vec![("emial", SqlValue::Text("a@b.c".into()))];
+    let err = get_or_create(&pool, bogus.clone(), user("a@b.c"))
+        .await
+        .unwrap_err();
+    assert!(matches!(err, Error::Invalid(_)), "{err:?}");
+    let err = update_or_create(&pool, bogus, user("a@b.c"))
+        .await
+        .unwrap_err();
+    assert!(matches!(err, Error::Invalid(_)), "{err:?}");
+    let err = bulk_upsert(&pool, &[user("a@b.c")], &["emial"])
+        .await
+        .unwrap_err();
+    assert!(matches!(err, Error::Invalid(_)), "{err:?}");
+}
