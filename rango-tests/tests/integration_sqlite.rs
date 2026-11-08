@@ -418,7 +418,7 @@ async fn test_sqlite_bulk_create_is_atomic_across_chunks() {
     setup(&pool).await;
 
     // Enough rows for several chunks; the last row duplicates the first email.
-    let mut users: Vec<TestUser> = (0..450)
+    let mut users: Vec<TestUser> = (0..6500)
         .map(|i| user(&format!("atomic{}@t.com", i)))
         .collect();
     users.push(user("atomic0@t.com"));
@@ -1921,8 +1921,8 @@ async fn test_sqlite_bulk_update_mixed_types_over_several_chunks() {
     }
 
     // Enough rows for at least two chunks of the multi-row UPDATE.
-    let mut rows: Vec<BulkMix> = (0..300).map(bulk_mix).collect();
-    assert_eq!(bulk_create(&pool, &rows).await.unwrap(), 300);
+    let mut rows: Vec<BulkMix> = (0..3700).map(bulk_mix).collect();
+    assert_eq!(bulk_create(&pool, &rows).await.unwrap(), 3700);
 
     // Every column changes, NULLs become values and values become NULL.
     for (i, r) in rows.iter_mut().enumerate() {
@@ -1945,15 +1945,15 @@ async fn test_sqlite_bulk_update_mixed_types_over_several_chunks() {
     }
     let t = std::time::Instant::now();
     let cols = ["flag", "n", "big", "price", "at", "nick", "meta"];
-    assert_eq!(bulk_update(&pool, &rows, &cols).await.unwrap(), 300);
-    println!("sqlite bulk_update of 300 rows: {:?}", t.elapsed());
+    assert_eq!(bulk_update(&pool, &rows, &cols).await.unwrap(), 3700);
+    println!("sqlite bulk_update of 3700 rows: {:?}", t.elapsed());
     rows.sort_by_key(|r| r.id.0);
     assert_eq!(bulk_mix_sorted(&pool).await, rows);
 
     // Unchanged rows still count as matched; a subset of columns leaves the others alone.
     assert_eq!(
         bulk_update(&pool, &rows, &["n", "nick"]).await.unwrap(),
-        300
+        3700
     );
     for r in rows.iter_mut() {
         r.n = Some(FieldInt(5));
@@ -1961,7 +1961,7 @@ async fn test_sqlite_bulk_update_mixed_types_over_several_chunks() {
     }
     assert_eq!(
         bulk_update(&pool, &rows, &["n", "nick"]).await.unwrap(),
-        300
+        3700
     );
     assert_eq!(bulk_mix_sorted(&pool).await, rows);
 
@@ -1972,14 +1972,14 @@ async fn test_sqlite_bulk_update_mixed_types_over_several_chunks() {
     let before = bulk_mix_sorted(&pool).await;
     let snapshot = rows.clone();
     let res: Result<(), Error> = atomic(&pool, async |tx| {
-        assert_eq!(bulk_update(&mut **tx, &snapshot, &["flag"]).await?, 300);
+        assert_eq!(bulk_update(&mut **tx, &snapshot, &["flag"]).await?, 3700);
         Err(Error::Invalid("rollback".into()))
     })
     .await;
     assert!(res.is_err());
     assert_eq!(bulk_mix_sorted(&pool).await, before);
     atomic(&pool, async |tx| {
-        assert_eq!(bulk_update(&mut **tx, &snapshot, &["flag"]).await?, 300);
+        assert_eq!(bulk_update(&mut **tx, &snapshot, &["flag"]).await?, 3700);
         Ok(())
     })
     .await

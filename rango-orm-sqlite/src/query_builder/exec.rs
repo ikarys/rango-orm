@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet};
 
 use super::*;
 
-const PREFETCH_CHUNK: usize = 900; // stays under SQLite's old 999-parameter limit.
+const PREFETCH_CHUNK: usize = 900; // stays under the old 999-parameter limit of SQLite < 3.32 (bulk ops use more).
 
 impl<'a, M> QueryBuilder<'a, M>
 where
