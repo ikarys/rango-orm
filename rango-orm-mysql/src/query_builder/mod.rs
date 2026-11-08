@@ -1,198 +1,83 @@
 use crate::error::db_err;
 use crate::ops::bind_sql_values;
-use rango_orm_core::related::{CollectVecFn, FromRowFn};
-use rango_orm_core::{
-    quote_ident_mysql as quote_ident, FromRow, Model, ModelValues, Result, SqlValue,
-};
+use rango_orm_core::filter::{Dialect, Filter};
+use rango_orm_core::Result;
+use rango_orm_core::SqlValue;
+use rango_orm_core::{FromRow, Model, ModelValues};
 use sqlx::mysql::MySqlRow;
 use sqlx::Executor;
-use std::any::TypeId;
 
 mod conn;
 pub use conn::Conn;
 mod exec;
 pub use exec::SelectAs;
-mod filter;
-mod relations;
 
-pub const DEFAULT_QUERY_LIMIT: i64 = 1000;
+pub use rango_orm_core::DEFAULT_QUERY_LIMIT;
 
-#[derive(Debug, Clone)]
-enum Op {
-    Eq,
-    Ne,
-    Gt,
-    Gte,
-    Lt,
-    Lte,
-    Like,
-    ILike,
-    In,
-    IsNull,
-    IsNotNull,
-}
-
-#[derive(Debug, Clone)]
-struct Condition {
-    column: String,
-    op: Op,
-    value: Option<SqlValue>,
-    values: Option<Vec<SqlValue>>,
-}
-
-#[derive(Debug, Clone)]
-enum Connector {
-    And,
-    Or,
-    AndNot,
-    OrNot,
-    Xor,
-}
-
-#[derive(Debug, Clone)]
-enum ConditionNode {
-    Single(Condition),
-    Group(Vec<ConditionGroup>),
-    Subquery(Box<Subquery>),
-}
-
-/// `EXISTS (...)` / `col IN (...)` built from another `QueryBuilder`'s filters.
-#[derive(Debug, Clone)]
-struct Subquery {
-    /// SQL up to the subquery's filters, e.g. `` `col` IN (SELECT `x` FROM `t` ``.
-    head: String,
-    /// True when `head` already ends with a WHERE clause (correlated EXISTS).
-    has_where: bool,
-    conditions: Vec<ConditionGroup>,
-}
-
-#[derive(Debug, Clone)]
-struct ConditionGroup {
-    node: ConditionNode,
-    connector: Connector,
-}
-
-/// Spec for a `.select_related(fk_col)` call.
-/// The FK is on the main model's table: `m.fk_col = r.pk`, loaded with a LEFT JOIN.
-struct SelectRelatedSpec {
-    /// Column on M's table containing the FK to R.
-    fk_col: String,
-    /// `TypeId::of::<R>()` — used as the `WithRelated` cache key.
-    type_id: TypeId,
-    /// R's table name.
-    table_name: &'static str,
-    /// R's primary key column name.
-    pk_col: &'static str,
-    /// R's columns, selected as `` `r{i}`.`col` AS `__r{i}_col` ``.
-    columns: Vec<String>,
-    /// Type-erased `R::from_row`.
-    from_row: FromRowFn,
-}
-
-/// Spec for a `.prefetch_related(..)` call: a reverse FK or a M2M field.
-struct PrefetchSpec {
-    /// SQL up to and including the key expression, without the `= ANY(..)` / `IN (..)` part.
-    select: String,
-    /// Name of the result column holding M's primary key value in each fetched row.
-    key_col: String,
-    /// `TypeId::of::<Vec<R>>()` — used as the `WithRelated` cache key.
-    vec_type_id: TypeId,
-    /// Type-erased `R::from_row`.
-    from_row: FromRowFn,
-    /// Collects `Vec<Box<dyn Any>>` into a `Box<dyn Any>` containing `Vec<R>`.
-    collect_vec: CollectVecFn,
-}
-
+/// Chainable, lazy query builder. SQL is built and executed only at `.all()` / `.one()`.
+///
+/// The filters and the SQL they render to live in the DB-free `Filter`; this type adds
+/// the connection and the sqlx execution.
 pub struct QueryBuilder<'a, M> {
     conn: Conn<'a>,
-    conditions: Vec<ConditionGroup>,
-    order_by: Vec<String>,
-    limit: Option<i64>,
-    offset: Option<i64>,
-    explicit_limit: bool,
-    next_connector: Connector,
-    select_related: Vec<SelectRelatedSpec>,
-    prefetch_related: Vec<PrefetchSpec>,
-    /// First unknown column met while building; returned as `Error::Invalid` on execution.
-    invalid: Option<String>,
-    _phantom: std::marker::PhantomData<M>,
+    f: Filter<M>,
 }
 
-// ─── SQL builders ─────────────────────────────────────────────────────────────
-fn build_conditions(groups: &[ConditionGroup], binds: &mut Vec<SqlValue>) -> String {
-    let mut parts = Vec::new();
-    for (i, cg) in groups.iter().enumerate() {
-        let expr = match &cg.node {
-            ConditionNode::Single(c) => build_condition(c, binds),
-            ConditionNode::Group(inner) => format!("({})", build_conditions(inner, binds)),
-            ConditionNode::Subquery(sub) => {
-                let body = build_conditions(&sub.conditions, binds);
-                match (body.is_empty(), sub.has_where) {
-                    (true, _) => format!("{})", sub.head),
-                    (false, true) => format!("{} AND ({}))", sub.head, body),
-                    (false, false) => format!("{} WHERE {})", sub.head, body),
-                }
-            }
-        };
-        if i == 0 {
-            let expr = match &cg.connector {
-                Connector::AndNot | Connector::OrNot => format!("NOT {}", expr),
-                _ => expr,
-            };
-            parts.push(expr);
-        } else {
-            let conn = match &cg.connector {
-                Connector::And => format!("AND {}", expr),
-                Connector::Or => format!("OR {}", expr),
-                Connector::AndNot => format!("AND NOT {}", expr),
-                Connector::OrNot => format!("OR NOT {}", expr),
-                Connector::Xor => format!("XOR {}", expr),
-            };
-            parts.push(conn);
+impl<'a, M> QueryBuilder<'a, M>
+where
+    M: Model + ModelValues + FromRow,
+{
+    pub fn new(conn: impl Into<Conn<'a>>) -> Self {
+        Self {
+            conn: conn.into(),
+            f: Filter::new(Dialect::Mysql),
         }
     }
-    parts.join(" ")
+
+    /// A sub-builder (`group`, `where_exists`, ...): filters only, never runs.
+    fn detached(f: Filter<M>) -> Self {
+        Self {
+            conn: Conn::Detached,
+            f,
+        }
+    }
+
+    fn map(mut self, g: impl FnOnce(Filter<M>) -> Filter<M>) -> Self {
+        self.f = g(self.f);
+        self
+    }
+
+    /// Add a raw WHERE clause, for backend-specific extensions only.
+    #[allow(dead_code)]
+    pub(crate) fn raw_where(self, sql: String, binds: Vec<SqlValue>) -> Self {
+        self.map(|f| f.raw_where(sql, binds))
+    }
+
+    /// Remember the first unknown column of model `T`; reported when the query runs.
+    #[allow(dead_code)]
+    pub(crate) fn check_col<T: Model>(&mut self, name: &str) {
+        self.f.check_col::<T>(name);
+    }
+
+    /// Warn when the implicit row cap may have hidden rows.
+    fn warn_if_capped(&self, rows: usize) {
+        if self.f.is_capped(rows) {
+            tracing::warn!(
+                table = M::table_name(),
+                cap = DEFAULT_QUERY_LIMIT,
+                "query returned exactly the default row cap, results may be truncated; \
+                 call .limit(n) to choose a cap or .unlimited() to fetch every row"
+            );
+        }
+    }
+
+    /// Returns the SQL that would be executed by `.all()`, for debugging.
+    pub fn explain(&self) -> String {
+        self.f.select_sql().0
+    }
 }
 
-fn build_condition(c: &Condition, binds: &mut Vec<SqlValue>) -> String {
-    let col = quote_ident(&c.column);
-    match &c.op {
-        Op::IsNull => format!("{} IS NULL", col),
-        Op::IsNotNull => format!("{} IS NOT NULL", col),
-        Op::In => {
-            let vals = c.values.as_ref().unwrap();
-            if vals.is_empty() {
-                // `IN ()` is a syntax error; an empty set matches nothing.
-                return "(1 = 0)".to_string();
-            }
-            let placeholders: Vec<String> = vals.iter().map(|_| "?".to_string()).collect();
-            binds.extend(vals.clone());
-            format!("{} IN ({})", col, placeholders.join(", "))
-        }
-        op => {
-            let op_str = match op {
-                Op::Eq => "=",
-                Op::Ne => "!=",
-                Op::Gt => ">",
-                Op::Gte => ">=",
-                Op::Lt => "<",
-                Op::Lte => "<=",
-                // Case-sensitive like Postgres, whatever the column collation
-                Op::Like => {
-                    binds.push(c.value.clone().unwrap());
-                    return format!("{} COLLATE utf8mb4_bin LIKE ?", col);
-                }
-                Op::ILike => {
-                    binds.push(c.value.clone().unwrap());
-                    return format!("LOWER({}) LIKE LOWER(?)", col);
-                }
-                _ => unreachable!(),
-            };
-            binds.push(c.value.clone().unwrap());
-            format!("{} {} ?", col, op_str)
-        }
-    }
-}
+rango_orm_core::impl_filter_methods!();
 
 async fn bind_and_fetch_all<'e, E>(
     executor: E,
@@ -278,6 +163,7 @@ mod tests {
             .where_exists::<TestModel>("parent_id", |q| q.eq("b", 2i32))
             .in_subquery::<TestModel>("c", "id", |q| q)
             .eq("d", 3i32)
+            .f
             .build_where();
 
         assert_eq!(
