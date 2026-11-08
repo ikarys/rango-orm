@@ -128,6 +128,19 @@ let posts = Post::filter(&pool)
 
 Both compose with `.or()`, `.not()` and `.group()` like any other filter. For "has none", use `.not().where_exists(...)` rather than `.not().in_subquery(...)`: `NOT IN` matches nothing as soon as the subquery returns a `NULL`.
 
+### When to use a subquery, a JOIN, or a prefetch
+
+Rango does not pick between these for you — you express the intent, and each maps to the cheapest shape for that intent:
+
+| You want… | Use | Why it is the cheap shape |
+|---|---|---|
+| Keep/drop rows based on **whether** a related row exists | `where_exists` (correlated `EXISTS`) | The DB stops scanning the inner table at the first matching row; no row multiplication, no `DISTINCT`, no `JOIN` to clean up |
+| Compare a column against a **set of values** from another query | `in_subquery` (`IN (SELECT …)`) | One subquery, values stay bound; avoids loading them into Rust |
+| **Select columns from** a related table alongside the row | `select_related` (single `JOIN`) | You need the related columns in the result, so a `JOIN` is the right tool — a subquery would drop them |
+| **Load the related rows themselves** to iterate them | `prefetch_related` (one batched `IN` / `= ANY`) | One extra query for the whole page, which is what avoids the N+1 of a per-row lookup |
+
+The rule of thumb: a subquery answers *"does it exist?"* or *"is it in this set?"* without touching the related rows; a `JOIN` or `prefetch` is only for when you actually need the related data in hand. Reaching for a `JOIN` just to filter (then `DISTINCT`-ing the duplicates) is the N+1-adjacent anti-pattern `where_exists` exists to replace.
+
 ## Ordering, limit, offset
 
 ```rust

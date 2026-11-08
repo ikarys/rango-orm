@@ -28,3 +28,5 @@ sqlx = { version = "0.8", features = ["postgres", "sqlite", "mysql", "runtime-to
 integration = []
 integration-sqlite = []
 integration-mysql = []
+# On-demand, end-to-end scenario suite (`just scenarios`). Not enabled in CI.
+integration-scenarios = []

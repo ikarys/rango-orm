@@ -143,7 +143,7 @@ Design rules:
 | **Relations FK** ✅ | `ForeignKey<User>` → real `REFERENCES … ON DELETE` in SQL, FK columns indexed |
 | **ManyToMany** ✅ | Auto-generated pivot table; `add` / `remove` / `set` / `all` / `reverse` / `clear` / `exists` |
 | **Constraints** ✅ | `#[model(constraints = [CheckConstraint::new("age >= 18").name("chk_age"), UniqueConstraint::on(&["room", "date"]).name("uniq_booking")])]`: `CHECK` and `UNIQUE` inline in `CREATE TABLE`; `UNIQUE … WHERE cond` → partial unique index (Postgres, SQLite; skipped with a comment on MySQL). `managed = false` → ignored by migrations. `ordering = [asc("col"), desc("other")]` → default order |
-| **Subqueries** 🚧 | `where_exists(Article::AUTHOR_ID, \|q\| ..)` (correlated `EXISTS`, `.not()` → `NOT EXISTS`) and `in_subquery(col, sub_col, \|q\| ..)` ✅. Left: Rango picks a subquery over a JOIN or N+1 when it is cheaper |
+| **Subqueries** ✅ | `where_exists(Article::AUTHOR_ID, \|q\| ..)` (correlated `EXISTS`, `.not()` → `NOT EXISTS`) and `in_subquery(col, sub_col, \|q\| ..)`; decision rules for subquery vs `JOIN` vs `prefetch` documented in `docs/src/querying/filter.md`. Left (P2): Rango auto-picks the cheapest shape from a cost model |
 | **select_related** ✅ | One `LEFT JOIN` (filtered/paginated M in a subquery, R's columns prefixed `__r{i}_`); `all()` returns `Vec<WithRelated<M>>` |
 | **prefetch_related** ✅ | Reverse FK (`Comment::POST_ID`) and M2M (`Article::TAGS`, one `INNER JOIN` on the pivot); `= ANY($1)` on Postgres, `IN (...)` in batches of 900 elsewhere |
 | **values** ✅ | `.values(&["id", "email"])` → `Vec<HashMap<String, SqlValue>>` |
@@ -193,7 +193,7 @@ let active_users = User::filter(&pool)
 
 | Backend | Crate | Status |
 |---|---|---|
-| PostgreSQL | `rango-orm-postgres` | 🚧 en cours |
+| PostgreSQL | `rango-orm-postgres` | ✅ backend + CLI (default backend) |
 | MySQL / MariaDB | `rango-orm-mysql` | ✅ backend + CLI (MySQL 8.0+, MariaDB 10.6+) |
 | SQLite | `rango-orm-sqlite` | ✅ |
 | MSSQL | `rango-mssql` | 🔮 futur — SQLx a droppé le support MSSQL en 0.7, backend custom via `tiberius` |

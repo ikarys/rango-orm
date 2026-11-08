@@ -4,6 +4,9 @@
 
 use std::path::PathBuf;
 use std::process::Output;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static COUNTER: AtomicU64 = AtomicU64::new(0);
 
 const FIXTURE: &str = include_str!("../fixtures/models.rs");
 
@@ -15,7 +18,8 @@ impl Project {
     /// A project whose `src/models.rs` is the fixture, configured for `backend`
     /// (`sqlite`, `postgres` or `mysql`).
     pub fn new(name: &str, backend: &str) -> Self {
-        let dir = std::env::temp_dir().join(format!("rango_rp_{name}_{}", std::process::id()));
+        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("rango_rp_{name}_{}_{}", std::process::id(), n));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("src")).unwrap();
         std::fs::write(
