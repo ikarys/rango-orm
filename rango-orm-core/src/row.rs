@@ -1,6 +1,12 @@
 /// Error when reading a row.
 #[derive(Debug)]
-pub struct RowError(pub String);
+pub struct RowError(String);
+
+impl RowError {
+    pub fn new(msg: impl Into<String>) -> Self {
+        Self(msg.into())
+    }
+}
 
 impl std::fmt::Display for RowError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
