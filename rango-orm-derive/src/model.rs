@@ -682,10 +682,7 @@ fn unsupported_type(ty: &Type, type_str: &str) -> syn::Error {
     };
     syn::Error::new_spanned(
         ty,
-        format!(
-            "`{type_str}` is not a Rango field type: {hint}. \
-             Wrap it in `Option<..>` for a nullable column."
-        ),
+        format!("`{type_str}` is not a Rango field type: {hint}."),
     )
 }
 
