@@ -109,13 +109,13 @@ Checked against the tree at commit cd9a7cd (2026-11-08).
 | 2 | documented | 5fb5fd5: field-types.md has a "Working with decimals" section (construct, filter, sum). The compiler message still does not name the value type to pass (c8c74bc added `on_unimplemented` notes). |
 | 3 | documented | 5fb5fd5: aggregations.md and field-types.md warn that `sum`/`avg` return `f64`. Returning `Decimal` not done. |
 | 4 | won't fix | By design: defining-models.md says "There is no generated constructor: the fields are the API", and the compiler lists missing fields. `.into()` is the short form. |
-| 5 | open | `connect_sqlite(&str)` vs `connect_postgres(&DatabaseConfig)` unchanged; quick-start has only the SQLite call (configuration.md and postgres.md show the PG one). |
+| 5 | documented | a12b529: quick start shows `connect_postgres(&DatabaseConfig::from_url(..))` and `connect_mysql(url)` next to the SQLite call. API unchanged. |
 | 6 | fixed | 1c25338 and 5fb5fd5: renames and `--yes` documented in migrations/makemigrations.md; the non-TTY error names the rename. |
 | 7 | won't fix | Names come from the tables touched (`NNNN_<tables>.sql`, documented in makemigrations.md). Descriptive change names are not planned; the SQL is the readable part. |
 | 8 | fixed | 7fbd6ba: `exists()` runs `SELECT EXISTS(SELECT 1 ...)`. |
-| 9 | open | SQLite chunk size is still 999 parameters (rango-orm-sqlite/src/ops/bulk.rs). 58f3cf6 made `bulk_update` one statement per chunk and ef2a708 skips the transaction for a single chunk, but 1,000 rows still take several statements. |
+| 9 | fixed | 7b0c1c9: SQLite bulk operations chunk at 32,000 bound parameters (bundled SQLite 3.46 allows 32,766), so 1,000 rows are one statement. |
 | 10 | documented | filter.md says string names "accept any value and are checked by the database at runtime". No value validation added. |
-| 11 | open | No note in field-types.md that `FieldPassword` (argon2id) is slow in debug builds. |
+| 11 | documented | 89d82f0: field-types.md notes the argon2id cost per write and that bulk inserts pay it per row. |
 | 12 | fixed | Version is `0.2` in README, installation.md, postgres.md and the crate rustdoc (5fb5fd5). |
 | 13 | documented | filter.md Subqueries explains the FK column points at the parent and shows `Article::AUTHOR_ID` (84a39ad). No extra example added. |
 | D1 | fixed | 5fb5fd5: stale "UUID keys only" sentence replaced; defining-models.md lists the integer key types. |

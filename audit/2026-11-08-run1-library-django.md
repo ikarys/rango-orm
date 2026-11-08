@@ -129,7 +129,7 @@ Checked against the tree at commit cd9a7cd (2026-11-08).
 | 6 | documented | bbe54d9: quick-start lists uuid and chrono as dependencies you add. Shorter constructors (`FieldUuid::new()`, `FieldDateTime::now()`) are still not shown in the examples. |
 | 7 | fixed | ba80c4c: validated field values are private, so `FieldVarchar("x".into())` no longer compiles and validation cannot be skipped. Verbosity of building values: won't fix, by design (defining-models.md: "There is no generated constructor: the fields are the API"). |
 | 8 | fixed | 1c25338: non-TTY error mentions a possible rename and `--yes`; renames and `--yes` documented in migrations/makemigrations.md (5fb5fd5). |
-| 9 | open | The "What gets detected" table in docs/src/migrations/makemigrations.md still has no rename, constraint or index rows (renames and the SQLite rebuild have their own sections). |
+| 9 | fixed | 0520b02: the table lists renames, unique, index, FK, check/unique constraint and partial unique changes, with the SQLite rebuild. |
 | 10 | documented | 5fb5fd5: field-types.md now says Postgres and SQLite use a plain `NUMERIC`, only MySQL/MariaDB enforce P and S. Generator unchanged. |
 | 11 | documented | 5fb5fd5: aggregations.md and field-types.md say `sum`/`avg` are `f64`. SQLite dynamic typing of Decimal in `values()` is still not mentioned in values.md. |
 | 12 | fixed | bbe54d9: `.after()` orders by the column once; a repeated `.order_by` on it is not duplicated. |
@@ -138,7 +138,7 @@ Checked against the tree at commit cd9a7cd (2026-11-08).
 | 15 | fixed | 5fb5fd5: tracing.md documents `summary`, the empty `db.statement`, and `sqlx::query=debug`. The "count queries in tests" snippet was not added. |
 | 16 | fixed | 31908b1, 5ea0750: bulk_update, bulk_upsert, update_or_create and `transaction()` exist on SQLite. `atomic_retry` is Postgres/MySQL only and transactions.md says SQLite has no equivalent. |
 | 17 | fixed | c8c74bc: manual `Clone`/`Copy` for `ForeignKey<M>` without a bound on `M` (rango-orm-core/src/fields.rs). |
-| 18 | open | Fixed: `.one()` type, `myapp_user` sample, crate version (0.2) (bbe54d9, fd2d824). Still wrong: constraints.md and defining-models.md use `CheckConstraint::raw`, which does not exist (only `CheckConstraint::new`); constraints.md says partial unique is "Postgres only" while the CLI emits it for SQLite too. |
+| 18 | fixed | d2070ff: docs use `CheckConstraint::new`; constraints.md says partial unique is a partial unique index on Postgres and SQLite, skipped with a comment on MySQL / MariaDB (checked in the CLI SQL generation). |
 | 19 | won't fix | Compiler candidate noise on a mistyped constant comes from rustc, not Rango. c8c74bc added clearer messages elsewhere, and run 2 saw a "did you mean" help. |
-| 20 | open | quick-start.md still teaches string column names (`.eq("active", true)`) before typed columns. |
+| 20 | fixed | a12b529: the quick start uses typed columns (`User::ACTIVE`); string names are a secondary note (checked at run time, `Error::Invalid`). |
 | D | see rows | Section (d) repeats rows above: quick-start #4 #6 #20, bulk #1 #3 #16, transactions #2 #16, crud #16, tracing #15, makemigrations #8 #9, relations #5 #17, field-types #10 #11, constraints #18, filter #18, pagination #12, aggregations #11, sqlite #16. Extra items: installation.md version `0.1` fixed (5fb5fd5); "anyhow listed but tokio macros assumed" not checked. |
