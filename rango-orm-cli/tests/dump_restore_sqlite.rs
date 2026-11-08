@@ -310,3 +310,49 @@ async fn restore_of_a_dump_without_migrations_warns() {
     assert!(String::from_utf8_lossy(&out.stderr).contains("does not list applied migrations"));
     assert_eq!(p.count("b.db", "t_author").await, Some(2));
 }
+
+/// Hostile names in models (migration DDL) and in the database catalog (dump) stay identifiers.
+#[tokio::test]
+async fn hostile_table_and_column_names_stay_identifiers() {
+    let p = Project::new("evil_ddl").await;
+    let table = "ev\"il; DROP TABLE t_book; --";
+    let column = "na\"me); DROP TABLE t_book; --";
+
+    // DDL: makemigrations + migrate create exactly one table with that literal name.
+    let mut models = std::fs::read_to_string(p.dir.join("src/models.rs")).unwrap();
+    models.push_str(&format!(
+        "\n#[derive(Model)]\n#[model(table = {table:?})]\npub struct Evil {{\n    pub id: FieldUuid,\n    #[field(column = {column:?})]\n    pub name: FieldText,\n}}\n"
+    ));
+    std::fs::write(p.dir.join("src/models.rs"), models).unwrap();
+    assert_ok(&p.cli("a.db", &["makemigrations", "src", "--yes"]));
+    assert_ok(&p.cli("a.db", &["migrate"]));
+    assert_eq!(p.count("a.db", "t_book").await, Some(1));
+    let mut c = p.conn("a.db").await;
+    let found: i64 = sqlx::query_scalar("SELECT count(*) FROM sqlite_master WHERE name = ?")
+        .bind(table)
+        .fetch_one(&mut c)
+        .await
+        .unwrap();
+    assert_eq!(found, 1);
+
+    // Catalog: dump reads the table and column names back from the database and must not
+    // run them as SQL; the rows survive a restore into a fresh database.
+    let ins = format!(
+        "INSERT INTO \"{}\" (id, \"{}\") VALUES ('e1', 'v')",
+        table.replace('"', "\"\""),
+        column.replace('"', "\"\"")
+    );
+    sqlx::query(sqlx::AssertSqlSafe(ins))
+        .execute(&mut c)
+        .await
+        .unwrap();
+    assert_ok(&p.cli("a.db", &["dump", "-o", "d.json"]));
+    let dump = std::fs::read_to_string(p.dir.join("d.json")).unwrap();
+    assert!(
+        dump.contains("DROP TABLE t_book"),
+        "hostile rows not dumped"
+    );
+    assert_ok(&p.cli("b.db", &["restore", "d.json"]));
+    assert_eq!(p.count("b.db", "t_book").await, Some(1));
+    assert_eq!(p.count("b.db", &table.replace('"', "\"\"")).await, Some(1));
+}
