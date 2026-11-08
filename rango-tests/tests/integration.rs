@@ -1654,3 +1654,27 @@ async fn test_bulk_create_is_atomic_across_chunks() {
     assert!(err.is_err());
     assert_eq!(TestUser::filter(&pool).count().await.unwrap(), 0);
 }
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration"), ignore)]
+async fn test_in_values_empty_list() {
+    let pool = pool().await;
+    setup(&pool).await;
+    insert(&pool, user("in1@t.com")).await.unwrap();
+    insert(&pool, user("in2@t.com")).await.unwrap();
+
+    let none = TestUser::filter(&pool)
+        .in_values(TestUser::EMAIL, vec![])
+        .all()
+        .await
+        .unwrap();
+    assert!(none.is_empty());
+
+    let all = TestUser::filter(&pool)
+        .not()
+        .in_values(TestUser::EMAIL, vec![])
+        .all()
+        .await
+        .unwrap();
+    assert_eq!(all.len(), 2);
+}
