@@ -61,8 +61,11 @@ impl ModelHooks for User {
 | `get_or_create` | create hooks on `defaults`: `before_*` always run before the statement, `after_*` only if a row was inserted |
 | `update_or_create` | create hooks or update hooks, depending on whether the row existed |
 
-Not fired (same as Django): `bulk_create` / `bulk_update` / `bulk_upsert`, query-builder
-`update` / `delete`, and `raw*`.
+> **Bulk operations skip hooks.** `bulk_create`, `bulk_update` and `bulk_upsert` never call
+> any hook (see [Bulk operations](../operations/bulk.md)). If a hook computes a field, such as
+> the `slug` above, compute it yourself before a bulk call or insert row by row.
+
+Not fired (same as Django): query-builder `update` / `delete` and `raw*`, as well as the bulk operations above.
 
 `before_*` hooks take `&mut self`, so they can change the model; `after_*` hooks see the row
 returned by the database.

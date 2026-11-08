@@ -25,6 +25,8 @@ All field types live in `rango::prelude::*`.
 | `FieldUrl` | `VARCHAR(2048)` | `TEXT` | |
 | `FieldPassword<MIN, MAX>` | `TEXT` | `TEXT` | MIN / MAX bound the plain password, which is stored as an argon2id hash: the column is always `TEXT` (`LONGTEXT` on MySQL / MariaDB) |
 
+`FieldPassword::new(plain)` checks the bounds and hashes. `verify(&self, candidate)` checks a candidate against the stored hash. `hash()` returns the hash string and `from_hash(hash)` wraps a hash you already have.
+
 `FieldPassword` hashes with argon2id on every write. This is deliberately slow (about 200 ms per value in a debug build, much less in release), so a bulk insert of users pays it per row.
 
 ## Numeric types
@@ -48,7 +50,21 @@ let pricey = Product::filter(&pool).gte(Product::PRICE, Decimal::new(2000, 2)).a
 let exact = Product::filter(&pool).eq("price", Decimal::new(1999, 2)).all().await?;         // = 19.99
 ```
 
-`sum()` and `avg()` return `Result<Option<f64>>` (the database casts the result to a float), so they are not exact; use `min` / `max` or read the rows when you need exact decimals. See [Aggregations](../querying/aggregations.md).
+`sum()` and `avg()` return `Result<Option<f64>>` on every backend (the database casts the result to a float), so they are not exact. For an exact decimal aggregate the rule depends on the backend:
+
+| Backend | `min::<Decimal>` / `max::<Decimal>` | Exact `sum` |
+|---|---|---|
+| PostgreSQL, MySQL / MariaDB | Compile and return an exact `Decimal` | Read the rows and add the `Decimal`s in Rust |
+| SQLite | Do not compile: `Decimal` cannot be decoded from SQLite | Same |
+
+The portable way to get the exact extreme is to read the row that holds it:
+
+```rust
+let priciest = Product::filter(&pool).order_by("-fee").limit(1).one().await?; // Option<Product>
+let max_fee: Option<Decimal> = priciest.map(|p| p.fee.0);
+```
+
+`values()` works too when you do not want the whole model. On SQLite a value with more than 15 significant digits is kept as text and sorts after the numbers. See [Aggregations](../querying/aggregations.md).
 
 ## Date/time types
 

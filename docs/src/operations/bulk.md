@@ -2,6 +2,8 @@
 
 Bulk operations insert or update multiple rows efficiently in a single query.
 
+Bulk operations do not run [model hooks](../models/hooks.md) (`before_save`, `after_create`, ...).
+
 ## bulk_create
 
 Insert multiple rows in one query. Automatically chunks to stay within database parameter limits.
