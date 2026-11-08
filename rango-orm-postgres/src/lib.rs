@@ -54,36 +54,6 @@ fn tls_default(url: &str, env_sslmode: bool) -> rango_orm_core::Result<PgConnect
     Ok(opts)
 }
 
-#[cfg(test)]
-mod tls_tests {
-    use super::*;
-
-    #[test]
-    fn remote_hosts_require_tls_unless_the_url_says_otherwise() {
-        let mode = |url, env| tls_default(url, env).unwrap().get_ssl_mode();
-        assert!(matches!(
-            mode("postgres://u:p@db.example.com/d", false),
-            PgSslMode::Require
-        ));
-        assert!(matches!(
-            mode("postgres://u:p@localhost/d", false),
-            PgSslMode::Prefer
-        ));
-        assert!(matches!(
-            mode("postgres://u:p@127.0.0.1/d", false),
-            PgSslMode::Prefer
-        ));
-        assert!(matches!(
-            mode("postgres://u:p@db.example.com/d?sslmode=disable", false),
-            PgSslMode::Disable
-        ));
-        assert!(matches!(
-            mode("postgres://u:p@db.example.com/d", true),
-            PgSslMode::Prefer
-        ));
-    }
-}
-
 /// Connect to a PostgreSQL database and return a connection pool.
 /// Applies `after_connect` SQL statements on every new connection if configured.
 ///
@@ -129,4 +99,34 @@ pub async fn connect(config: &DatabaseConfig) -> rango_orm_core::Result<PgPool> 
     }
 
     opts.connect_with(connect_opts).await.map_err(error::db_err)
+}
+
+#[cfg(test)]
+mod tls_tests {
+    use super::*;
+
+    #[test]
+    fn remote_hosts_require_tls_unless_the_url_says_otherwise() {
+        let mode = |url, env| tls_default(url, env).unwrap().get_ssl_mode();
+        assert!(matches!(
+            mode("postgres://u:p@db.example.com/d", false),
+            PgSslMode::Require
+        ));
+        assert!(matches!(
+            mode("postgres://u:p@localhost/d", false),
+            PgSslMode::Prefer
+        ));
+        assert!(matches!(
+            mode("postgres://u:p@127.0.0.1/d", false),
+            PgSslMode::Prefer
+        ));
+        assert!(matches!(
+            mode("postgres://u:p@db.example.com/d?sslmode=disable", false),
+            PgSslMode::Disable
+        ));
+        assert!(matches!(
+            mode("postgres://u:p@db.example.com/d", true),
+            PgSslMode::Prefer
+        ));
+    }
 }
