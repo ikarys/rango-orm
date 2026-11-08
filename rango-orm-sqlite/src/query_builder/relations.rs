@@ -6,7 +6,7 @@ use std::any::TypeId;
 
 use super::*;
 
-impl<M> QueryBuilder<M>
+impl<M> QueryBuilder<'_, M>
 where
     M: Model + ModelValues + FromRow,
 {

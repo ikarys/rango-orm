@@ -7,7 +7,7 @@ use rango_orm_core::{
 };
 use rango_orm_core::{quote_ident_mysql as quote_ident, FromRow, Model, ModelValues, SqlValue};
 use rango_orm_core::{Error, Result};
-use sqlx::{Executor, MySql, MySqlPool};
+use sqlx::{Acquire, Executor, MySql};
 
 use super::*;
 
@@ -42,7 +42,7 @@ where
     M: Model + ModelValues + FromRow,
 {
     before_update(&mut model).await?;
-    let (sql, values) = build_update_sql::<M>(&model);
+    let (sql, values) = build_update_sql::<M>(&model, model.pk_value());
     let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*sql)), values);
     let res = q.execute(executor).await.map_err(db_err)?;
     if res.rows_affected() == 0 {
@@ -109,19 +109,21 @@ where
 /// Plain INSERT; on a unique violation, fetch the existing row. (`INSERT IGNORE` would also
 /// swallow NOT NULL / FK / truncation errors.)
 #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "mysql", db.operation = "INSERT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
-pub async fn get_or_create<M>(
-    pool: &MySqlPool,
+pub async fn get_or_create<'a, A, M>(
+    executor: A,
     lookup: Vec<(&'static str, SqlValue)>,
     mut defaults: M,
 ) -> Result<(M, bool)>
 where
+    A: Acquire<'a, Database = MySql>,
     M: Model + ModelValues + FromRow,
 {
+    let mut conn = executor.acquire().await.map_err(db_err)?;
     before_insert(&mut defaults).await?;
     let generated = defaults.pk_value().is_null();
     let (insert_sql, insert_vals) = build_insert_sql::<M>(&defaults);
     let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*insert_sql)), insert_vals);
-    match q.execute(pool).await.map_err(db_err) {
+    match q.execute(&mut *conn).await.map_err(db_err) {
         Ok(res) => {
             if generated {
                 defaults.set_generated_pk(res.last_insert_id() as i64);
@@ -135,11 +137,58 @@ where
 
     let (select_sql, select_vals) = build_lookup_sql::<M>(&lookup);
     let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*select_sql)), select_vals);
-    let row = q.fetch_one(pool).await.map_err(db_err)?;
+    let row = q.fetch_one(&mut *conn).await.map_err(db_err)?;
     Ok((
         M::from_row(&MySqlRangoRow(row)).map_err(Error::from)?,
         false,
     ))
+}
+
+/// UPDATE OR CREATE.
+///
+/// Updates the row matching `lookup` (update hooks fire), or inserts `values` (create hooks fire).
+/// Accepts `&MySqlPool`, `&mut *tx` or any type implementing `sqlx::Acquire`.
+/// Lookup then write are two statements: wrap in `atomic()` to make them one unit.
+#[tracing::instrument(name = "db.query", skip_all, fields(db.system = "mysql", db.operation = "UPDATE", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
+pub async fn update_or_create<'a, A, M>(
+    executor: A,
+    lookup: Vec<(&'static str, SqlValue)>,
+    mut values: M,
+) -> Result<M>
+where
+    A: Acquire<'a, Database = MySql>,
+    M: Model + ModelValues + FromRow,
+{
+    let mut conn = executor.acquire().await.map_err(db_err)?;
+    let (lookup_sql, lookup_vals) = build_lookup_sql::<M>(&lookup);
+    let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*lookup_sql)), lookup_vals);
+    let row = q.fetch_optional(&mut *conn).await.map_err(db_err)?;
+    if let Some(row) = row {
+        // Update the row that exists (its PK), not the PK carried by `values`.
+        let existing = M::from_row(&MySqlRangoRow(row)).map_err(Error::from)?;
+        before_update(&mut values).await?;
+        let (update_sql, update_vals) = build_update_sql::<M>(&values, existing.pk_value());
+        let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*update_sql)), update_vals);
+        q.execute(&mut *conn).await.map_err(db_err)?;
+        // No RETURNING: read the stored row back by PK.
+        let (sel_sql, sel_vals) = build_lookup_sql::<M>(&[(M::pk_column(), existing.pk_value())]);
+        let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*sel_sql)), sel_vals);
+        let row = q.fetch_one(&mut *conn).await.map_err(db_err)?;
+        let saved = M::from_row(&MySqlRangoRow(row)).map_err(Error::from)?;
+        after_update(&saved).await?;
+        Ok(saved)
+    } else {
+        before_insert(&mut values).await?;
+        let generated = values.pk_value().is_null();
+        let (insert_sql, insert_vals) = build_insert_sql::<M>(&values);
+        let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*insert_sql)), insert_vals);
+        let res = q.execute(&mut *conn).await.map_err(db_err)?;
+        if generated {
+            values.set_generated_pk(res.last_insert_id() as i64);
+        }
+        after_insert(&values).await?;
+        Ok(values)
+    }
 }
 
 // ─── SQL builders ─────────────────────────────────────────────────────────────
@@ -156,10 +205,12 @@ fn build_insert_sql<M: Model + ModelValues>(model: &M) -> (String, Vec<SqlValue>
     (sql, values)
 }
 
-fn build_update_sql<M: Model + ModelValues>(model: &M) -> (String, Vec<SqlValue>) {
+fn build_update_sql<M: Model + ModelValues>(
+    model: &M,
+    pk_val: SqlValue,
+) -> (String, Vec<SqlValue>) {
     let fields = model.field_values();
     let pk_col = M::pk_column();
-    let pk_val = model.pk_value();
     let set_clauses: Vec<String> = fields
         .iter()
         .map(|(col, _)| format!("{} = ?", quote_ident(col)))

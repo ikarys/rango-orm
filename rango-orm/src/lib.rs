@@ -112,10 +112,9 @@ pub use rango_orm_derive::model;
 pub use rango_orm_postgres::PgPool;
 #[cfg(feature = "postgres")]
 pub use rango_orm_postgres::{
-    M2M, Pg, PgQueryExt, QueryBuilder, RangoExecutor, RangoFilterExt, RangoTransaction, SelectAs,
-    TxFuture, WithRelated, all, atomic, atomic_retry, bulk_create, bulk_update, bulk_upsert,
-    delete, get, get_or_create, insert, raw, raw_execute, raw_scalar, transaction, update,
-    update_or_create,
+    Conn, M2M, Pg, PgQueryExt, QueryBuilder, RangoFilterExt, RangoTransaction, SelectAs, TxFuture,
+    WithRelated, all, atomic, atomic_retry, bulk_create, bulk_update, bulk_upsert, delete, get,
+    get_or_create, insert, raw, raw_execute, raw_scalar, transaction, update, update_or_create,
 };
 
 #[cfg(feature = "postgres")]
@@ -133,8 +132,9 @@ pub use rango_orm_sqlite::SqlitePool;
 #[cfg(feature = "sqlite")]
 pub mod sqlite {
     pub use rango_orm_sqlite::{
-        M2M, QueryBuilder, RangoFilterExt, SelectAs, SqliteTransaction, TxFuture, all, atomic,
-        bulk_create, delete, get, get_or_create, insert, raw, raw_execute, raw_scalar, update,
+        Conn, M2M, QueryBuilder, RangoFilterExt, SelectAs, SqliteTransaction, TxFuture, all,
+        atomic, bulk_create, bulk_update, bulk_upsert, delete, get, get_or_create, insert, raw,
+        raw_execute, raw_scalar, update, update_or_create,
     };
 }
 
@@ -152,8 +152,9 @@ pub use rango_orm_mysql::MySqlPool;
 #[cfg(feature = "mysql")]
 pub mod mysql {
     pub use rango_orm_mysql::{
-        M2M, MySqlTransaction, QueryBuilder, RangoFilterExt, SelectAs, TxFuture, all, atomic,
-        bulk_create, delete, get, get_or_create, insert, raw, raw_execute, raw_scalar, update,
+        Conn, M2M, MySqlTransaction, QueryBuilder, RangoFilterExt, SelectAs, TxFuture, all, atomic,
+        bulk_create, bulk_update, bulk_upsert, delete, get, get_or_create, insert, raw,
+        raw_execute, raw_scalar, update, update_or_create,
     };
 }
 
@@ -177,7 +178,7 @@ pub mod prelude {
 
     #[cfg(feature = "postgres")]
     pub use rango_orm_postgres::{
-        M2M, Pg, PgPool, PgQueryExt, QueryBuilder, RangoExecutor, RangoFilterExt, RangoTransaction,
+        Conn, M2M, Pg, PgPool, PgQueryExt, QueryBuilder, RangoFilterExt, RangoTransaction,
         SelectAs, TxFuture, WithRelated, all, atomic, atomic_retry, bulk_create, bulk_update,
         bulk_upsert, delete, get, get_or_create, insert, raw, raw_execute, raw_scalar, transaction,
         update, update_or_create,

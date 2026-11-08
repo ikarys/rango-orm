@@ -1,7 +1,6 @@
 //! Single-row CRUD operations.
 
 use crate::error::db_err;
-use crate::executor::RangoExecutor;
 use crate::row::{PgRangoRow, decode_all};
 use rango_orm_core::{Error, Result};
 use rango_orm_core::{FromRow, Model, ModelValues, SqlValue, quote_ident};
@@ -51,7 +50,7 @@ where
     M: Model + ModelValues + FromRow,
 {
     before_update(&mut model).await?;
-    let (sql, values) = build_update_sql::<M>(&model);
+    let (sql, values) = build_update_sql::<M>(&model, model.pk_value());
     let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*sql)), values);
     let row = q.fetch_one(executor).await.map_err(db_err)?;
     let saved = M::from_row(&PgRangoRow(row)).map_err(Error::from)?;
@@ -110,7 +109,7 @@ where
     decode_all::<M>(rows)
 }
 
-// ─── Compound ops — require RangoExecutor (pool or transaction, sequential queries) ─
+// ─── Compound ops — pool or transaction, sequential queries on one connection ─
 /// GET OR CREATE — atomic, race-free. Returns `(model, created: bool)`.
 ///
 /// Uses `INSERT ... ON CONFLICT (lookup_cols) DO NOTHING RETURNING *` in a single
@@ -164,26 +163,30 @@ where
 
 /// UPDATE OR CREATE.
 ///
-/// Accepts `&mut pool` (for standalone use) or `tx` (inside `atomic()`).
-/// For atomicity, wrap in `atomic()`.
+/// Updates the row matching `lookup` (update hooks fire), or inserts `values` (create hooks fire).
+/// Accepts `&PgPool`, `&mut *tx` or any type implementing `sqlx::Acquire`.
+/// Lookup then write are two statements: wrap in `atomic()` to make them one unit.
 #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "postgresql", db.operation = "UPDATE", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
-pub async fn update_or_create<E, M>(
-    exec: &mut E,
+pub async fn update_or_create<'a, A, M>(
+    executor: A,
     lookup: Vec<(&'static str, SqlValue)>,
     mut values: M,
 ) -> Result<M>
 where
-    E: RangoExecutor,
+    A: Acquire<'a, Database = Postgres>,
     M: Model + ModelValues + FromRow,
 {
+    let mut conn = executor.acquire().await.map_err(db_err)?;
     let (lookup_sql, lookup_vals) = build_lookup_sql::<M>(&lookup);
     let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*lookup_sql)), lookup_vals);
-    let row = exec.fetch_optional_query(q).await.map_err(db_err)?;
-    if row.is_some() {
+    let row = q.fetch_optional(&mut *conn).await.map_err(db_err)?;
+    if let Some(row) = row {
+        // Update the row that exists (its PK), not the PK carried by `values`.
+        let existing = M::from_row(&PgRangoRow(row)).map_err(Error::from)?;
         before_update(&mut values).await?;
-        let (update_sql, update_vals) = build_update_sql::<M>(&values);
+        let (update_sql, update_vals) = build_update_sql::<M>(&values, existing.pk_value());
         let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*update_sql)), update_vals);
-        let row = exec.fetch_one_query(q).await.map_err(db_err)?;
+        let row = q.fetch_one(&mut *conn).await.map_err(db_err)?;
         let saved = M::from_row(&PgRangoRow(row)).map_err(Error::from)?;
         after_update(&saved).await?;
         Ok(saved)
@@ -191,7 +194,7 @@ where
         before_insert(&mut values).await?;
         let (insert_sql, insert_vals) = build_insert_sql::<M>(&values);
         let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*insert_sql)), insert_vals);
-        let row = exec.fetch_one_query(q).await.map_err(db_err)?;
+        let row = q.fetch_one(&mut *conn).await.map_err(db_err)?;
         let saved = M::from_row(&PgRangoRow(row)).map_err(Error::from)?;
         after_insert(&saved).await?;
         Ok(saved)
@@ -212,10 +215,12 @@ fn build_insert_sql<M: Model + ModelValues>(model: &M) -> (String, Vec<SqlValue>
     (sql, values)
 }
 
-fn build_update_sql<M: Model + ModelValues>(model: &M) -> (String, Vec<SqlValue>) {
+fn build_update_sql<M: Model + ModelValues>(
+    model: &M,
+    pk_val: SqlValue,
+) -> (String, Vec<SqlValue>) {
     let fields = model.field_values();
     let pk_col = M::pk_column();
-    let pk_val = model.pk_value();
     let set_clauses: Vec<String> = fields
         .iter()
         .enumerate()

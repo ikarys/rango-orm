@@ -69,7 +69,7 @@ where
     fn fts5(self, fts_table: &str, query: &str) -> Self;
 }
 
-impl<M> SqliteQueryExt<M> for QueryBuilder<M>
+impl<M> SqliteQueryExt<M> for QueryBuilder<'_, M>
 where
     M: Model + ModelValues + FromRow,
 {

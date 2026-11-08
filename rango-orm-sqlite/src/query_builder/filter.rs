@@ -2,17 +2,16 @@ use rango_orm_core::{
     quote_ident, ColumnRef, FilterColumn, ForeignKeyRef, FromRow, Model, ModelValues, OrderRef,
     SqlValue,
 };
-use sqlx::SqlitePool;
 
 use super::*;
 
-impl<M> QueryBuilder<M>
+impl<'a, M> QueryBuilder<'a, M>
 where
     M: Model + ModelValues + FromRow,
 {
-    pub fn new(pool: &SqlitePool) -> Self {
+    pub fn new(conn: impl Into<Conn<'a>>) -> Self {
         Self {
-            pool: pool.clone(),
+            conn: conn.into(),
             conditions: Vec::new(),
             order_by: Vec::new(),
             limit: None,
@@ -171,7 +170,7 @@ where
     where
         F: FnOnce(QueryBuilder<M>) -> QueryBuilder<M>,
     {
-        let inner = QueryBuilder::<M>::new(&self.pool);
+        let inner = QueryBuilder::<M>::new(Conn::Detached);
         let inner = f(inner);
         if self.invalid.is_none() {
             self.invalid = inner.invalid;
@@ -221,7 +220,7 @@ where
             quote_ident(fk_col.column_name()),
             quote_ident(M::pk_column()),
         );
-        let sub = sub(QueryBuilder::new(&self.pool));
+        let sub = sub(QueryBuilder::new(Conn::Detached));
         self.add_subquery(head, true, sub)
     }
 
@@ -252,7 +251,7 @@ where
             quote_ident(sub_col.column_name()),
             quote_ident(R::table_name()),
         );
-        let sub = sub(QueryBuilder::new(&self.pool));
+        let sub = sub(QueryBuilder::new(Conn::Detached));
         self.add_subquery(head, false, sub)
     }
 

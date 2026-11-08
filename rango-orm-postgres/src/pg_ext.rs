@@ -67,7 +67,7 @@ where
     fn array_contains(self, col: impl ColumnRef<M>, values: Vec<String>) -> Self;
 }
 
-impl<M> PgQueryExt<M> for QueryBuilder<M>
+impl<M> PgQueryExt<M> for QueryBuilder<'_, M>
 where
     M: Model + ModelValues + FromRow,
 {

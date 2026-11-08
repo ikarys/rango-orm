@@ -30,14 +30,14 @@ where
         return Ok(0);
     }
 
-    let mut conn = executor.acquire().await.map_err(db_err)?;
-
     // One statement, one array parameter per column; falls back for unsupported types.
     if let Some((sql, cols)) = build_bulk_create_unnest_sql::<M>(models) {
         let q = cols
             .into_iter()
             .fold(sqlx::query(sqlx::AssertSqlSafe(&*sql)), |q, c| c.bind(q));
-        let result = q.execute(&mut *conn).await.map_err(db_err)?;
+        let mut tx = executor.begin().await.map_err(db_err)?;
+        let result = q.execute(&mut *tx).await.map_err(db_err)?;
+        tx.commit().await.map_err(db_err)?;
         return Ok(result.rows_affected() as usize);
     }
 
@@ -45,7 +45,7 @@ where
     let chunk_size = (65535 / n_cols).max(1);
     let mut total = 0usize;
     // All chunks in one transaction: a later failure must not leave earlier rows behind.
-    let mut tx = (&mut *conn).begin().await.map_err(db_err)?;
+    let mut tx = executor.begin().await.map_err(db_err)?;
 
     for chunk in models.chunks(chunk_size) {
         let (sql, values) = build_bulk_create_sql::<M>(chunk);
@@ -77,12 +77,21 @@ where
         return Ok(0);
     }
 
-    let mut conn = executor.acquire().await.map_err(db_err)?;
+    for f in fields {
+        if let Some(msg) = rango_orm_core::unknown_column::<M>(f) {
+            return Err(rango_orm_core::Error::Invalid(msg));
+        }
+        if *f == M::pk_column() {
+            return Err(rango_orm_core::Error::Invalid(format!(
+                "`{f}` is the primary key and cannot be updated"
+            )));
+        }
+    }
 
     let n_cols = fields.len() + 1; // +1 for pk
     let chunk_size = (65535 / n_cols).max(1);
     let mut total = 0usize;
-    let mut tx = (&mut *conn).begin().await.map_err(db_err)?;
+    let mut tx = executor.begin().await.map_err(db_err)?;
 
     for chunk in models.chunks(chunk_size) {
         let (sql, values) = build_bulk_update_sql::<M>(chunk, fields);
@@ -115,12 +124,10 @@ where
         return Ok(0);
     }
 
-    let mut conn = executor.acquire().await.map_err(db_err)?;
-
     let n_cols = 1 + models[0].field_values().len();
     let chunk_size = (65535 / n_cols).max(1);
     let mut total = 0usize;
-    let mut tx = (&mut *conn).begin().await.map_err(db_err)?;
+    let mut tx = executor.begin().await.map_err(db_err)?;
 
     for chunk in models.chunks(chunk_size) {
         let (sql, values) = build_bulk_upsert_sql::<M>(chunk, conflict_on);
