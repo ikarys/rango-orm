@@ -99,7 +99,7 @@ where
     &'c mut DB::Connection: sqlx::Executor<'c, Database = DB>,
 {
     if let Some(sql) = setup_sql {
-        sqlx::raw_sql(sql)
+        sqlx::raw_sql(sqlx::AssertSqlSafe(sql))
             .execute(conn)
             .await
             .context("Failed to create the schema")?;
@@ -139,10 +139,10 @@ pub(crate) async fn columns_of_type_postgres(
     table: &str,
     data_type: &str,
 ) -> Result<HashSet<String>> {
-    let cols: Vec<String> = sqlx::query_scalar(
+    let cols: Vec<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(
         "SELECT column_name::text FROM information_schema.columns \
          WHERE table_schema = current_schema() AND table_name = $1 AND data_type = $2",
-    )
+    ))
     .bind(table)
     .bind(data_type)
     .fetch_all(conn)
@@ -319,7 +319,7 @@ async fn import_postgres(
             "UPDATE {t} SET {set} FROM (SELECT {rec} AS r) x WHERE {cond}",
             t = quote_ident(table)
         );
-        sqlx::query(&sql)
+        sqlx::query(sqlx::AssertSqlSafe(&*sql))
             .bind(serde_json::Value::Object(fix.clone()).to_string())
             .execute(&mut *tx)
             .await
@@ -336,10 +336,10 @@ async fn resync_identities_postgres(
     conn: &mut sqlx::PgConnection,
     tables: &[String],
 ) -> Result<()> {
-    let identities: Vec<(String, String)> = sqlx::query_as(
+    let identities: Vec<(String, String)> = sqlx::query_as(sqlx::AssertSqlSafe(
         "SELECT table_name::text, column_name::text FROM information_schema.columns \
          WHERE table_schema = current_schema() AND is_identity = 'YES'",
-    )
+    ))
     .fetch_all(&mut *conn)
     .await
     .context("Failed to read identity columns")?;
@@ -349,7 +349,7 @@ async fn resync_identities_postgres(
             quote_ident(column),
             quote_ident(table)
         );
-        sqlx::query(&sql)
+        sqlx::query(sqlx::AssertSqlSafe(&*sql))
             .bind(quote_ident(table))
             .bind(column)
             .execute(&mut *conn)
@@ -383,11 +383,11 @@ async fn insert_rows_postgres(
     let conflict = match on_conflict {
         OnConflict::Replace => {
             // Postgres needs a conflict target for DO UPDATE: the primary key.
-            let pk: Vec<String> = sqlx::query_scalar(
+            let pk: Vec<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(
                 "SELECT a.attname::text FROM pg_index i \
                  JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey) \
                  WHERE i.indrelid = $1::regclass AND i.indisprimary",
-            )
+            ))
             .bind(quote_ident(table))
             .fetch_all(&mut *conn)
             .await
@@ -430,7 +430,7 @@ async fn insert_rows_postgres(
             }
             values.insert(c.to_string(), v);
         }
-        sqlx::query(&sql)
+        sqlx::query(sqlx::AssertSqlSafe(&*sql))
             .bind(serde_json::Value::Object(values).to_string())
             .execute(&mut *conn)
             .await
@@ -514,7 +514,7 @@ async fn insert_rows_sqlite(
             suffix
         );
 
-        let mut q = sqlx::query(&sql);
+        let mut q = sqlx::query(sqlx::AssertSqlSafe(&*sql));
         for col in &cols {
             let val = row.get(*col).unwrap_or(&serde_json::Value::Null);
             q = match val {
@@ -547,9 +547,9 @@ async fn binary_columns_sqlite(
 }
 
 fn bind_json_value_sqlite<'q>(
-    q: sqlx::query::Query<'q, sqlx::Sqlite, sqlx::sqlite::SqliteArguments<'q>>,
+    q: sqlx::query::Query<'q, sqlx::Sqlite, sqlx::sqlite::SqliteArguments>,
     val: &serde_json::Value,
-) -> sqlx::query::Query<'q, sqlx::Sqlite, sqlx::sqlite::SqliteArguments<'q>> {
+) -> sqlx::query::Query<'q, sqlx::Sqlite, sqlx::sqlite::SqliteArguments> {
     match val {
         serde_json::Value::Null => q.bind(Option::<String>::None),
         serde_json::Value::Bool(b) => q.bind(*b as i64),
@@ -670,7 +670,7 @@ async fn insert_rows_mysql(
             conflict
         );
 
-        let mut q = sqlx::query(&sql);
+        let mut q = sqlx::query(sqlx::AssertSqlSafe(&*sql));
         for col in &cols {
             q = bind_json_value_mysql(
                 q,
@@ -694,13 +694,13 @@ async fn fetch_uuid_columns_mysql(
 ) -> Result<HashSet<String>> {
     use sqlx::Row;
 
-    let rows = sqlx::query(
+    let rows = sqlx::query(sqlx::AssertSqlSafe(
         "SELECT CAST(COLUMN_NAME AS CHAR) FROM information_schema.COLUMNS \
          WHERE TABLE_SCHEMA = DATABASE() \
            AND TABLE_NAME = ? \
            AND DATA_TYPE = 'binary' \
            AND CHARACTER_OCTET_LENGTH = 16",
-    )
+    ))
     .bind(table)
     .fetch_all(conn)
     .await
@@ -756,12 +756,12 @@ async fn binary_columns_mysql(
     conn: &mut sqlx::MySqlConnection,
     table: &str,
 ) -> Result<HashSet<String>> {
-    let cols: Vec<String> = sqlx::query_scalar(
+    let cols: Vec<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(
         "SELECT CAST(COLUMN_NAME AS CHAR) FROM information_schema.COLUMNS \
          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? \
            AND DATA_TYPE IN ('tinyblob', 'blob', 'mediumblob', 'longblob', 'varbinary', 'binary') \
            AND NOT (DATA_TYPE = 'binary' AND CHARACTER_OCTET_LENGTH = 16)",
-    )
+    ))
     .bind(table)
     .fetch_all(conn)
     .await
@@ -921,18 +921,18 @@ JOIN pg_namespace n ON n.oid = c.relnamespace
 JOIN pg_attribute a ON a.attrelid = k.conrelid AND a.attnum = k.conkey[1]
 WHERE k.contype = 'f' AND array_length(k.conkey, 1) = 1 AND NOT a.attnotnull
   AND n.nspname = current_schema()";
-    sqlx::query_as(sql)
+    sqlx::query_as(sqlx::AssertSqlSafe(sql))
         .fetch_all(&mut *conn)
         .await
         .context("Failed to read nullable foreign keys")
 }
 
 async fn primary_key_postgres(conn: &mut sqlx::PgConnection, table: &str) -> Result<Vec<String>> {
-    sqlx::query_scalar(
+    sqlx::query_scalar(sqlx::AssertSqlSafe(
         "SELECT a.attname::text FROM pg_index i \
          JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey) \
          WHERE i.indrelid = $1::regclass AND i.indisprimary",
-    )
+    ))
     .bind(quote_ident(table))
     .fetch_all(&mut *conn)
     .await
@@ -950,7 +950,7 @@ JOIN pg_class p ON p.oid = k.confrelid
 JOIN pg_namespace n ON n.oid = c.relnamespace
 WHERE k.contype = 'f' AND n.nspname = current_schema()";
 
-    sqlx::query_as::<_, (String, String)>(sql)
+    sqlx::query_as::<_, (String, String)>(sqlx::AssertSqlSafe(sql))
         .fetch_all(&mut *conn)
         .await
         .context("Failed to read foreign keys")

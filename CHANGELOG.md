@@ -4,6 +4,7 @@
 
 First beta of the 0.2 cycle. The API may still change between betas: pin the tag.
 
+- Deps: sqlx 0.9, syn 3, argon2 0.6, toml 1, base64 0.23, criterion 0.8. Minimum supported Rust version is now 1.94 (required by sqlx 0.9). Dynamic SQL built by Rango (identifiers through `quote_ident`, values always bound) is passed to sqlx as `AssertSqlSafe`.
 - Docs: subquery decision rules — when to use a correlated `EXISTS` subquery vs a `JOIN` vs a `prefetch` (`docs/src/querying/filter.md`).
 - Tests: on-demand end-to-end scenario suite (`just scenarios`), gated behind `integration-scenarios` so it never runs in CI; drives a real blog/CMS app (CRUD, relations, M2M, subquery filter, transactions, bulk) on SQLite in-memory.
 - License: dual-licensed under MIT OR Apache-2.0 (was MIT only).

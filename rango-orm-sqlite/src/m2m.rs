@@ -59,7 +59,10 @@ where
     #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "sqlite", db.operation = "INSERT", db.sql.table = %Self::pivot_table(), db.rows = tracing::field::Empty, otel.kind = "client"))]
     pub async fn add(pool: &SqlitePool, from: &From, to: &To) -> Result<()> {
         let sql = Self::insert_sql();
-        let q = bind_sql_values(sqlx::query(&sql), vec![from.pk_value(), to.pk_value()]);
+        let q = bind_sql_values(
+            sqlx::query(sqlx::AssertSqlSafe(&*sql)),
+            vec![from.pk_value(), to.pk_value()],
+        );
         q.execute(pool).await.map_err(db_err)?;
         Ok(())
     }
@@ -76,7 +79,10 @@ where
             quote_ident(&from_col),
             quote_ident(&to_col)
         );
-        let q = bind_sql_values(sqlx::query(&sql), vec![from.pk_value(), to.pk_value()]);
+        let q = bind_sql_values(
+            sqlx::query(sqlx::AssertSqlSafe(&*sql)),
+            vec![from.pk_value(), to.pk_value()],
+        );
         q.execute(pool).await.map_err(db_err)?;
         Ok(())
     }
@@ -85,7 +91,10 @@ where
     #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "sqlite", db.operation = "DELETE", db.sql.table = %Self::pivot_table(), db.rows = tracing::field::Empty, otel.kind = "client"))]
     pub async fn clear(pool: &SqlitePool, from: &From) -> Result<()> {
         let sql = Self::clear_sql();
-        let q = bind_sql_values(sqlx::query(&sql), vec![from.pk_value()]);
+        let q = bind_sql_values(
+            sqlx::query(sqlx::AssertSqlSafe(&*sql)),
+            vec![from.pk_value()],
+        );
         q.execute(pool).await.map_err(db_err)?;
         Ok(())
     }
@@ -109,7 +118,10 @@ where
             to_col = quote_ident(&to_col),
             from_col = quote_ident(&from_col),
         );
-        let q = bind_sql_values(sqlx::query(&sql), vec![from.pk_value()]);
+        let q = bind_sql_values(
+            sqlx::query(sqlx::AssertSqlSafe(&*sql)),
+            vec![from.pk_value()],
+        );
         let rows = q.fetch_all(pool).await.map_err(db_err)?;
 
         decode_all::<To>(rows)
@@ -137,7 +149,7 @@ where
             from_col = quote_ident(&from_col),
             to_col = quote_ident(&to_col),
         );
-        let q = bind_sql_values(sqlx::query(&sql), vec![to.pk_value()]);
+        let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*sql)), vec![to.pk_value()]);
         let rows = q.fetch_all(pool).await.map_err(db_err)?;
 
         decode_all::<From>(rows)
@@ -148,11 +160,17 @@ where
     pub async fn set(pool: &SqlitePool, from: &From, to_list: &[To]) -> Result<()> {
         let mut tx = pool.begin().await.map_err(db_err)?;
         let sql = Self::clear_sql();
-        let q = bind_sql_values(sqlx::query(&sql), vec![from.pk_value()]);
+        let q = bind_sql_values(
+            sqlx::query(sqlx::AssertSqlSafe(&*sql)),
+            vec![from.pk_value()],
+        );
         q.execute(&mut *tx).await.map_err(db_err)?;
         let sql = Self::insert_sql();
         for to in to_list {
-            let q = bind_sql_values(sqlx::query(&sql), vec![from.pk_value(), to.pk_value()]);
+            let q = bind_sql_values(
+                sqlx::query(sqlx::AssertSqlSafe(&*sql)),
+                vec![from.pk_value(), to.pk_value()],
+            );
             q.execute(&mut *tx).await.map_err(db_err)?;
         }
         tx.commit().await.map_err(db_err)?;
@@ -171,7 +189,10 @@ where
             quote_ident(&from_col),
             quote_ident(&to_col)
         );
-        let q = bind_sql_values(sqlx::query(&sql), vec![from.pk_value(), to.pk_value()]);
+        let q = bind_sql_values(
+            sqlx::query(sqlx::AssertSqlSafe(&*sql)),
+            vec![from.pk_value(), to.pk_value()],
+        );
         let row = q.fetch_optional(pool).await.map_err(db_err)?;
         Ok(row.is_some())
     }

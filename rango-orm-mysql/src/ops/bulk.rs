@@ -20,7 +20,7 @@ where
     let mut total = 0usize;
     for chunk in models.chunks(chunk_size) {
         let (sql, values) = build_bulk_create_sql::<M>(chunk);
-        let q = bind_sql_values(sqlx::query(&sql), values);
+        let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*sql)), values);
         let result = q.execute(pool).await.map_err(db_err)?;
         total += result.rows_affected() as usize;
     }

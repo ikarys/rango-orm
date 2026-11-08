@@ -85,7 +85,10 @@ async fn setup(pool: &SqlitePool) {
             PRIMARY KEY ("app_post_id", "app_tag_id")
         )"#,
     ] {
-        sqlx::query(ddl).execute(pool).await.expect("schema setup failed");
+        sqlx::query(ddl)
+            .execute(pool)
+            .await
+            .expect("schema setup failed");
     }
 }
 
@@ -111,7 +114,9 @@ fn post(author_id: &Uuid, title: &str, published: bool) -> Post {
 
 #[tokio::test]
 async fn blog_app_end_to_end() {
-    let pool = SqlitePool::connect("sqlite::memory:").await.expect("in-memory pool");
+    let pool = SqlitePool::connect("sqlite::memory:")
+        .await
+        .expect("in-memory pool");
     setup(&pool).await;
 
     // ── Seed a realistic blog: 2 authors, 3 posts (1 draft), a comment, tags ──
@@ -161,7 +166,11 @@ async fn blog_app_end_to_end() {
     assert_eq!(titles, vec!["hello".to_string(), "world".to_string()]);
 
     assert_eq!(
-        Post::filter(&pool).eq(Post::PUBLISHED, false).count().await.unwrap(),
+        Post::filter(&pool)
+            .eq(Post::PUBLISHED, false)
+            .count()
+            .await
+            .unwrap(),
         1
     );
     assert!(Comment::filter(&pool).exists().await.unwrap());
@@ -214,10 +223,7 @@ async fn blog_app_end_to_end() {
     // ── M2M ───────────────────────────────────────────────────────────────────
     let tags = M2M::<Post, Tag>::all(&pool, &p1).await.unwrap();
     let tag_names: Vec<_> = tags.iter().map(|t| t.name.0.clone()).collect();
-    assert!(
-        tag_names.contains(&"rust".to_string())
-            && tag_names.contains(&"orm".to_string())
-    );
+    assert!(tag_names.contains(&"rust".to_string()) && tag_names.contains(&"orm".to_string()));
 
     // ── Subquery: filter authors through posts with a correlated EXISTS ──────
     let with_published = Author::filter(&pool)
@@ -257,9 +263,7 @@ async fn blog_app_end_to_end() {
 
     // ── Transactions: commit on Ok, roll back on Err ─────────────────────────
     let committed = atomic(&pool, |tx| {
-        Box::pin(async move {
-            insert(&mut **tx, post(&ada.id.0, "in-tx", true)).await
-        })
+        Box::pin(async move { insert(&mut **tx, post(&ada.id.0, "in-tx", true)).await })
     })
     .await
     .unwrap();
@@ -279,7 +283,11 @@ async fn blog_app_end_to_end() {
     .await;
     assert!(rolled_back.is_err());
     assert_eq!(
-        Post::filter(&pool).eq(Post::TITLE, "rolled-back").count().await.unwrap(),
+        Post::filter(&pool)
+            .eq(Post::TITLE, "rolled-back")
+            .count()
+            .await
+            .unwrap(),
         0,
         "a failed transaction must not persist the insert"
     );
@@ -396,10 +404,14 @@ pub struct Post {
         let mut c = sqlx::SqliteConnection::connect(url("b.db").as_str())
             .await
             .unwrap();
-        let authors: i64 =
-            sqlx::query_scalar("SELECT count(*) FROM s_author").fetch_one(&mut c).await.unwrap();
-        let posts: i64 =
-            sqlx::query_scalar("SELECT count(*) FROM s_post").fetch_one(&mut c).await.unwrap();
+        let authors: i64 = sqlx::query_scalar("SELECT count(*) FROM s_author")
+            .fetch_one(&mut c)
+            .await
+            .unwrap();
+        let posts: i64 = sqlx::query_scalar("SELECT count(*) FROM s_post")
+            .fetch_one(&mut c)
+            .await
+            .unwrap();
         assert_eq!(authors, 2, "restore must bring the authors back");
         assert_eq!(posts, 1, "restore must bring the posts back");
     }

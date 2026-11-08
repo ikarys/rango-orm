@@ -80,7 +80,7 @@ async fn drop_tables(pool: &MySqlPool, tables: &[&str]) {
         sql.push_str(&format!("DROP TABLE IF EXISTS `{table}`; "));
     }
     sql.push_str("SET FOREIGN_KEY_CHECKS = 1;");
-    sqlx::raw_sql(&sql)
+    sqlx::raw_sql(sqlx::AssertSqlSafe(&*sql))
         .execute(pool)
         .await
         .expect("drop tables");
@@ -89,7 +89,7 @@ async fn drop_tables(pool: &MySqlPool, tables: &[&str]) {
 async fn column_type(pool: &MySqlPool, table: &str, column: &str) -> Option<String> {
     let sql = "SELECT CAST(COLUMN_TYPE AS CHAR) FROM information_schema.COLUMNS \
               WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?";
-    sqlx::query_scalar::<_, String>(sql)
+    sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(sql))
         .bind(table)
         .bind(column)
         .fetch_optional(pool)
@@ -101,7 +101,7 @@ async fn column_type(pool: &MySqlPool, table: &str, column: &str) -> Option<Stri
 async fn is_nullable(pool: &MySqlPool, table: &str, column: &str) -> bool {
     let sql = "SELECT IS_NULLABLE = 'YES' FROM information_schema.COLUMNS \
               WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?";
-    sqlx::query_scalar::<_, i64>(sql)
+    sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(sql))
         .bind(table)
         .bind(column)
         .fetch_optional(pool)
@@ -113,7 +113,7 @@ async fn is_nullable(pool: &MySqlPool, table: &str, column: &str) -> bool {
 async fn index_names(pool: &MySqlPool, table: &str) -> Vec<String> {
     let sql = "SELECT DISTINCT CAST(INDEX_NAME AS CHAR) FROM information_schema.STATISTICS \
               WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?";
-    sqlx::query_scalar::<_, String>(sql)
+    sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(sql))
         .bind(table)
         .fetch_all(pool)
         .await
@@ -123,7 +123,7 @@ async fn index_names(pool: &MySqlPool, table: &str) -> Vec<String> {
 async fn constraint_names(pool: &MySqlPool, table: &str, kind: &str) -> Vec<String> {
     let sql = "SELECT CAST(CONSTRAINT_NAME AS CHAR) FROM information_schema.TABLE_CONSTRAINTS \
               WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND CONSTRAINT_TYPE = ?";
-    sqlx::query_scalar::<_, String>(sql)
+    sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(sql))
         .bind(table)
         .bind(kind)
         .fetch_all(pool)
@@ -133,7 +133,7 @@ async fn constraint_names(pool: &MySqlPool, table: &str, kind: &str) -> Vec<Stri
 
 async fn count_rows(pool: &MySqlPool, table: &str) -> i64 {
     let sql = format!("SELECT count(*) FROM `{table}`");
-    sqlx::query_scalar::<_, i64>(&sql)
+    sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(&*sql))
         .fetch_one(pool)
         .await
         .expect("count rows")
@@ -263,10 +263,10 @@ pub struct Book {
         Some("binary(16)")
     );
 
-    let insert = sqlx::query(
+    let insert = sqlx::query(sqlx::AssertSqlSafe(
         "INSERT INTO e2e_my_life_author (id, email, name, age, data) \
          VALUES (?, 'x@y.z', 'X', -1, '{}')",
-    )
+    ))
     .bind(vec![1u8; 16])
     .execute(&pool)
     .await;
@@ -417,10 +417,10 @@ pub struct Post {
     let person_id = vec![0x01u8; 16];
     let post_id = vec![0x02u8; 16];
 
-    sqlx::query(
+    sqlx::query(sqlx::AssertSqlSafe(
         "INSERT INTO e2e_my_rt_person (id, name, bio, data) \
          VALUES (?, ?, ?, ?)",
-    )
+    ))
     .bind(&person_id)
     .bind("Ann")
     .bind("hé \"x\"")
@@ -436,10 +436,10 @@ pub struct Post {
         .await
         .expect("insert post");
 
-    sqlx::query(
+    sqlx::query(sqlx::AssertSqlSafe(
         "INSERT INTO e2e_my_rt_post_e2e_my_rt_person \
          (e2e_my_rt_post_id, e2e_my_rt_person_id) VALUES (?, ?)",
-    )
+    ))
     .bind(&post_id)
     .bind(&person_id)
     .execute(&pool)
@@ -623,7 +623,10 @@ async fn dump_project(pool: &MySqlPool, name: &str) -> Project {
         "INSERT INTO e2e_mydump_post (id, author, title) VALUES \
          (UNHEX('000000000000000000000000000000a1'), UNHEX('00000000000000000000000000000001'), 'Hello')",
     ] {
-        sqlx::query(sql).execute(pool).await.expect(sql);
+        sqlx::query(sqlx::AssertSqlSafe(sql))
+            .execute(pool)
+            .await
+            .expect(sql);
     }
     project
 }
@@ -636,17 +639,22 @@ async fn dump_state(pool: &MySqlPool) -> Vec<String> {
          FROM e2e_mydump_person ORDER BY id",
         "SELECT CAST(CONCAT_WS('|', HEX(id), HEX(author), title) AS CHAR) FROM e2e_mydump_post ORDER BY id",
     ] {
-        let rows = sqlx::query(sql).fetch_all(pool).await.expect(sql);
+        let rows = sqlx::query(sqlx::AssertSqlSafe(sql))
+            .fetch_all(pool)
+            .await
+            .expect(sql);
         out.extend(rows.iter().map(|r| r.get::<String, _>(0)));
     }
     out
 }
 
 async fn dump_count(pool: &MySqlPool, table: &str) -> Option<i64> {
-    sqlx::query_scalar(&format!("SELECT count(*) FROM `{table}`"))
-        .fetch_one(pool)
-        .await
-        .ok()
+    sqlx::query_scalar(sqlx::AssertSqlSafe(&*format!(
+        "SELECT count(*) FROM `{table}`"
+    )))
+    .fetch_one(pool)
+    .await
+    .ok()
 }
 
 #[tokio::test]
@@ -860,7 +868,7 @@ pub struct RingB {
     drop_tables(&pool, &tables).await;
     assert_success(&project.run_cli(&["restore", "ring.json"]), "restore");
     for t in &tables[..2] {
-        let n: i64 = sqlx::query_scalar(&format!("SELECT count(*) FROM {t}"))
+        let n: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(&*format!("SELECT count(*) FROM {t}")))
             .fetch_one(&pool)
             .await
             .unwrap();

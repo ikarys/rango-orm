@@ -775,7 +775,10 @@ struct TestPost {
 }
 
 async fn exec(pool: &MySqlPool, sql: &str) {
-    sqlx::query(sql).execute(pool).await.expect(sql);
+    sqlx::query(sqlx::AssertSqlSafe(sql))
+        .execute(pool)
+        .await
+        .expect(sql);
 }
 
 #[tokio::test]
@@ -934,10 +937,10 @@ async fn test_mysql_auto_pk_is_generated() {
         .execute(&pool)
         .await
         .unwrap();
-    sqlx::query(
+    sqlx::query(sqlx::AssertSqlSafe(
         "CREATE TABLE `test_counter` (`id` BIGINT AUTO_INCREMENT PRIMARY KEY, \
          `label` VARCHAR(50) NOT NULL UNIQUE) ENGINE=InnoDB",
-    )
+    ))
     .execute(&pool)
     .await
     .unwrap();

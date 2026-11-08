@@ -19,7 +19,8 @@ impl Project {
     /// (`sqlite`, `postgres` or `mysql`).
     pub fn new(name: &str, backend: &str) -> Self {
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let dir = std::env::temp_dir().join(format!("rango_rp_{name}_{}_{}", std::process::id(), n));
+        let dir =
+            std::env::temp_dir().join(format!("rango_rp_{name}_{}_{}", std::process::id(), n));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("src")).unwrap();
         std::fs::write(

@@ -214,7 +214,7 @@ async fn bind_and_fetch_all<'e, E>(
 where
     E: Executor<'e, Database = sqlx::Sqlite>,
 {
-    let q = sqlx::query(sql);
+    let q = sqlx::query(sqlx::AssertSqlSafe(sql));
     let q = bind_sql_values(q, binds);
     q.fetch_all(executor).await.map_err(db_err)
 }
@@ -227,7 +227,7 @@ async fn bind_and_fetch_one<'e, E>(
 where
     E: Executor<'e, Database = sqlx::Sqlite>,
 {
-    let q = sqlx::query(sql);
+    let q = sqlx::query(sqlx::AssertSqlSafe(sql));
     let q = bind_sql_values(q, binds);
     q.fetch_one(executor).await.map_err(db_err)
 }
