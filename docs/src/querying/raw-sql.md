@@ -8,7 +8,7 @@ Raw SQL is an escape hatch for queries the builder can't express.
 ```rust
 let users = raw::<User>(
     &pool,
-    "SELECT * FROM myapp_user WHERE role = $1 AND created_at > $2",
+    "SELECT * FROM user WHERE role = $1 AND created_at > $2",
     vec![
         SqlValue::Text("admin".into()),
         SqlValue::DateTime(cutoff_date),
@@ -21,13 +21,13 @@ let users = raw::<User>(
 ```rust
 let count: i64 = raw_scalar(
     &pool,
-    "SELECT COUNT(*) FROM myapp_user WHERE active = $1",
+    "SELECT COUNT(*) FROM user WHERE active = $1",
     vec![SqlValue::Bool(true)],
 ).await?;
 
 let name: String = raw_scalar(
     &pool,
-    "SELECT name FROM myapp_user WHERE id = $1",
+    "SELECT name FROM user WHERE id = $1",
     vec![SqlValue::Uuid(user_id)],
 ).await?;
 ```
@@ -37,7 +37,7 @@ let name: String = raw_scalar(
 ```rust
 let affected = raw_execute(
     &pool,
-    "UPDATE myapp_user SET score = score + $1 WHERE active = $2",
+    "UPDATE user SET score = score + $1 WHERE active = $2",
     vec![SqlValue::Int(10), SqlValue::Bool(true)],
 ).await?;
 

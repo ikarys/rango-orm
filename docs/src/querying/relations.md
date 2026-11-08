@@ -34,8 +34,8 @@ for post in &posts {
 SQL generated:
 ```sql
 SELECT "__m".*, "__r0"."id" AS "__r0_id", "__r0"."name" AS "__r0_name", ...
-FROM (SELECT * FROM "myapp_post" WHERE ... ORDER BY ... LIMIT 1000) AS "__m"
-LEFT JOIN "myapp_user" AS "__r0" ON "__r0"."id" = "__m"."author_id"
+FROM (SELECT * FROM "post" WHERE ... ORDER BY ... LIMIT 1000) AS "__m"
+LEFT JOIN "user" AS "__r0" ON "__r0"."id" = "__m"."author_id"
 ```
 
 Filters, ordering and `LIMIT` apply to the posts before the join. A post whose FK is `NULL` comes back without a related object: `.related::<User>()` panics on it, so only use `select_related` on nullable FKs when you know they are set.
@@ -59,10 +59,10 @@ for post in &posts {
 SQL generated:
 ```sql
 -- Query 1
-SELECT * FROM "myapp_post"
+SELECT * FROM "post"
 
 -- Query 2
-SELECT * FROM "myapp_comment" WHERE "post_id" = ANY($1)  -- $1: array of post ids
+SELECT * FROM "comment" WHERE "post_id" = ANY($1)  -- $1: array of post ids
 ```
 
 SQLite and MySQL have no array parameters: they send `WHERE "post_id" IN (?, ?, ...)` in batches of 900 keys. Every backend runs the main query and the prefetch queries on one connection, and `all()` returns `Vec<WithRelated<M>>` everywhere (it derefs to `M`, so `post.title` works as before).
@@ -83,10 +83,10 @@ for article in &articles {
 ```
 
 ```sql
-SELECT "__p"."myapp_article_id" AS "__m2m_key", "__t".*
-FROM "myapp_tag" AS "__t"
-INNER JOIN "myapp_article_myapp_tag" AS "__p" ON "__t"."id" = "__p"."myapp_tag_id"
-WHERE "__p"."myapp_article_id" = ANY($1)
+SELECT "__p"."article_id" AS "__m2m_key", "__t".*
+FROM "tag" AS "__t"
+INNER JOIN "article_tag" AS "__p" ON "__t"."id" = "__p"."tag_id"
+WHERE "__p"."article_id" = ANY($1)
 ```
 
 ## Combining both
