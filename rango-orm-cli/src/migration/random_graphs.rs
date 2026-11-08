@@ -131,10 +131,13 @@ fn random_graph(seed: u64) -> Vec<TableSchema> {
             uuid_tables[rng.below(uuid_tables.len())],
         );
         if seen.insert((a, b)) {
-            tables.push(generate_pivot_table(&M2MRelation {
-                from_table: name(a),
-                to_table: name(b),
-            }));
+            tables.push(generate_pivot_table(
+                &M2MRelation {
+                    from_table: name(a),
+                    to_table: name(b),
+                },
+                &[],
+            ));
         }
     }
     tables

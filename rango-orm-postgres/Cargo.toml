@@ -14,9 +14,12 @@ categories = ["database", "asynchronous"]
 [dependencies]
 rango-orm-core = { workspace = true }
 sqlx = { version = "0.9", features = ["runtime-tokio", "tls-rustls", "postgres", "uuid", "chrono", "json", "rust_decimal"] }
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["time"] }
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4" }
 serde_json = "1"
 log = "0.4"
 tracing = { version = "0.1", default-features = false, features = ["std", "attributes"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt"] }

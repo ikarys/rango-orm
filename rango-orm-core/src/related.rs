@@ -195,3 +195,161 @@ mod pivot_tests {
         );
     }
 }
+
+/// The SQL of the many-to-many pivot operations, for one dialect.
+///
+/// Every statement binds the from id first, then the to id.
+#[doc(hidden)]
+#[doc(hidden)]
+pub struct M2mSql {
+    dialect: crate::Dialect,
+    pivot: String,
+    from_col: String,
+    to_col: String,
+    from_table: String,
+    to_table: String,
+}
+
+impl M2mSql {
+    pub fn new(dialect: crate::Dialect, from_table: &str, to_table: &str) -> Self {
+        let (pivot, from_col, to_col) = m2m_pivot(from_table, to_table);
+        Self {
+            dialect,
+            pivot,
+            from_col,
+            to_col,
+            from_table: from_table.to_owned(),
+            to_table: to_table.to_owned(),
+        }
+    }
+
+    /// Unquoted pivot table name (for tracing).
+    pub fn pivot_table(&self) -> &str {
+        &self.pivot
+    }
+
+    fn q(&self, ident: &str) -> String {
+        self.dialect.quote_ident(ident)
+    }
+
+    fn ph(&self, n: usize) -> String {
+        match self.dialect {
+            crate::Dialect::Postgres => format!("${n}"),
+            _ => "?".to_owned(),
+        }
+    }
+
+    /// Idempotent insert of a `(from, to)` pair.
+    pub fn insert(&self) -> String {
+        let (pivot, from, to) = (
+            self.q(&self.pivot),
+            self.q(&self.from_col),
+            self.q(&self.to_col),
+        );
+        let (p1, p2) = (self.ph(1), self.ph(2));
+        match self.dialect {
+            // ON DUPLICATE KEY UPDATE, not INSERT IGNORE, to avoid silencing FK and other errors.
+            crate::Dialect::Mysql => format!(
+                "INSERT INTO {pivot} ({from}, {to}) VALUES ({p1}, {p2}) \
+                 ON DUPLICATE KEY UPDATE {from} = {from}"
+            ),
+            _ => format!(
+                "INSERT INTO {pivot} ({from}, {to}) VALUES ({p1}, {p2}) ON CONFLICT DO NOTHING"
+            ),
+        }
+    }
+
+    /// Delete every pair of one `from` id.
+    pub fn clear(&self) -> String {
+        format!(
+            "DELETE FROM {} WHERE {} = {}",
+            self.q(&self.pivot),
+            self.q(&self.from_col),
+            self.ph(1)
+        )
+    }
+
+    /// Delete one `(from, to)` pair.
+    pub fn remove(&self) -> String {
+        format!(
+            "DELETE FROM {} WHERE {} = {} AND {} = {}",
+            self.q(&self.pivot),
+            self.q(&self.from_col),
+            self.ph(1),
+            self.q(&self.to_col),
+            self.ph(2)
+        )
+    }
+
+    /// Does the `(from, to)` pair exist.
+    pub fn exists(&self) -> String {
+        format!(
+            "SELECT 1 FROM {} WHERE {} = {} AND {} = {} LIMIT 1",
+            self.q(&self.pivot),
+            self.q(&self.from_col),
+            self.ph(1),
+            self.q(&self.to_col),
+            self.ph(2)
+        )
+    }
+
+    /// The `to` rows of one `from` id (bind: from id).
+    pub fn all(&self, to_pk: &str) -> String {
+        format!(
+            r#"SELECT t.* FROM {to_table} t
+               INNER JOIN {pivot} p ON t.{to_pk} = p.{to_col}
+               WHERE p.{from_col} = {p1}"#,
+            to_table = self.q(&self.to_table),
+            pivot = self.q(&self.pivot),
+            to_pk = self.q(to_pk),
+            to_col = self.q(&self.to_col),
+            from_col = self.q(&self.from_col),
+            p1 = self.ph(1),
+        )
+    }
+
+    /// The `from` rows of one `to` id (bind: to id).
+    pub fn reverse(&self, from_pk: &str) -> String {
+        format!(
+            r#"SELECT f.* FROM {from_table} f
+               INNER JOIN {pivot} p ON f.{from_pk} = p.{from_col}
+               WHERE p.{to_col} = {p1}"#,
+            from_table = self.q(&self.from_table),
+            pivot = self.q(&self.pivot),
+            from_pk = self.q(from_pk),
+            from_col = self.q(&self.from_col),
+            to_col = self.q(&self.to_col),
+            p1 = self.ph(1),
+        )
+    }
+}
+
+#[cfg(test)]
+mod m2m_sql_tests {
+    use super::M2mSql;
+    use crate::Dialect;
+
+    #[test]
+    fn per_dialect_sql() {
+        let pg = M2mSql::new(Dialect::Postgres, "post", "tag");
+        assert_eq!(
+            pg.insert(),
+            "INSERT INTO \"post_tag\" (\"post_id\", \"tag_id\") VALUES ($1, $2) ON CONFLICT DO NOTHING"
+        );
+        assert_eq!(
+            pg.remove(),
+            "DELETE FROM \"post_tag\" WHERE \"post_id\" = $1 AND \"tag_id\" = $2"
+        );
+        let my = M2mSql::new(Dialect::Mysql, "post", "tag");
+        assert_eq!(
+            my.insert(),
+            "INSERT INTO `post_tag` (`post_id`, `tag_id`) VALUES (?, ?) \
+             ON DUPLICATE KEY UPDATE `post_id` = `post_id`"
+        );
+        let lite = M2mSql::new(Dialect::Sqlite, "post", "tag");
+        assert_eq!(
+            lite.clear(),
+            "DELETE FROM \"post_tag\" WHERE \"post_id\" = ?"
+        );
+    }
+}

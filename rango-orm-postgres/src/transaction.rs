@@ -1,8 +1,6 @@
 use crate::error::db_err;
 use rango_orm_core::Result;
 use sqlx::{PgPool, Postgres, Transaction};
-use std::future::Future;
-use std::pin::Pin;
 use std::time::Duration;
 
 /// Type alias for a Rango/sqlx transaction — use this in function signatures
@@ -16,14 +14,11 @@ use std::time::Duration;
 ///     Ok(user)
 /// }
 ///
-/// rango::atomic(&pool, |tx| Box::pin(async move {
+/// rango::atomic(&pool, async |tx| {
 ///     create_user_with_profile(tx, ...).await
-/// })).await?;
+/// }).await?;
 /// ```
 pub type RangoTransaction<'a> = Transaction<'a, Postgres>;
-
-/// Future returned by an [`atomic`] closure: wrap the body in `Box::pin(async move { ... })`.
-pub type TxFuture<'c, T> = Pin<Box<dyn Future<Output = Result<T>> + Send + 'c>>;
 
 /// Execute a closure atomically — commits on Ok, rolls back on Err.
 ///
@@ -33,18 +28,18 @@ pub type TxFuture<'c, T> = Pin<Box<dyn Future<Output = Result<T>> + Send + 'c>>;
 ///
 /// # Example
 /// ```rust,ignore
-/// let user = rango::atomic(&pool, |tx| Box::pin(async move {
+/// let user = rango::atomic(&pool, async |tx| {
 ///     let user = rango::insert(&mut **tx, User { ... }).await?;
 ///     rango::insert(&mut **tx, Profile {
 ///         user_id: ForeignKey::new(user.id.0),
 ///         ...
 ///     }).await?;
 ///     Ok(user)
-/// })).await?;
+/// }).await?;
 /// ```
 pub async fn atomic<F, T>(pool: &PgPool, f: F) -> Result<T>
 where
-    F: for<'c> FnOnce(&'c mut RangoTransaction<'_>) -> TxFuture<'c, T>,
+    F: AsyncFnOnce(&mut RangoTransaction<'_>) -> Result<T>,
 {
     let mut tx = pool.begin().await.map_err(db_err)?;
 
@@ -71,7 +66,7 @@ where
 ///
 /// # Example
 /// ```rust,ignore
-/// let n = rango::atomic_retry(&pool, 3, |tx| Box::pin(async move {
+/// let n = rango::atomic_retry(&pool, 3, async |tx| {
 ///     rango::raw_execute(
 ///         &mut **tx,
 ///         "SET TRANSACTION ISOLATION LEVEL SERIALIZABLE",
@@ -79,11 +74,11 @@ where
 ///     )
 ///     .await?;
 ///     ...
-/// })).await?;
+/// }).await?;
 /// ```
 pub async fn atomic_retry<F, T>(pool: &PgPool, max_attempts: u32, mut f: F) -> Result<T>
 where
-    F: for<'c> FnMut(&'c mut RangoTransaction<'_>) -> TxFuture<'c, T>,
+    F: AsyncFnMut(&mut RangoTransaction<'_>) -> Result<T>,
 {
     let max_attempts = max_attempts.max(1);
     let mut attempt = 0u32;
@@ -109,7 +104,7 @@ where
 /// Alias for [`atomic`] — same semantics, alternative name.
 pub async fn transaction<F, T>(pool: &PgPool, f: F) -> Result<T>
 where
-    F: for<'c> FnOnce(&'c mut RangoTransaction<'_>) -> TxFuture<'c, T>,
+    F: AsyncFnOnce(&mut RangoTransaction<'_>) -> Result<T>,
 {
     atomic(pool, f).await
 }

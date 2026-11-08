@@ -19,7 +19,7 @@ macro_rules! impl_get {
         fn $fn_name(&self, col: &str) -> Result<$t, RowError> {
             self.0
                 .try_get::<$t, _>(col)
-                .map_err(|e| RowError(format!("Column '{}': {}", col, e)))
+                .map_err(|e| RowError::new(format!("Column '{}': {}", col, e)))
         }
     };
 }
@@ -45,7 +45,7 @@ macro_rules! impl_rangorow {
                 self.0
                     .try_get::<sqlx::types::Json<serde_json::Value>, _>(col)
                     .map(|j| j.0)
-                    .map_err(|e| RowError(format!("Column '{}': {}", col, e)))
+                    .map_err(|e| RowError::new(format!("Column '{}': {}", col, e)))
             }
 
             fn is_null(&self, col: &str) -> bool {

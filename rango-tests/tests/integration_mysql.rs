@@ -124,21 +124,21 @@ async fn test_mysql_prefetch_related_many_to_many() {
 
     let b1 = TestBlog {
         id: FieldUuid(Uuid::new_v4()),
-        title: FieldVarchar("rust".to_string()),
+        title: FieldVarchar::new("rust".to_string()).unwrap(),
         tags: ManyToMany::empty(),
     };
     let b2 = TestBlog {
         id: FieldUuid(Uuid::new_v4()),
-        title: FieldVarchar("empty".to_string()),
+        title: FieldVarchar::new("empty".to_string()).unwrap(),
         tags: ManyToMany::empty(),
     };
     let t1 = TestTag {
         id: FieldUuid(Uuid::new_v4()),
-        name: FieldVarchar("orm".to_string()),
+        name: FieldVarchar::new("orm".to_string()).unwrap(),
     };
     let t2 = TestTag {
         id: FieldUuid(Uuid::new_v4()),
-        name: FieldVarchar("async".to_string()),
+        name: FieldVarchar::new("async".to_string()).unwrap(),
     };
 
     insert(&pool, b1.clone()).await.unwrap();
@@ -167,7 +167,7 @@ async fn test_mysql_prefetch_related_many_to_many() {
     let mut tag_names: Vec<String> = b1_blog
         .prefetched::<TestTag>()
         .iter()
-        .map(|t| t.name.0.clone())
+        .map(|t| t.name.to_string())
         .collect();
     tag_names.sort();
     assert_eq!(tag_names, vec!["async".to_string(), "orm".to_string()]);
@@ -220,8 +220,8 @@ async fn test_mysql_prefetch_related_many_to_many() {
 fn user(email: &str) -> TestUser {
     TestUser {
         id: FieldUuid(Uuid::new_v4()),
-        email: FieldEmail(email.to_string()),
-        name: FieldVarchar("Test User".to_string()),
+        email: FieldEmail::new(email.to_string()).unwrap(),
+        name: FieldVarchar::new("Test User".to_string()).unwrap(),
         active: FieldBool(true),
         score: None,
     }
@@ -250,12 +250,12 @@ async fn test_mysql_select_and_prefetch_related() {
         let post = TestPost {
             id: FieldUuid(Uuid::new_v4()),
             author: ForeignKey::new(alice.id.0),
-            title: FieldVarchar(title.to_string()),
+            title: FieldVarchar::new(title.to_string()).unwrap(),
         };
         insert(&pool, post).await.unwrap();
     }
 
-    let q = TestPost::filter(&pool)
+    let mut q = TestPost::filter(&pool)
         .select_related(TestPost::AUTHOR)
         .order_by("-title")
         .limit(1);
@@ -268,7 +268,7 @@ async fn test_mysql_select_and_prefetch_related() {
     );
     let posts = q.all().await.unwrap();
     assert_eq!(posts.len(), 1);
-    assert_eq!(posts[0].title.0, "second");
+    assert_eq!(posts[0].title.as_str(), "second");
     assert_eq!(posts[0].related::<TestUser>().email, alice.email);
 
     let users = TestUser::filter(&pool)
@@ -316,9 +316,12 @@ async fn test_mysql_update() {
     let mut u = user("update@mysql.com");
     insert(&pool, u.clone()).await.unwrap();
 
-    u.name = FieldVarchar("Updated".to_string());
+    u.name = FieldVarchar::new("Updated".to_string()).unwrap();
     let updated = update(&pool, u.clone()).await.expect("update failed");
-    assert_eq!(updated.name, FieldVarchar("Updated".to_string()));
+    assert_eq!(
+        updated.name,
+        FieldVarchar::new("Updated".to_string()).unwrap()
+    );
 }
 
 #[tokio::test]
@@ -359,12 +362,12 @@ async fn test_mysql_filter_eq() {
     assert!(
         results
             .iter()
-            .any(|u| u.email == FieldEmail("active@mysql.com".to_string()))
+            .any(|u| u.email == FieldEmail::new("active@mysql.com".to_string()).unwrap())
     );
     assert!(
         !results
             .iter()
-            .any(|u| u.email == FieldEmail("inactive@mysql.com".to_string()))
+            .any(|u| u.email == FieldEmail::new("inactive@mysql.com".to_string()).unwrap())
     );
 }
 
@@ -389,10 +392,7 @@ async fn test_mysql_subqueries() {
         .await
         .unwrap();
     assert_eq!(
-        active
-            .iter()
-            .map(|u| u.email.0.as_str())
-            .collect::<Vec<_>>(),
+        active.iter().map(|u| u.email.as_str()).collect::<Vec<_>>(),
         ["a@mysql.com", "b@mysql.com"]
     );
 
@@ -405,7 +405,7 @@ async fn test_mysql_subqueries() {
     assert_eq!(
         inactive
             .iter()
-            .map(|u| u.email.0.as_str())
+            .map(|u| u.email.as_str())
             .collect::<Vec<_>>(),
         ["b@mysql.com"]
     );
@@ -739,7 +739,10 @@ async fn test_mysql_typed_columns() {
         .all()
         .await
         .unwrap();
-    assert_eq!(desc[0].email, FieldEmail("b@typed.com".to_string()));
+    assert_eq!(
+        desc[0].email,
+        FieldEmail::new("b@typed.com".to_string()).unwrap()
+    );
 
     let sum = TestUser::filter(&pool).sum(TestUser::SCORE).await.unwrap();
     assert_eq!(sum, Some(3.0));
@@ -836,7 +839,7 @@ async fn test_mysql_like_is_case_sensitive_ilike_is_not() {
     let pool = pool().await;
     setup(&pool).await;
     let mut u = user("Alice@Example.com");
-    u.name = FieldVarchar("Alice".into());
+    u.name = FieldVarchar::new("Alice").unwrap();
     insert(&pool, u).await.unwrap();
 
     let n = TestUser::filter(&pool)
@@ -896,14 +899,14 @@ async fn test_mysql_fk_cascade_and_violation() {
     let post = TestPost {
         id: FieldUuid(Uuid::new_v4()),
         author: ForeignKey::new(u.id.0),
-        title: FieldVarchar("hello".into()),
+        title: FieldVarchar::new("hello").unwrap(),
     };
     insert(&pool, post).await.unwrap();
 
     let orphan = TestPost {
         id: FieldUuid(Uuid::new_v4()),
         author: ForeignKey::new(Uuid::new_v4()),
-        title: FieldVarchar("orphan".into()),
+        title: FieldVarchar::new("orphan").unwrap(),
     };
     let err = insert(&pool, orphan).await.unwrap_err();
     assert!(
@@ -946,7 +949,7 @@ async fn test_mysql_auto_pk_is_generated() {
     .unwrap();
     let new = |l: &str| TestCounter {
         id: FieldAutoBigInt::default(),
-        label: FieldVarchar(l.into()),
+        label: FieldVarchar::new(l).unwrap(),
     };
 
     let a = insert(&pool, new("a")).await.unwrap();
@@ -964,7 +967,7 @@ async fn test_mysql_auto_pk_is_generated() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(e.label.0, "e");
+    assert_eq!(e.label.as_str(), "e");
 }
 
 #[tokio::test]
@@ -1042,7 +1045,7 @@ async fn test_mysql_select_as_partial() {
     ] {
         let person = TestPartialPerson {
             id: FieldUuid(Uuid::new_v4()),
-            name: FieldVarchar(name.to_string()),
+            name: FieldVarchar::new(name.to_string()).unwrap(),
             age: FieldInt(age),
             nick: nick.map(|n| FieldText(n.to_string())),
         };
@@ -1061,11 +1064,11 @@ async fn test_mysql_select_as_partial() {
         rows,
         vec![
             PersonLite {
-                name: FieldVarchar("Ann".to_string()),
+                name: FieldVarchar::new("Ann".to_string()).unwrap(),
                 nick: Some(FieldText("annie".to_string())),
             },
             PersonLite {
-                name: FieldVarchar("Bob".to_string()),
+                name: FieldVarchar::new("Bob".to_string()).unwrap(),
                 nick: None,
             },
         ]
@@ -1077,7 +1080,10 @@ async fn test_mysql_select_as_partial() {
         .one()
         .await
         .unwrap();
-    assert_eq!(one.unwrap().name, FieldVarchar("Cleo".to_string()));
+    assert_eq!(
+        one.unwrap().name,
+        FieldVarchar::new("Cleo".to_string()).unwrap()
+    );
 
     let none = TestPartialPerson::filter(&pool)
         .eq(TestPartialPerson::AGE, 99)
@@ -1131,4 +1137,1002 @@ async fn test_keyset_pagination_after_and_before() {
     }
     ids.reverse();
     assert_eq!(seen, ids);
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-mysql"), ignore)]
+async fn test_mysql_bulk_create_is_atomic_across_chunks() {
+    let pool = pool().await;
+    setup(&pool).await;
+
+    // Enough rows for several chunks; the last row duplicates the first email.
+    let mut users: Vec<TestUser> = (0..14000)
+        .map(|i| user(&format!("atomic{}@t.com", i)))
+        .collect();
+    users.push(user("atomic0@t.com"));
+
+    let err = bulk_create(&pool, &users).await;
+    assert!(err.is_err());
+    assert_eq!(TestUser::filter(&pool).count().await.unwrap(), 0);
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-mysql"), ignore)]
+async fn test_mysql_in_values_empty_list() {
+    let pool = pool().await;
+    setup(&pool).await;
+    insert(&pool, user("in1@t.com")).await.unwrap();
+    insert(&pool, user("in2@t.com")).await.unwrap();
+
+    let none = TestUser::filter(&pool)
+        .in_values(TestUser::EMAIL, vec![])
+        .all()
+        .await
+        .unwrap();
+    assert!(none.is_empty());
+
+    let all = TestUser::filter(&pool)
+        .not()
+        .in_values(TestUser::EMAIL, vec![])
+        .all()
+        .await
+        .unwrap();
+    assert_eq!(all.len(), 2);
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-mysql"), ignore)]
+async fn test_keyset_after_does_not_duplicate_order_by() {
+    let pool = pool().await;
+    setup(&pool).await;
+    let sql = TestUser::filter(&pool)
+        .order_by(TestUser::ID)
+        .after(TestUser::ID, FieldUuid(uuid::Uuid::new_v4()))
+        .explain();
+    assert_eq!(sql.matches("ORDER BY").count(), 1, "{sql}");
+    let order = sql.split("ORDER BY").nth(1).unwrap();
+    assert_eq!(order.matches("id").count(), 1, "{sql}");
+}
+
+// ── Model hooks ───────────────────────────────────────────────────────────────
+
+static HOOK_LOG: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+fn hook_log(event: &str, name: &str) {
+    HOOK_LOG.lock().unwrap().push(format!("{event}:{name}"));
+}
+
+fn hook_events(name: &str) -> Vec<String> {
+    let suffix = format!(":{name}");
+    let log = HOOK_LOG.lock().unwrap();
+    log.iter()
+        .filter(|e| e.ends_with(&suffix))
+        .map(|e| e.trim_end_matches(&suffix).to_string())
+        .collect()
+}
+
+#[derive(Model, Debug, Clone)]
+#[model(table = "test_hooked", hooks)]
+struct Hooked {
+    id: FieldUuid,
+    name: FieldVarchar<1, 100>,
+    slug: FieldVarchar<0, 100>,
+}
+
+impl ModelHooks for Hooked {
+    fn before_save(&mut self) -> BoxFuture<'_> {
+        Box::pin(async move {
+            self.slug = FieldVarchar::new(self.name.as_str().to_lowercase()).unwrap();
+            hook_log("before_save", self.name.as_str());
+            Ok(())
+        })
+    }
+    fn after_save(&self) -> BoxFuture<'_> {
+        Box::pin(async move {
+            hook_log("after_save", self.name.as_str());
+            if self.name.as_str().starts_with("fail_after") {
+                return Err("after_save refused".into());
+            }
+            Ok(())
+        })
+    }
+    fn before_create(&mut self) -> BoxFuture<'_> {
+        Box::pin(async move {
+            hook_log("before_create", self.name.as_str());
+            if self.name.as_str().starts_with("fail_create") {
+                return Err("before_create refused".into());
+            }
+            Ok(())
+        })
+    }
+    fn after_create(&self) -> BoxFuture<'_> {
+        Box::pin(async move {
+            hook_log("after_create", self.name.as_str());
+            Ok(())
+        })
+    }
+    fn before_update(&mut self) -> BoxFuture<'_> {
+        Box::pin(async move {
+            hook_log("before_update", self.name.as_str());
+            Ok(())
+        })
+    }
+    fn after_update(&self) -> BoxFuture<'_> {
+        Box::pin(async move {
+            hook_log("after_update", self.name.as_str());
+            Ok(())
+        })
+    }
+    fn before_delete(&self) -> BoxFuture<'_> {
+        Box::pin(async move {
+            hook_log("before_delete", self.name.as_str());
+            Ok(())
+        })
+    }
+    fn after_delete(&self) -> BoxFuture<'_> {
+        Box::pin(async move {
+            hook_log("after_delete", self.name.as_str());
+            Ok(())
+        })
+    }
+}
+
+fn hooked(name: &str) -> Hooked {
+    Hooked {
+        id: FieldUuid(Uuid::new_v4()),
+        name: FieldVarchar::new(name.to_string()).unwrap(),
+        slug: FieldVarchar::new(String::new()).unwrap(),
+    }
+}
+
+async fn hooked_setup(pool: &MySqlPool) {
+    sqlx::query("DROP TABLE IF EXISTS `test_hooked`")
+        .execute(pool)
+        .await
+        .expect("setup: drop hooked table");
+    sqlx::query(
+        "CREATE TABLE `test_hooked` (
+            `id`   BINARY(16) PRIMARY KEY,
+            `name` VARCHAR(100) NOT NULL UNIQUE,
+            `slug` VARCHAR(100) NOT NULL
+        ) ENGINE=InnoDB",
+    )
+    .execute(pool)
+    .await
+    .expect("setup: create hooked table");
+}
+
+async fn hooked_count(pool: &MySqlPool, name: &str) -> usize {
+    Hooked::filter(pool)
+        .eq("name", name)
+        .all()
+        .await
+        .unwrap()
+        .len()
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-mysql"), ignore)]
+async fn test_hooks_insert_update_delete() {
+    let pool = pool().await;
+    hooked_setup(&pool).await;
+
+    let saved = insert(&pool, hooked("Ada Lovelace")).await.unwrap();
+    // before_save mutated the model and the mutation is what was written
+    assert_eq!(saved.slug.as_str(), "ada lovelace");
+    let stored = get::<_, Hooked>(&pool, &saved.id.to_sql_value())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(stored.slug.as_str(), "ada lovelace");
+    assert_eq!(
+        hook_events("Ada Lovelace"),
+        ["before_save", "before_create", "after_create", "after_save"]
+    );
+
+    // update: save + update hooks, never create hooks
+    let mut changed = saved.clone();
+    changed.slug = FieldVarchar::new("tampered").unwrap();
+    let updated = update(&pool, changed).await.unwrap();
+    assert_eq!(updated.slug.as_str(), "ada lovelace");
+    assert_eq!(
+        hook_events("Ada Lovelace")[4..],
+        ["before_save", "before_update", "after_update", "after_save"]
+    );
+
+    delete(&pool, &updated).await.unwrap();
+    assert_eq!(hooked_count(&pool, "Ada Lovelace").await, 0);
+    assert_eq!(
+        hook_events("Ada Lovelace")[8..],
+        ["before_delete", "after_delete"]
+    );
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-mysql"), ignore)]
+async fn test_hooks_before_error_cancels_insert() {
+    let pool = pool().await;
+    hooked_setup(&pool).await;
+
+    let err = insert(&pool, hooked("fail_create_1")).await.unwrap_err();
+    assert!(matches!(err, Error::Hook(_)), "got {err:?}");
+    assert_eq!(err.to_string(), "hook failed: before_create refused");
+    assert_eq!(hooked_count(&pool, "fail_create_1").await, 0);
+    assert_eq!(
+        hook_events("fail_create_1"),
+        ["before_save", "before_create"]
+    );
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-mysql"), ignore)]
+async fn test_hooks_after_error_rolls_back_in_transaction() {
+    let pool = pool().await;
+    hooked_setup(&pool).await;
+
+    let mut tx = pool.begin().await.unwrap();
+    let err = insert(&mut *tx, hooked("fail_after_tx")).await.unwrap_err();
+    assert!(matches!(err, Error::Hook(_)), "got {err:?}");
+    tx.rollback().await.unwrap();
+    assert_eq!(hooked_count(&pool, "fail_after_tx").await, 0);
+
+    // With a plain pool the statement is already committed.
+    let err = insert(&pool, hooked("fail_after_pool")).await.unwrap_err();
+    assert!(matches!(err, Error::Hook(_)), "got {err:?}");
+    assert_eq!(hooked_count(&pool, "fail_after_pool").await, 1);
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-mysql"), ignore)]
+async fn test_hooks_get_or_create_only_on_insert() {
+    let pool = pool().await;
+    hooked_setup(&pool).await;
+
+    let lookup = vec![("name", SqlValue::Text("goc_hooked".to_string()))];
+    let (_, created) = get_or_create(&pool, lookup.clone(), hooked("goc_hooked"))
+        .await
+        .unwrap();
+    assert!(created);
+    let after_first = hook_events("goc_hooked");
+    assert!(after_first.contains(&"after_create".to_string()));
+
+    let (_, created) = get_or_create(&pool, lookup, hooked("goc_hooked"))
+        .await
+        .unwrap();
+    assert!(!created);
+    let after_second = hook_events("goc_hooked");
+    // second call: before_* ran on the defaults, after_* did not
+    assert_eq!(after_second.len(), after_first.len() + 2);
+    assert_eq!(
+        after_second[after_first.len()..],
+        ["before_save", "before_create"]
+    );
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-mysql"), ignore)]
+async fn test_model_without_hooks_attribute_still_works() {
+    let pool = pool().await;
+    setup(&pool).await;
+    let saved = insert(&pool, user("nohooks@hooks.com")).await.unwrap();
+    delete(&pool, &saved).await.unwrap();
+}
+
+// ── Transactions everywhere: filter + M2M + bulk in one rolled-back atomic ───────
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-mysql"), ignore)]
+async fn test_mysql_filter_m2m_bulk_roll_back_in_atomic() {
+    let pool = pool().await;
+    setup(&pool).await;
+
+    for t in ["test_blog_test_tag", "test_blog", "test_tag"] {
+        sqlx::query(sqlx::AssertSqlSafe(format!("DROP TABLE IF EXISTS `{t}`")))
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+    for ddl in [
+        "CREATE TABLE `test_blog` (`id` BINARY(16) PRIMARY KEY, `title` VARCHAR(100) NOT NULL) ENGINE=InnoDB",
+        "CREATE TABLE `test_tag` (`id` BINARY(16) PRIMARY KEY, `name` VARCHAR(100) NOT NULL) ENGINE=InnoDB",
+        "CREATE TABLE `test_blog_test_tag` (`test_blog_id` BINARY(16) NOT NULL, `test_tag_id` BINARY(16) NOT NULL, PRIMARY KEY (`test_blog_id`, `test_tag_id`)) ENGINE=InnoDB",
+    ] {
+        sqlx::query(ddl).execute(&pool).await.unwrap();
+    }
+
+    let blog = TestBlog {
+        id: FieldUuid(Uuid::new_v4()),
+        title: FieldVarchar::new("tx".to_string()).unwrap(),
+        tags: ManyToMany::empty(),
+    };
+    let tag = TestTag {
+        id: FieldUuid(Uuid::new_v4()),
+        name: FieldVarchar::new("tx".to_string()).unwrap(),
+    };
+    insert(&pool, blog.clone()).await.unwrap();
+    insert(&pool, tag.clone()).await.unwrap();
+    insert(&pool, user("keep@tx.com")).await.unwrap();
+
+    let (b, t) = (blog.clone(), tag.clone());
+    let err = atomic(&pool, async |tx| {
+        bulk_create(&mut **tx, &[user("a@tx.com"), user("b@tx.com")]).await?;
+        // Reads see the transaction's own writes.
+        assert_eq!(TestUser::filter(&mut **tx).count().await?, 3);
+        M2M::<TestBlog, TestTag>::add(&mut **tx, &b, &t).await?;
+        assert!(M2M::<TestBlog, TestTag>::exists(&mut **tx, &b, &t).await?);
+        M2M::<TestBlog, TestTag>::set(&mut **tx, &b, &[]).await?;
+        M2M::<TestBlog, TestTag>::add(&mut **tx, &b, &t).await?;
+        Err::<(), Error>(Error::abort("roll back"))
+    })
+    .await
+    .unwrap_err();
+    assert!(matches!(err, Error::Aborted(_)), "{err:?}");
+
+    assert_eq!(TestUser::filter(&pool).count().await.unwrap(), 1);
+    assert!(
+        !M2M::<TestBlog, TestTag>::exists(&pool, &blog, &tag)
+            .await
+            .unwrap()
+    );
+
+    // Same calls commit with the transaction.
+    atomic(&pool, async |tx| {
+        bulk_create(&mut **tx, &[user("c@tx.com")]).await?;
+        M2M::<TestBlog, TestTag>::add(&mut **tx, &blog, &tag).await?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+    assert_eq!(TestUser::filter(&pool).count().await.unwrap(), 2);
+}
+
+// ── bulk_update / bulk_upsert / update_or_create ─────────────────────────────────
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-mysql"), ignore)]
+async fn test_mysql_bulk_update_bulk_upsert_update_or_create() {
+    let pool = pool().await;
+    setup(&pool).await;
+
+    let mut users: Vec<TestUser> = (0..3).map(|i| user(&format!("bu{i}@t.com"))).collect();
+    bulk_create(&pool, &users).await.unwrap();
+    for (i, u) in users.iter_mut().enumerate() {
+        u.name = FieldVarchar::new(format!("renamed{i}")).unwrap();
+        u.active = FieldBool(false);
+    }
+    assert_eq!(
+        bulk_update(&pool, &users, &["name", "active"])
+            .await
+            .unwrap(),
+        3
+    );
+    let stored = get::<_, TestUser>(&pool, &users[1].id.to_sql_value())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(stored.name.as_str(), "renamed1");
+    assert!(!stored.active.0);
+    // Unknown column and PK are rejected before any SQL runs.
+    for bad in ["nope", "id"] {
+        let err = bulk_update(&pool, &users, &[bad]).await.unwrap_err();
+        assert!(matches!(err, Error::Invalid(_)), "{err:?}");
+    }
+
+    // Upsert: existing email keeps its id and takes the new name, new email is inserted.
+    let mut again = user("bu0@t.com");
+    again.name = FieldVarchar::new("upserted".to_string()).unwrap();
+    bulk_upsert(&pool, &[again, user("bu9@t.com")], &["email"])
+        .await
+        .unwrap();
+    assert_eq!(TestUser::filter(&pool).count().await.unwrap(), 4);
+    let row = TestUser::filter(&pool)
+        .eq("email", "bu0@t.com")
+        .all()
+        .await
+        .unwrap();
+    assert_eq!(row[0].id.0, users[0].id.0);
+    assert_eq!(row[0].name.as_str(), "upserted");
+
+    // update_or_create: creates, then updates the row it finds (same PK).
+    let lookup = vec![("email", SqlValue::Text("uoc@t.com".to_string()))];
+    let mut first = user("uoc@t.com");
+    first.name = FieldVarchar::new("first".to_string()).unwrap();
+    let created = update_or_create(&pool, lookup.clone(), first)
+        .await
+        .unwrap();
+    assert_eq!(created.name.as_str(), "first");
+    let mut second = user("uoc@t.com");
+    second.name = FieldVarchar::new("second".to_string()).unwrap();
+    let updated = update_or_create(&pool, lookup, second).await.unwrap();
+    assert_eq!(updated.id.0, created.id.0);
+    assert_eq!(updated.name.as_str(), "second");
+    assert_eq!(
+        TestUser::filter(&pool)
+            .eq("email", "uoc@t.com")
+            .count()
+            .await
+            .unwrap(),
+        1
+    );
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-mysql"), ignore)]
+async fn test_hooks_update_or_create() {
+    let pool = pool().await;
+    hooked_setup(&pool).await;
+
+    let lookup = vec![("name", SqlValue::Text("uoc_hooked".to_string()))];
+    update_or_create(&pool, lookup.clone(), hooked("uoc_hooked"))
+        .await
+        .unwrap();
+    assert_eq!(
+        hook_events("uoc_hooked"),
+        ["before_save", "before_create", "after_create", "after_save"]
+    );
+    update_or_create(&pool, lookup, hooked("uoc_hooked"))
+        .await
+        .unwrap();
+    assert_eq!(
+        hook_events("uoc_hooked")[4..],
+        ["before_save", "before_update", "after_update", "after_save"]
+    );
+}
+
+// ── atomic: the future is Send (usable from a multi-thread spawn) ────────────────
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-mysql"), ignore)]
+async fn test_mysql_atomic_future_is_send() {
+    let pool = pool().await;
+    setup(&pool).await;
+
+    let p = pool.clone();
+    let n = tokio::spawn(async move {
+        atomic(&p, async |tx| {
+            insert(&mut **tx, user("spawned@tx.com")).await?;
+            TestUser::filter(&mut **tx).count().await
+        })
+        .await
+    })
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(n, 1);
+}
+
+// ── Foreign keys and M2M follow the target's primary key type ─────────────────
+
+#[derive(Model, Debug, Clone)]
+#[model(table = "pk_author")]
+struct PkAuthor {
+    id: FieldAutoBigInt,
+    name: FieldVarchar<1, 100>,
+}
+
+#[derive(Model, Debug, Clone)]
+#[model(table = "pk_label")]
+struct PkLabel {
+    id: FieldAutoInt,
+    name: FieldVarchar<1, 100>,
+}
+
+#[derive(Model, Debug, Clone)]
+#[model(table = "pk_book")]
+struct PkBook {
+    id: FieldUuid,
+    author_id: ForeignKey<PkAuthor>,
+    editor_id: Option<ForeignKey<PkLabel>>,
+    title: FieldVarchar<1, 100>,
+    labels: ManyToMany<PkLabel>,
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-mysql"), ignore)]
+async fn mysql_test_fk_and_m2m_follow_the_target_pk_type() {
+    let pool = pool().await;
+    for ddl in [
+        "DROP TABLE IF EXISTS `pk_book_pk_label`",
+        "DROP TABLE IF EXISTS `pk_book`",
+        "DROP TABLE IF EXISTS `pk_label`",
+        "DROP TABLE IF EXISTS `pk_author`",
+        "CREATE TABLE `pk_author` (`id` BIGINT AUTO_INCREMENT PRIMARY KEY, `name` VARCHAR(100) NOT NULL)",
+        "CREATE TABLE `pk_label` (`id` INT AUTO_INCREMENT PRIMARY KEY, `name` VARCHAR(100) NOT NULL)",
+        "CREATE TABLE `pk_book` (`id` BINARY(16) PRIMARY KEY, `author_id` BIGINT NOT NULL, `editor_id` INT NULL, `title` VARCHAR(100) NOT NULL, FOREIGN KEY (`author_id`) REFERENCES `pk_author` (`id`), FOREIGN KEY (`editor_id`) REFERENCES `pk_label` (`id`))",
+        "CREATE TABLE `pk_book_pk_label` (`pk_book_id` BINARY(16) NOT NULL, `pk_label_id` INT NOT NULL, PRIMARY KEY (`pk_book_id`, `pk_label_id`), FOREIGN KEY (`pk_book_id`) REFERENCES `pk_book` (`id`) ON DELETE CASCADE, FOREIGN KEY (`pk_label_id`) REFERENCES `pk_label` (`id`) ON DELETE CASCADE)",
+    ] {
+        sqlx::query(ddl).execute(&pool).await.unwrap();
+    }
+
+    // The schema derived from the models: FK columns take the target's key type.
+    let col = |name: &str| {
+        PkBook::schema()
+            .columns
+            .into_iter()
+            .find(|c| c.name == name)
+            .unwrap()
+    };
+    assert_eq!(col("author_id").col_type, ColumnType::BigInt);
+    assert_eq!(col("editor_id").col_type, ColumnType::Int);
+    assert_eq!(col("author_id").references.unwrap().table, "pk_author");
+
+    let name = |s: &str| FieldVarchar::<1, 100>::new(s.to_string()).unwrap();
+    let ann = insert(
+        &pool,
+        PkAuthor {
+            id: FieldAutoBigInt(None),
+            name: name("ann"),
+        },
+    )
+    .await
+    .unwrap();
+    let bob = insert(
+        &pool,
+        PkAuthor {
+            id: FieldAutoBigInt(None),
+            name: name("bob"),
+        },
+    )
+    .await
+    .unwrap();
+    let mut labels = Vec::new();
+    for n in ["rust", "orm"] {
+        let label = insert(
+            &pool,
+            PkLabel {
+                id: FieldAutoInt(None),
+                name: name(n),
+            },
+        )
+        .await
+        .unwrap();
+        labels.push(label);
+    }
+    let (ann_id, bob_id) = (ann.id.0.unwrap(), bob.id.0.unwrap());
+    let rust_id: i32 = labels[0].id.0.unwrap();
+
+    // Insert and read back: bigint FK, nullable int FK (Some and None).
+    let book = |title: &str, author: i64, editor: Option<i32>| PkBook {
+        id: FieldUuid(Uuid::new_v4()),
+        author_id: ForeignKey::new(author),
+        editor_id: editor.map(ForeignKey::new),
+        title: name(title),
+        labels: ManyToMany::empty(),
+    };
+    let b1 = insert(&pool, book("one", ann_id, Some(rust_id)))
+        .await
+        .unwrap();
+    let b2 = insert(&pool, book("two", ann_id, None)).await.unwrap();
+    insert(&pool, book("three", bob_id, None)).await.unwrap();
+    let got = get::<_, PkBook>(&pool, &b1.id.to_sql_value())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(got.author_id.id(), ann_id);
+    assert_eq!(got.editor_id.map(|e| e.id()), Some(rust_id));
+    let got2 = get::<_, PkBook>(&pool, &b2.id.to_sql_value())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(got2.editor_id.is_none());
+
+    // Filter by the raw key value.
+    let anns = PkBook::filter(&pool)
+        .eq(PkBook::AUTHOR_ID, ann_id)
+        .all()
+        .await
+        .unwrap();
+    assert_eq!(anns.len(), 2);
+
+    // select_related: one JOIN, the author's bigint key decodes.
+    let joined = PkBook::filter(&pool)
+        .select_related(PkBook::AUTHOR_ID)
+        .order_by("title")
+        .all()
+        .await
+        .unwrap();
+    assert_eq!(joined.len(), 3);
+    // titles sorted: one, three, two
+    assert_eq!(joined[0].related::<PkAuthor>().name.as_str(), "ann");
+    assert_eq!(joined[1].related::<PkAuthor>().id.0, Some(bob_id));
+
+    // prefetch_related over the reverse bigint FK.
+    let authors = PkAuthor::filter(&pool)
+        .prefetch_related(PkBook::AUTHOR_ID)
+        .all()
+        .await
+        .unwrap();
+    let books_of = |id: i64| {
+        authors
+            .iter()
+            .find(|a| a.id.0 == Some(id))
+            .unwrap()
+            .prefetched::<PkBook>()
+            .len()
+    };
+    assert_eq!((books_of(ann_id), books_of(bob_id)), (2, 1));
+
+    // ManyToMany to an int key: add / all / reverse / exists / prefetch / remove.
+    for l in &labels {
+        M2M::<PkBook, PkLabel>::add(&pool, &b1, l).await.unwrap();
+    }
+    M2M::<PkBook, PkLabel>::add(&pool, &b2, &labels[0])
+        .await
+        .unwrap();
+    assert_eq!(
+        M2M::<PkBook, PkLabel>::all(&pool, &b1).await.unwrap().len(),
+        2
+    );
+    assert_eq!(
+        M2M::<PkBook, PkLabel>::reverse(&pool, &labels[0])
+            .await
+            .unwrap()
+            .len(),
+        2
+    );
+    assert!(
+        M2M::<PkBook, PkLabel>::exists(&pool, &b2, &labels[0])
+            .await
+            .unwrap()
+    );
+    assert!(
+        !M2M::<PkBook, PkLabel>::exists(&pool, &b2, &labels[1])
+            .await
+            .unwrap()
+    );
+    let with_labels = PkBook::filter(&pool)
+        .prefetch_related(PkBook::LABELS)
+        .all()
+        .await
+        .unwrap();
+    let labels_of = |b: &PkBook| {
+        with_labels
+            .iter()
+            .find(|w| w.id == b.id)
+            .unwrap()
+            .prefetched::<PkLabel>()
+            .len()
+    };
+    assert_eq!((labels_of(&b1), labels_of(&b2)), (2, 1));
+    M2M::<PkBook, PkLabel>::remove(&pool, &b1, &labels[1])
+        .await
+        .unwrap();
+    assert_eq!(
+        M2M::<PkBook, PkLabel>::all(&pool, &b1).await.unwrap().len(),
+        1
+    );
+}
+
+// ── atomic_retry ─────────────────────────────────────────────────────────────────
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-mysql"), ignore)]
+async fn test_mysql_atomic_retry_recovers_from_deadlock() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use tokio::sync::Barrier;
+
+    let pool = pool().await;
+    setup(&pool).await;
+    bulk_create(&pool, &[user("dl_a@t.com"), user("dl_b@t.com")])
+        .await
+        .unwrap();
+
+    let barrier = Arc::new(Barrier::new(2));
+    let runs = Arc::new(AtomicU32::new(0));
+    let worker = |first: &'static str, second: &'static str| {
+        let (pool, barrier, runs) = (pool.clone(), barrier.clone(), runs.clone());
+        async move {
+            let mut attempt = 0;
+            atomic_retry(&pool, 5, async |tx| {
+                attempt += 1;
+                runs.fetch_add(1, Ordering::SeqCst);
+                let sql = "UPDATE `test_user` SET `score` = 1 WHERE `email` = ?";
+                raw_execute(&mut **tx, sql, vec![SqlValue::Text(first.into())]).await?;
+                if attempt == 1 {
+                    // Both transactions hold their first row before asking for the second.
+                    barrier.wait().await;
+                }
+                raw_execute(&mut **tx, sql, vec![SqlValue::Text(second.into())]).await?;
+                Ok(())
+            })
+            .await
+        }
+    };
+    // Same task, interleaved by `join!` (async closures are not `Send`-inferable for `spawn`).
+    let (r1, r2) = tokio::join!(
+        worker("dl_a@t.com", "dl_b@t.com"),
+        worker("dl_b@t.com", "dl_a@t.com")
+    );
+    r1.unwrap();
+    r2.unwrap();
+    assert!(
+        runs.load(Ordering::SeqCst) > 2,
+        "a deadlock victim must have retried"
+    );
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-mysql"), ignore)]
+async fn test_mysql_atomic_retry_does_not_retry_other_errors() {
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    let pool = pool().await;
+    let runs = AtomicU32::new(0);
+    let err = atomic_retry(&pool, 5, async |_tx| {
+        runs.fetch_add(1, Ordering::SeqCst);
+        Err::<(), _>(Error::abort("nope"))
+    })
+    .await
+    .unwrap_err();
+    assert_eq!(runs.load(Ordering::SeqCst), 1);
+    assert!(!err.is_retryable());
+}
+
+// ── bulk_upsert key check ────────────────────────────────────────────────────────
+
+#[derive(Model, Debug, Clone)]
+#[model(table = "test_two_keys")]
+struct TwoKeys {
+    id: FieldUuid,
+    #[field(unique)]
+    email: FieldEmail,
+    #[field(unique)]
+    username: FieldVarchar<1, 100>,
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-mysql"), ignore)]
+async fn test_mysql_bulk_upsert_rejects_other_unique_keys() {
+    let pool = pool().await;
+    // The table does not exist: the check must fail before any SQL runs.
+    let row = TwoKeys {
+        id: FieldUuid(Uuid::new_v4()),
+        email: FieldEmail::new("k@t.com".to_string()).unwrap(),
+        username: FieldVarchar::new("k".to_string()).unwrap(),
+    };
+    for on in [&["email"][..], &["id"][..]] {
+        let err = bulk_upsert(&pool, std::slice::from_ref(&row), on)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, Error::Invalid(_)), "{err:?}");
+    }
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-mysql"), ignore)]
+async fn test_mysql_bulk_upsert_single_unique_key_ok() {
+    let pool = pool().await;
+    setup(&pool).await;
+    bulk_upsert(&pool, &[user("one@t.com")], &["email"])
+        .await
+        .unwrap();
+    assert_eq!(TestUser::filter(&pool).count().await.unwrap(), 1);
+}
+
+// ── bulk_update: one statement per chunk, mixed types ─────────────────────────────
+
+#[derive(Model, Debug, Clone, PartialEq)]
+#[model(table = "bulk_mix")]
+struct BulkMix {
+    id: FieldUuid,
+    flag: FieldBool,
+    n: Option<FieldInt>,
+    big: FieldBigInt,
+    price: FieldDecimal<10, 2>,
+    at: FieldDateTime,
+    nick: Option<FieldText>,
+    meta: FieldJson,
+}
+
+#[derive(Model, Debug, Clone, PartialEq)]
+#[model(table = "bulk_counter")]
+struct BulkCounter {
+    id: FieldAutoInt,
+    label: FieldText,
+}
+
+fn bulk_mix(i: i64) -> BulkMix {
+    BulkMix {
+        id: FieldUuid(Uuid::new_v4()),
+        flag: FieldBool(i % 2 == 0),
+        n: if i % 3 == 0 {
+            None
+        } else {
+            Some(FieldInt(i as i32))
+        },
+        big: FieldBigInt(i * 10_000_000_000),
+        price: FieldDecimal::from_decimal(Decimal::new(i * 125, 2)),
+        at: FieldDateTime(chrono::DateTime::from_timestamp(1_700_000_000 + i, 0).unwrap()),
+        nick: if i % 5 == 0 {
+            None
+        } else {
+            Some(FieldText(format!("nick \"{i}\" 'q'")))
+        },
+        meta: FieldJson(serde_json::json!({"i": i, "tags": ["a", "b"], "nested": {"ok": true}})),
+    }
+}
+
+async fn bulk_mix_sorted(pool: &MySqlPool) -> Vec<BulkMix> {
+    let mut rows: Vec<BulkMix> = BulkMix::filter(pool)
+        .unlimited()
+        .all()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|r| r.inner)
+        .collect();
+    rows.sort_by_key(|r| r.id.0);
+    rows
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-mysql"), ignore)]
+async fn test_mysql_bulk_update_mixed_types_over_several_chunks() {
+    let pool = pool().await;
+    for ddl in [
+        "DROP TABLE IF EXISTS `bulk_mix`",
+        "DROP TABLE IF EXISTS `bulk_counter`",
+        "CREATE TABLE `bulk_mix` (`id` BINARY(16) PRIMARY KEY, `flag` BOOLEAN NOT NULL, `n` INT, `big` BIGINT NOT NULL, `price` DECIMAL(10,2) NOT NULL, `at` DATETIME(6) NOT NULL, `nick` TEXT, `meta` JSON NOT NULL) ENGINE=InnoDB",
+        "CREATE TABLE `bulk_counter` (`id` INT AUTO_INCREMENT PRIMARY KEY, `label` TEXT NOT NULL) ENGINE=InnoDB",
+    ] {
+        sqlx::query(ddl).execute(&pool).await.unwrap();
+    }
+
+    // Enough rows for at least two chunks of the multi-row UPDATE.
+    let mut rows: Vec<BulkMix> = (0..5000).map(bulk_mix).collect();
+    assert_eq!(bulk_create(&pool, &rows).await.unwrap(), 5000);
+
+    // Every column changes, NULLs become values and values become NULL.
+    for (i, r) in rows.iter_mut().enumerate() {
+        let i = i as i64;
+        r.flag = FieldBool(!r.flag.0);
+        r.n = if r.n.is_some() {
+            None
+        } else {
+            Some(FieldInt(-(i as i32)))
+        };
+        r.big = FieldBigInt(-i * 7_000_000_000);
+        r.price = FieldDecimal::from_decimal(Decimal::new(i * 3 + 1, 2));
+        r.at = FieldDateTime(chrono::DateTime::from_timestamp(1_600_000_000 + i * 60, 0).unwrap());
+        r.nick = if r.nick.is_some() {
+            None
+        } else {
+            Some(FieldText(format!("back {i}")))
+        };
+        r.meta = FieldJson(serde_json::json!({"changed": i, "s": "x\"y"}));
+    }
+    let t = std::time::Instant::now();
+    let cols = ["flag", "n", "big", "price", "at", "nick", "meta"];
+    assert_eq!(bulk_update(&pool, &rows, &cols).await.unwrap(), 5000);
+    println!("mysql bulk_update of 5000 rows: {:?}", t.elapsed());
+    rows.sort_by_key(|r| r.id.0);
+    assert_eq!(bulk_mix_sorted(&pool).await, rows);
+
+    // Unchanged rows still count as matched; a subset of columns leaves the others alone.
+    assert_eq!(
+        bulk_update(&pool, &rows, &["n", "nick"]).await.unwrap(),
+        5000
+    );
+    for r in rows.iter_mut() {
+        r.n = Some(FieldInt(5));
+        r.nick = None;
+    }
+    assert_eq!(
+        bulk_update(&pool, &rows, &["n", "nick"]).await.unwrap(),
+        5000
+    );
+    assert_eq!(bulk_mix_sorted(&pool).await, rows);
+
+    // Inside atomic(): visible in the transaction, rolled back on error, kept on commit.
+    for r in rows.iter_mut() {
+        r.flag = FieldBool(!r.flag.0);
+    }
+    let before = bulk_mix_sorted(&pool).await;
+    let snapshot = rows.clone();
+    let res: Result<(), Error> = atomic(&pool, async |tx| {
+        assert_eq!(bulk_update(&mut **tx, &snapshot, &["flag"]).await?, 5000);
+        Err(Error::Invalid("rollback".into()))
+    })
+    .await;
+    assert!(res.is_err());
+    assert_eq!(bulk_mix_sorted(&pool).await, before);
+    atomic(&pool, async |tx| {
+        assert_eq!(bulk_update(&mut **tx, &snapshot, &["flag"]).await?, 5000);
+        Ok(())
+    })
+    .await
+    .unwrap();
+    assert_eq!(bulk_mix_sorted(&pool).await, rows);
+
+    // Rows not in the slice are untouched; unknown PKs match nothing.
+    let mut some = rows[..10].to_vec();
+    some[0].big = FieldBigInt(42);
+    let mut ghost = bulk_mix(999_999);
+    ghost.big = FieldBigInt(1);
+    some.push(ghost);
+    assert_eq!(bulk_update(&pool, &some, &["big"]).await.unwrap(), 10);
+    rows[0].big = FieldBigInt(42);
+    assert_eq!(bulk_mix_sorted(&pool).await, rows);
+
+    // Auto-increment integer PK.
+    let new = |l: String| BulkCounter {
+        id: FieldAutoInt::default(),
+        label: FieldText(l),
+    };
+    bulk_create(
+        &pool,
+        &(0..5000).map(|i| new(format!("c{i}"))).collect::<Vec<_>>(),
+    )
+    .await
+    .unwrap();
+    let mut counters: Vec<BulkCounter> = BulkCounter::filter(&pool)
+        .unlimited()
+        .all()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|r| r.inner)
+        .collect();
+    assert_eq!(counters.len(), 5000);
+    for c in counters.iter_mut() {
+        c.label = FieldText(format!("renamed {}", c.id.0.unwrap()));
+    }
+    assert_eq!(
+        bulk_update(&pool, &counters, &["label"]).await.unwrap(),
+        5000
+    );
+    let mut stored: Vec<BulkCounter> = BulkCounter::filter(&pool)
+        .unlimited()
+        .all()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|r| r.inner)
+        .collect();
+    stored.sort_by_key(|c| c.id.0);
+    counters.sort_by_key(|c| c.id.0);
+    assert_eq!(stored, counters);
+}
+
+// ── Missing table ────────────────────────────────────────────────────────────────
+
+#[derive(Model, Debug, Clone)]
+#[model(table = "never_migrated")]
+struct NeverMigrated {
+    id: FieldUuid,
+    label: FieldVarchar<1, 50>,
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-mysql"), ignore)]
+async fn test_mysql_missing_table_is_typed() {
+    let pool = pool().await;
+    raw_execute(&pool, "DROP TABLE IF EXISTS `never_migrated`", vec![])
+        .await
+        .unwrap();
+    let is_missing = |err: &Error| {
+        matches!(err, Error::TableMissing { table } if table == "never_migrated")
+            && err.to_string().contains("rango migrate")
+    };
+
+    let err = NeverMigrated::filter(&pool)
+        .all()
+        .await
+        .err()
+        .expect("read");
+    assert!(is_missing(&err), "read: {err:?}");
+
+    let row = NeverMigrated {
+        id: FieldUuid(Uuid::new_v4()),
+        label: FieldVarchar::new("x").unwrap(),
+    };
+    let err = insert(&pool, row).await.expect_err("write");
+    assert!(is_missing(&err), "write: {err:?}");
+
+    // A missing table in another database is reported by its bare name too.
+    let err = raw_execute(&pool, "SELECT 1 FROM `mysql`.`never_migrated`", vec![])
+        .await
+        .expect_err("qualified");
+    assert!(is_missing(&err), "qualified: {err:?}");
 }

@@ -15,6 +15,8 @@ Add Rango to `Cargo.toml`:
 rango-orm = { version = "0.1", default-features = false, features = ["sqlite"] }
 tokio = { version = "1", features = ["full"] }
 anyhow = "1"
+uuid = { version = "1", features = ["v4"] }   # you add these two: Rango does not re-export them
+chrono = "0.4"
 ```
 
 ## 2. Define a model
@@ -80,8 +82,8 @@ async fn main() -> anyhow::Result<()> {
     // Insert
     let user = User {
         id: FieldUuid(uuid::Uuid::new_v4()),
-        email: FieldEmail("alice@example.com".into()),
-        name: FieldVarchar("Alice".into()),
+        email: FieldEmail::new("alice@example.com")?,
+        name: FieldVarchar::new("Alice")?,
         active: FieldBool(true),
         created_at: FieldDateTime(chrono::Utc::now()),
     };
@@ -96,7 +98,7 @@ async fn main() -> anyhow::Result<()> {
         .await?;
 
     for u in &active_users {
-        println!("{} — {}", u.name.0, u.email.0);
+        println!("{} — {}", u.name.as_str(), u.email.as_str());
     }
 
     Ok(())

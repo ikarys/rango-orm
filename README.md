@@ -4,7 +4,7 @@ A Django-inspired async ORM for Rust: define a struct, Rango generates the schem
 
 [![CI](https://github.com/ikarys/rango-orm/actions/workflows/ci.yml/badge.svg)](https://github.com/ikarys/rango-orm/actions/workflows/ci.yml) [![codecov](https://codecov.io/gh/ikarys/rango-orm/graph/badge.svg)](https://codecov.io/gh/ikarys/rango-orm)
 
-> `0.1.0`, on crates.io as [`rango-orm`](https://crates.io/crates/rango-orm). Pre-1.0: a `0.x` minor release may still break the API.
+> `0.1.1`, on crates.io as [`rango-orm`](https://crates.io/crates/rango-orm). Pre-1.0: a `0.x` minor release may still break the API.
 
 ## Why Rango
 
@@ -53,10 +53,10 @@ let adults = User::filter(&pool)
 // User::filter(&pool).eq(User::AGE, "eighteen");
 
 let user: Option<User> = rango::get(&pool, &SqlValue::from(id)).await?;
-rango::atomic(&pool, |tx| Box::pin(async move {
-    rango::insert(&mut *tx, post).await?;
+rango::atomic(&pool, async |tx| {
+    rango::insert(&mut **tx, post).await?;
     Ok(())
-})).await?;
+}).await?;
 ```
 
 ```bash
@@ -80,10 +80,19 @@ tokio = { version = "1", features = ["full"] }
 ```
 
 ```bash
-cargo install rango-orm-cli --version 0.1.0
+cargo install rango-orm-cli --version 0.1.1
 ```
 
 In production, pass the URL via `DATABASE_URL`; never put credentials in `rango.toml`.
+
+### Supported databases
+
+| Database | Supported | Tested in CI | Why this minimum |
+|---|---|---|---|
+| PostgreSQL | 14+ | 14, 18 | `gen_random_uuid()` is built in from 13; 13 is end-of-life |
+| MySQL | 8.0+ | 8.0, 8.4 | oldest version tested |
+| MariaDB | 10.6+ | 10.6, 11.4 | oldest version tested |
+| SQLite | 3.35+ | bundled 3.46 | `RETURNING` (3.35), `UPDATE … FROM` (3.33); sqlx bundles SQLite, so nothing to install |
 
 ## Features
 

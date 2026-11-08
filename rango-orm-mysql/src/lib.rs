@@ -15,11 +15,12 @@ use sqlx::{
 
 pub use m2m::M2M;
 pub use ops::{
-    all, bulk_create, delete, get, get_or_create, insert, raw, raw_execute, raw_scalar, update,
+    all, bulk_create, bulk_update, bulk_upsert, delete, get, get_or_create, insert, raw,
+    raw_execute, raw_scalar, update, update_or_create,
 };
-pub use query_builder::{QueryBuilder, RangoFilterExt, SelectAs};
+pub use query_builder::{Conn, QueryBuilder, RangoFilterExt, SelectAs};
 pub use rango_orm_core::WithRelated;
-pub use transaction::{atomic, MySqlTransaction, TxFuture};
+pub use transaction::{atomic, atomic_retry, transaction, MySqlTransaction};
 
 mod error;
 pub mod m2m;
@@ -27,27 +28,6 @@ mod ops;
 mod query_builder;
 mod row;
 mod transaction;
-
-/// Newtype wrapper around MySqlPool that implements RangoBackend.
-/// Use this when you need the backend trait — for direct DB calls use MySqlPool directly.
-#[derive(Clone)]
-pub struct RangoMySqlPool(pub MySqlPool);
-
-impl std::ops::Deref for RangoMySqlPool {
-    type Target = MySqlPool;
-    fn deref(&self) -> &MySqlPool {
-        &self.0
-    }
-}
-
-impl rango_orm_core::RangoBackend for RangoMySqlPool {
-    fn backend_kind(&self) -> rango_orm_core::BackendKind {
-        rango_orm_core::BackendKind::Mysql
-    }
-    fn placeholder(&self, _n: usize) -> String {
-        "?".to_string()
-    }
-}
 
 /// Connect to MySQL 8.0+ / MariaDB 10.6+. The session runs in UTC (`DATETIME` has no time zone)
 /// with strict SQL mode, so invalid values are rejected instead of silently truncated.

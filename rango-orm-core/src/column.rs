@@ -2,6 +2,7 @@
 
 use std::marker::PhantomData;
 
+use crate::Model;
 use crate::fields::ForeignKey;
 use crate::query::{SqlValue, ToSqlValue};
 
@@ -111,7 +112,7 @@ impl<M> ColumnRef<M> for &str {
 /// a column that points elsewhere. `&str` is accepted too (then name the model with `::<T>`).
 pub trait ForeignKeyRef<M, T>: ColumnRef<M> {}
 
-impl<M, T> ForeignKeyRef<M, T> for Column<M, ForeignKey<T>> {}
+impl<M, T: Model> ForeignKeyRef<M, T> for Column<M, ForeignKey<T>> {}
 
 impl<M, T> ForeignKeyRef<M, T> for &str {}
 
@@ -148,7 +149,7 @@ pub trait PrefetchRef<M, R> {
     fn prefetch_kind(&self) -> PrefetchKind<'_>;
 }
 
-impl<M, R> PrefetchRef<M, R> for Column<R, ForeignKey<M>> {
+impl<M: Model, R> PrefetchRef<M, R> for Column<R, ForeignKey<M>> {
     fn prefetch_kind(&self) -> PrefetchKind<'_> {
         PrefetchKind::ReverseFk(self.name)
     }
@@ -205,6 +206,7 @@ pub trait FilterValue<T> {
     fn into_sql_value(self) -> SqlValue;
 }
 
+#[diagnostic::do_not_recommend]
 impl<T: ToSqlValue> FilterValue<T> for T {
     fn into_sql_value(self) -> SqlValue {
         self.to_sql_value()
@@ -215,16 +217,22 @@ impl<T: ToSqlValue> FilterValue<T> for T {
 ///
 /// `Column<M, T>` only accepts values of its field type (`.eq(User::AGE, "x")` does
 /// not compile); `&str` accepts anything convertible to `SqlValue`.
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` is not a column of this model that accepts a `{V}` value",
+    note = "pass a typed column such as `Model::NAME` with a value of its field type, or a column name as `&str`"
+)]
 pub trait FilterColumn<M, V>: ColumnRef<M> {
     fn bind(&self, val: V) -> SqlValue;
 }
 
+#[diagnostic::do_not_recommend]
 impl<M, T, V: FilterValue<T>> FilterColumn<M, V> for Column<M, T> {
     fn bind(&self, val: V) -> SqlValue {
         val.into_sql_value()
     }
 }
 
+#[diagnostic::do_not_recommend]
 impl<M, V: Into<SqlValue>> FilterColumn<M, V> for &str {
     fn bind(&self, val: V) -> SqlValue {
         val.into()

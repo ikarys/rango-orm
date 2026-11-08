@@ -7,7 +7,7 @@ let page = User::filter(&pool).limit(100).offset(200).all().await?;
 ```
 
 ## Keyset pagination
-`.after(col, value)` adds `col > value` and orders by `col ASC` first.  
+`.after(col, value)` adds `col > value` and orders by `col ASC` first (no separate `.order_by(col)` needed; if you add one on the same column it is not duplicated).  
 `.before(col, value)` adds `col < value` and orders by `col DESC` first.
 
 Use a unique, indexed column, such as a primary key or unique timestamp. Cost is constant per page.
@@ -19,14 +19,14 @@ loop {
     if let Some(id) = last {
         q = q.after(User::ID, id);
     }
-    let page = q.order_by(User::ID).all().await?;
+    let page = q.all().await?;
     let Some(row) = page.last() else { break };
     last = Some(row.id.clone());
 }
 ```
 
 ## Default limit
-When no limit is set, the default cap is 1000 rows. Use `.unlimited()` to remove it.
+When no limit is set, the default cap is 1000 rows, and a `WARN` is logged if exactly 1000 rows come back. Use `.unlimited()` to remove it.
 
 ```rust,ignore
 let all = User::filter(&pool).unlimited().all().await?;

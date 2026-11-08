@@ -95,8 +95,8 @@ async fn setup(pool: &SqlitePool) {
 fn author(name: &str) -> Author {
     Author {
         id: FieldUuid(Uuid::new_v4()),
-        email: FieldEmail(format!("{name}@blog.test")),
-        name: FieldVarchar(name.to_string()),
+        email: FieldEmail::new(format!("{name}@blog.test")).unwrap(),
+        name: FieldVarchar::new(name.to_string()).unwrap(),
     }
 }
 
@@ -104,7 +104,7 @@ fn post(author_id: &Uuid, title: &str, published: bool) -> Post {
     Post {
         id: FieldUuid(Uuid::new_v4()),
         author_id: ForeignKey::new(*author_id),
-        title: FieldVarchar(title.to_string()),
+        title: FieldVarchar::new(title.to_string()).unwrap(),
         published: FieldBool(published),
         tags: ManyToMany::empty(),
     }
@@ -144,11 +144,11 @@ async fn blog_app_end_to_end() {
 
     let t_rust = Tag {
         id: FieldUuid(Uuid::new_v4()),
-        name: FieldVarchar("rust".into()),
+        name: FieldVarchar::new("rust").unwrap(),
     };
     let t_orm = Tag {
         id: FieldUuid(Uuid::new_v4()),
-        name: FieldVarchar("orm".into()),
+        name: FieldVarchar::new("orm").unwrap(),
     };
     insert(&pool, t_rust.clone()).await.unwrap();
     insert(&pool, t_orm.clone()).await.unwrap();
@@ -162,7 +162,10 @@ async fn blog_app_end_to_end() {
         .all()
         .await
         .unwrap();
-    let titles: Vec<_> = pub_posts.iter().map(|p| p.title.0.clone()).collect();
+    let titles: Vec<_> = pub_posts
+        .iter()
+        .map(|p| p.title.as_str().to_string())
+        .collect();
     assert_eq!(titles, vec!["hello".to_string(), "world".to_string()]);
 
     assert_eq!(
@@ -184,7 +187,7 @@ async fn blog_app_end_to_end() {
         .unwrap();
     assert_eq!(page.len(), 1);
     // Titles sorted asc are [draft, hello, world]; offset 1 skips `draft`.
-    assert_eq!(page[0].title.0, "hello");
+    assert_eq!(page[0].title.as_str(), "hello");
 
     let got = Author::filter(&pool)
         .eq(Author::EMAIL, "ada@blog.test")
@@ -192,7 +195,7 @@ async fn blog_app_end_to_end() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(got.name.0, "ada");
+    assert_eq!(got.name.as_str(), "ada");
     assert!(
         Author::filter(&pool)
             .eq(Author::EMAIL, "nobody@blog.test")
@@ -209,20 +212,20 @@ async fn blog_app_end_to_end() {
         .all()
         .await
         .unwrap();
-    let hello = posts.iter().find(|p| p.title.0 == "hello").unwrap();
-    assert_eq!(hello.related::<Author>().name.0, "ada");
+    let hello = posts.iter().find(|p| p.title.as_str() == "hello").unwrap();
+    assert_eq!(hello.related::<Author>().name.as_str(), "ada");
 
     let authors = Author::filter(&pool)
         .prefetch_related(Post::AUTHOR_ID)
         .all()
         .await
         .unwrap();
-    let ada_row = authors.iter().find(|a| a.name.0 == "ada").unwrap();
+    let ada_row = authors.iter().find(|a| a.name.as_str() == "ada").unwrap();
     assert_eq!(ada_row.prefetched::<Post>().len(), 2);
 
     // ── M2M ───────────────────────────────────────────────────────────────────
     let tags = M2M::<Post, Tag>::all(&pool, &p1).await.unwrap();
-    let tag_names: Vec<_> = tags.iter().map(|t| t.name.0.clone()).collect();
+    let tag_names: Vec<_> = tags.iter().map(|t| t.name.as_str().to_string()).collect();
     assert!(tag_names.contains(&"rust".to_string()) && tag_names.contains(&"orm".to_string()));
 
     // ── Subquery: filter authors through posts with a correlated EXISTS ──────
@@ -231,7 +234,10 @@ async fn blog_app_end_to_end() {
         .all()
         .await
         .unwrap();
-    let who: Vec<_> = with_published.iter().map(|a| a.name.0.clone()).collect();
+    let who: Vec<_> = with_published
+        .iter()
+        .map(|a| a.name.as_str().to_string())
+        .collect();
     assert!(
         who.contains(&"ada".to_string()) && who.contains(&"bob".to_string()),
         "both authors have a published post: {who:?}"
@@ -259,11 +265,11 @@ async fn blog_app_end_to_end() {
         .all()
         .await
         .unwrap();
-    assert!(no_pub.iter().any(|a| a.name.0 == "lonely"));
+    assert!(no_pub.iter().any(|a| a.name.as_str() == "lonely"));
 
     // ── Transactions: commit on Ok, roll back on Err ─────────────────────────
-    let committed = atomic(&pool, |tx| {
-        Box::pin(async move { insert(&mut **tx, post(&ada.id.0, "in-tx", true)).await })
+    let committed = atomic(&pool, async |tx| {
+        insert(&mut **tx, post(&ada.id.0, "in-tx", true)).await
     })
     .await
     .unwrap();
@@ -274,11 +280,9 @@ async fn blog_app_end_to_end() {
             .is_some()
     );
 
-    let rolled_back = atomic(&pool, |tx| {
-        Box::pin(async move {
-            insert(&mut **tx, post(&ada.id.0, "rolled-back", false)).await?;
-            Err::<(), _>(Error::abort("simulated failure"))
-        })
+    let rolled_back = atomic(&pool, async |tx| {
+        insert(&mut **tx, post(&ada.id.0, "rolled-back", false)).await?;
+        Err::<(), _>(Error::abort("simulated failure"))
     })
     .await;
     assert!(rolled_back.is_err());

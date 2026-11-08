@@ -63,9 +63,9 @@ This is by design — Rango should be portable.
 
 | Crate | Role |
 |---|---|
-| `rango-orm-core` | DB-free: traits (`Model`, `FromRow`, `ModelValues`), schema types (`TableSchema`, `ColumnDef`, constraints), field types, `quote_ident` |
+| `rango-orm-core` | DB-free: traits (`Model`, `FromRow`, `ModelValues`), schema types (`TableSchema`, `ColumnDef`, constraints), field types, `quote_ident`, the shared query builder (`Filter` + `Dialect`: filter state and every generated SELECT/aggregate/relation/M2M statement), Rust type → column type table (`type_map`) |
 | `rango-orm-derive` | `#[derive(Model)]` proc-macro — generates `TableSchema` from struct fields |
-| `rango-orm-postgres` | PostgreSQL backend (sqlx): `ops/` (crud, bulk, raw), `query_builder/` (filter, exec, relations), M2M, `PgQueryExt` |
+| `rango-orm-postgres` | PostgreSQL backend (sqlx): `ops/` (crud, bulk, raw), `query_builder/` (wraps core `Filter`: connection, binding, execution, row decoding), M2M, `PgQueryExt` |
 | `rango-orm-sqlite` | SQLite backend (sqlx), same layout as `rango-orm-postgres` |
 | `rango-orm-mysql` | MySQL 8.0+ / MariaDB 10.6+ backend (sqlx), common subset, no `RETURNING`, UUID as `BINARY(16)` |
 | `rango-orm` | Facade crate (lib name `rango`): re-exports core + derive + backends, selected by features (`postgres` default, `sqlite`, `mysql`) |
@@ -91,47 +91,37 @@ Une commande, ça marche pareil quel que soit le backend.
 
 ## Model Hooks
 
-Opt-in trait `ModelHooks` — implement only what you need.
+Opt-in trait `ModelHooks` (supertrait of `Model`). `#[derive(Model)]` emits an empty impl; with
+`#[model(hooks)]` you write `impl ModelHooks for X { ... }` yourself.
 
 ```rust
 #[derive(Model)]
+#[model(hooks)]
 struct User {
     id: FieldUuid,
     name: FieldVarchar<1, 100>,
-    slug: FieldVarchar<1, 100>,
+    slug: FieldVarchar<0, 100>,
 }
 
 impl ModelHooks for User {
-    async fn before_save(&mut self) -> Result<()> {
-        self.slug = slugify(&self.name);
-        Ok(())
-    }
-
-    async fn after_save(&self) -> Result<()> {
-        send_welcome_email(self).await?;
-        Ok(())
+    fn before_save(&mut self) -> BoxFuture<'_> {
+        Box::pin(async move {
+            self.slug = slugify(&self.name);
+            Ok(())
+        })
     }
 }
 ```
 
-Available hooks (all have a no-op default impl):
-
-| Hook | Triggered |
-|---|---|
-| `before_save` | Before INSERT or UPDATE |
-| `after_save` | After INSERT or UPDATE |
-| `before_create` | Before INSERT only |
-| `after_create` | After INSERT only |
-| `before_update` | Before UPDATE only |
-| `after_update` | After UPDATE only |
-| `before_delete` | Before DELETE |
-| `after_delete` | After DELETE |
+Available hooks (all have a no-op default impl): `before_save` / `after_save` (INSERT or UPDATE),
+`before_create` / `after_create` (INSERT), `before_update` / `after_update` (UPDATE),
+`before_delete` / `after_delete` (DELETE).
 
 Design rules:
-- All hooks are `async`
-- All hooks return `Result<()>` — returning `Err` cancels the operation
-- Hooks run inside the same transaction as the DB operation
-- `ModelHooks` is opt-in — no impl needed if unused
+- Fired by `insert`, `update`, `delete`, `get_or_create` (create hooks only when it inserts; `before_*` run on `defaults` first) and `update_or_create`. Order: `before_save`, `before_create|update`, SQL, `after_create|update`, `after_save`.
+- Not fired: bulk ops, query-builder updates/deletes, `raw*` (same as Django).
+- Hooks return `HookResult`; an `Err` becomes `Error::Hook`. `before_*` Err: no SQL runs. `after_*` Err: returned to the caller, and rolled back only inside `atomic()`/a transaction (a plain pool has already committed).
+- Hooks do not open a transaction themselves.
 
 ## Roadmap
 
@@ -140,16 +130,16 @@ Design rules:
 | Feature | Notes |
 |---|---|
 | **Query builder** ✅ | `eq/ne/gt/gte/lt/lte/like/in_values/is_null`, `or()` / `not()` / `xor()` / `group()`, `order_by`, `limit`/`offset`, default cap of 1000 rows (`unlimited()`), `.explain()`. Typed columns (`User::EMAIL`) checked at compile time; string names checked against `M::schema()` at run time (`Error::Invalid`) |
-| **Relations FK** ✅ | `ForeignKey<User>` → real `REFERENCES … ON DELETE` in SQL, FK columns indexed |
-| **ManyToMany** ✅ | Auto-generated pivot table; `add` / `remove` / `set` / `all` / `reverse` / `clear` / `exists` |
+| **Relations FK** ✅ | `ForeignKey<User>` → real `REFERENCES … ON DELETE` in SQL, FK columns indexed; the column follows the target's PK type (UUID default, INT, BIGINT) |
+| **ManyToMany** ✅ | Auto-generated pivot table (key columns follow the target PK types); `add` / `remove` / `set` / `all` / `reverse` / `clear` / `exists` |
 | **Constraints** ✅ | `#[model(constraints = [CheckConstraint::new("age >= 18").name("chk_age"), UniqueConstraint::on(&["room", "date"]).name("uniq_booking")])]`: `CHECK` and `UNIQUE` inline in `CREATE TABLE`; `UNIQUE … WHERE cond` → partial unique index (Postgres, SQLite; skipped with a comment on MySQL). `managed = false` → ignored by migrations. `ordering = [asc("col"), desc("other")]` → default order |
 | **Subqueries** ✅ | `where_exists(Article::AUTHOR_ID, \|q\| ..)` (correlated `EXISTS`, `.not()` → `NOT EXISTS`) and `in_subquery(col, sub_col, \|q\| ..)`; decision rules for subquery vs `JOIN` vs `prefetch` documented in `docs/src/querying/filter.md`. Left (P2): Rango auto-picks the cheapest shape from a cost model |
 | **select_related** ✅ | One `LEFT JOIN` (filtered/paginated M in a subquery, R's columns prefixed `__r{i}_`); `all()` returns `Vec<WithRelated<M>>` |
 | **prefetch_related** ✅ | Reverse FK (`Comment::POST_ID`) and M2M (`Article::TAGS`, one `INNER JOIN` on the pivot); `= ANY($1)` on Postgres, `IN (...)` in batches of 900 elsewhere |
 | **values** ✅ | `.values(&["id", "email"])` → `Vec<HashMap<String, SqlValue>>` |
 | **Aggregations** ✅ | `.count()` `.exists()` `.sum()` `.avg()` `.min()` `.max()` |
-| **Transactions** ✅ | `rango::atomic/transaction(&pool, \|tx\| async { ... }).await?`; `get/all/insert/update/delete` accept any `Executor`; `get_or_create` is atomic (`INSERT … ON CONFLICT DO NOTHING RETURNING *` on Postgres) and accepts pool or transaction; `atomic_retry` on Postgres |
-| **Bulk ops** ✅ | `rango::bulk_create/update/upsert(&pool, &models, ...)`: multi-row `INSERT`, `UPDATE … FROM (VALUES …)`, upsert; auto-chunked under the parameter limit; pool or transaction |
+| **Transactions** ✅ | `rango::atomic/transaction(&pool, async \|tx\| { ... }).await?` (async closure, `Send` future); crud, `filter`, M2M and bulk ops accept a pool or a transaction (`&mut **tx`) on all three backends; `get_or_create` is atomic (`INSERT … ON CONFLICT DO NOTHING RETURNING *` on Postgres); `update_or_create` on every backend; `atomic_retry` on Postgres and MySQL |
+| **Bulk ops** ✅ | `rango::bulk_create/update/upsert(&pool, &models, ...)`: multi-row `INSERT`, `UPDATE … FROM (VALUES …)` (Postgres, SQLite) or `CASE pk WHEN … END … WHERE pk IN (…)` (MySQL / MariaDB): one statement per chunk, upsert (MySQL rejects it with `Error::Invalid` when the table has a unique key other than `conflict_on`, since `ON DUPLICATE KEY` cannot target one); all three backends; atomic (savepoint inside a transaction); auto-chunked under the parameter limit; pool or transaction |
 | **Raw SQL escape hatch** ✅ | `rango::raw` / `raw_scalar` / `raw_execute(&pool, "SELECT ...", params)`, values always bound |
 | **Auto-increment PK** ✅ | `FieldAutoInt` / `FieldAutoBigInt`, id assigned by the database |
 | **Partial selects (only / defer)** ✅ | `#[derive(Partial)] #[partial(model = User)] struct UserLite { .. }` + `.select_as::<UserLite>()`; columns and types checked at compile time. Not a Model with defaults (`update()` would overwrite), not a `HashMap` (that is `.values()`) |
@@ -193,9 +183,9 @@ let active_users = User::filter(&pool)
 
 | Backend | Crate | Status |
 |---|---|---|
-| PostgreSQL | `rango-orm-postgres` | ✅ backend + CLI (default backend) |
+| PostgreSQL | `rango-orm-postgres` | ✅ backend + CLI (default backend, PostgreSQL 14+) |
 | MySQL / MariaDB | `rango-orm-mysql` | ✅ backend + CLI (MySQL 8.0+, MariaDB 10.6+) |
-| SQLite | `rango-orm-sqlite` | ✅ |
+| SQLite | `rango-orm-sqlite` | ✅ (SQLite 3.35+, sqlx bundles 3.46) |
 | MSSQL | `rango-mssql` | 🔮 futur — SQLx a droppé le support MSSQL en 0.7, backend custom via `tiberius` |
 
 Note : PostgreSQL, MySQL, SQLite passent par SQLx. MSSQL nécessitera un backend séparé basé sur `tiberius`.
@@ -305,13 +295,14 @@ Known-CVE checklist (reviewed 2026-11-01) — keep new APIs out of these classes
 | P2 | Row decoding by column index instead of by name | Measured: ~3% on `select_all_1000` (name lookup is cheap); needs a `RangoRow` API change. Pre-sized result `Vec` ✅ (−4.5%) |
 | P1 | Postgres `bulk_create` via `UNNEST` (one statement, no 65 535-param chunking) | ✅ JSON columns fall back to chunked multi-row `VALUES` |
 | P1 | Keyset pagination helper (`.after(col, value)`) | ✅ `.after()` / `.before()` |
-| P1 | Transaction retry on serialization failure / deadlock (`40001`, `40P01`) in `atomic()`, opt-in, bounded | ✅ `atomic_retry(&pool, max_attempts, f)` (Postgres), exponential backoff without jitter |
+| P1 | Transaction retry on serialization failure / deadlock (`40001`, `40P01`) in `atomic()`, opt-in, bounded | ✅ `atomic_retry(&pool, max_attempts, f)` (Postgres: `40001`/`40P01`; MySQL: 1213/1205), exponential backoff without jitter |
 | P1 | SQLite table rebuild for ALTER TYPE / NULL / FK changes (create new → copy → drop → rename, in one transaction) | ✅ `RebuildTable` diff on SQLite; `migrate` turns FKs off and runs `PRAGMA foreign_key_check` in each migration transaction |
 | P2 | Optimistic locking (`#[field(version)]` → `UPDATE … WHERE version = $n`) | Safe concurrent updates without row locks |
 | P2 | Read-replica routing (writes → primary, reads → replica) | |
 
 ## Known limitations
 
+- `ForeignKey<M>` and `ManyToMany<M>` need `M` to have a UUID, integer or bigint primary key (`FieldUuid`, `FieldInt`, `FieldAutoInt`, `FieldBigInt`, `FieldAutoBigInt`). Text or composite keys cannot be relation targets; `rango makemigrations` refuses a ManyToMany to one.
 - SQLite has no decimal type: `FieldDecimal` is stored in a `NUMERIC` column, so a value with more than 15 significant digits is kept exactly as text, and one with up to 15 digits is a number again once read (scale restored from the column). Postgres and MySQL are exact.
 - A Postgres FK cycle is restorable because the FKs that close it are `DEFERRABLE`; databases created by an older `rango migrate` have them non-deferrable, so a NOT NULL cycle there still needs the constraints recreated (`ALTER TABLE ... ALTER CONSTRAINT ... DEFERRABLE`).
 

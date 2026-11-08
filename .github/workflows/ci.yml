@@ -103,12 +103,17 @@ jobs:
         run: cargo test --test integration_sqlite --features rango-tests/integration-sqlite -- --test-threads=1
 
   integration:
-    name: Integration tests (Postgres)
+    name: Integration tests (PostgreSQL ${{ matrix.pg }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Oldest and newest supported majors.
+        pg: ["14", "18"]
 
     services:
       postgres:
-        image: postgres:16
+        image: postgres:${{ matrix.pg }}
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres

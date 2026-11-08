@@ -1,10 +1,12 @@
 //! Single-row CRUD operations.
 
 use crate::error::db_err;
-use crate::executor::RangoExecutor;
 use crate::row::{PgRangoRow, decode_all};
 use rango_orm_core::{Error, Result};
 use rango_orm_core::{FromRow, Model, ModelValues, SqlValue, quote_ident};
+use rango_orm_core::{
+    after_delete, after_insert, after_update, before_delete, before_insert, before_update,
+};
 use sqlx::{Acquire, Executor, Postgres};
 
 use super::*;
@@ -19,35 +21,41 @@ use super::*;
 /// let user = rango::insert(&pool, user).await?;
 ///
 /// // Inside rango::atomic()
-/// let user = rango::atomic(&pool, |tx| async move {
-///     let user = rango::insert(tx, user).await?;
-///     rango::insert(tx, profile).await?;
+/// let user = rango::atomic(&pool, async |tx| {
+///     let user = rango::insert(&mut **tx, user).await?;
+///     rango::insert(&mut **tx, profile).await?;
 ///     Ok(user)
 /// }).await?;
 /// ```
 #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "postgresql", db.operation = "INSERT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
-pub async fn insert<'e, E, M>(executor: E, model: M) -> Result<M>
+pub async fn insert<'e, E, M>(executor: E, mut model: M) -> Result<M>
 where
     E: Executor<'e, Database = Postgres>,
     M: Model + ModelValues + FromRow,
 {
+    before_insert(&mut model).await?;
     let (sql, values) = build_insert_sql::<M>(&model);
     let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*sql)), values);
     let row = q.fetch_one(executor).await.map_err(db_err)?;
-    M::from_row(&PgRangoRow(row)).map_err(Error::from)
+    let saved = M::from_row(&PgRangoRow(row)).map_err(Error::from)?;
+    after_insert(&saved).await?;
+    Ok(saved)
 }
 
 /// UPDATE → returns the updated model.
 #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "postgresql", db.operation = "UPDATE", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
-pub async fn update<'e, E, M>(executor: E, model: M) -> Result<M>
+pub async fn update<'e, E, M>(executor: E, mut model: M) -> Result<M>
 where
     E: Executor<'e, Database = Postgres>,
     M: Model + ModelValues + FromRow,
 {
-    let (sql, values) = build_update_sql::<M>(&model);
+    before_update(&mut model).await?;
+    let (sql, values) = build_update_sql::<M>(&model, model.pk_value());
     let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*sql)), values);
     let row = q.fetch_one(executor).await.map_err(db_err)?;
-    M::from_row(&PgRangoRow(row)).map_err(Error::from)
+    let saved = M::from_row(&PgRangoRow(row)).map_err(Error::from)?;
+    after_update(&saved).await?;
+    Ok(saved)
 }
 
 /// DELETE a model.
@@ -57,9 +65,11 @@ where
     E: Executor<'e, Database = Postgres>,
     M: Model + ModelValues,
 {
+    before_delete(model).await?;
     let (sql, values) = build_delete_sql::<M>(model);
     let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*sql)), values);
-    q.execute(executor).await.map(|_| ()).map_err(db_err)
+    q.execute(executor).await.map_err(db_err)?;
+    after_delete(model).await
 }
 
 /// GET by primary key.
@@ -83,7 +93,7 @@ where
     }
 }
 
-/// GET ALL rows.
+/// GET ALL rows. Uncapped: unlike `QueryBuilder::all` (1000-row default cap), this returns every row of the table.
 /// Accepts `&PgPool`, `&mut Transaction<'_, Postgres>`, or any sqlx `Executor`.
 #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "postgresql", db.operation = "SELECT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
 pub async fn all<'e, E, M>(executor: E) -> Result<Vec<M>>
@@ -99,7 +109,7 @@ where
     decode_all::<M>(rows)
 }
 
-// ─── Compound ops — require RangoExecutor (pool or transaction, sequential queries) ─
+// ─── Compound ops — pool or transaction, sequential queries on one connection ─
 /// GET OR CREATE — atomic, race-free. Returns `(model, created: bool)`.
 ///
 /// Uses `INSERT ... ON CONFLICT (lookup_cols) DO NOTHING RETURNING *` in a single
@@ -115,15 +125,15 @@ where
 /// let (user, created) = rango::get_or_create(&pool, lookup, defaults).await?;
 ///
 /// // Inside a transaction
-/// let (user, created) = rango::atomic(&pool, |tx| async move {
-///     rango::get_or_create(&mut *tx, lookup, defaults).await
+/// let (user, created) = rango::atomic(&pool, async |tx| {
+///     rango::get_or_create(&mut **tx, lookup, defaults).await
 /// }).await?;
 /// ```
 #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "postgresql", db.operation = "INSERT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
 pub async fn get_or_create<'a, A, M>(
     executor: A,
     lookup: Vec<(&'static str, SqlValue)>,
-    defaults: M,
+    mut defaults: M,
 ) -> Result<(M, bool)>
 where
     A: Acquire<'a, Database = Postgres>,
@@ -131,13 +141,16 @@ where
 {
     let mut conn = executor.acquire().await.map_err(db_err)?;
 
+    before_insert(&mut defaults).await?;
     let conflict_cols: Vec<&str> = lookup.iter().map(|(col, _)| *col).collect();
     let (insert_sql, insert_vals) = build_get_or_create_sql(&defaults, &conflict_cols);
     let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*insert_sql)), insert_vals);
     let row = q.fetch_optional(&mut *conn).await.map_err(db_err)?;
 
     if let Some(r) = row {
-        return Ok((M::from_row(&PgRangoRow(r)).map_err(Error::from)?, true));
+        let created = M::from_row(&PgRangoRow(r)).map_err(Error::from)?;
+        after_insert(&created).await?;
+        return Ok((created, true));
     }
 
     // Conflict — row already exists; fetch it
@@ -150,31 +163,41 @@ where
 
 /// UPDATE OR CREATE.
 ///
-/// Accepts `&mut pool` (for standalone use) or `tx` (inside `atomic()`).
-/// For atomicity, wrap in `atomic()`.
+/// Updates the row matching `lookup` (update hooks fire), or inserts `values` (create hooks fire).
+/// Accepts `&PgPool`, `&mut *tx` or any type implementing `sqlx::Acquire`.
+/// Lookup then write are two statements: wrap in `atomic()` to make them one unit.
 #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "postgresql", db.operation = "UPDATE", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
-pub async fn update_or_create<E, M>(
-    exec: &mut E,
+pub async fn update_or_create<'a, A, M>(
+    executor: A,
     lookup: Vec<(&'static str, SqlValue)>,
-    values: M,
+    mut values: M,
 ) -> Result<M>
 where
-    E: RangoExecutor,
+    A: Acquire<'a, Database = Postgres>,
     M: Model + ModelValues + FromRow,
 {
+    let mut conn = executor.acquire().await.map_err(db_err)?;
     let (lookup_sql, lookup_vals) = build_lookup_sql::<M>(&lookup);
     let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*lookup_sql)), lookup_vals);
-    let row = exec.fetch_optional_query(q).await.map_err(db_err)?;
-    if row.is_some() {
-        let (update_sql, update_vals) = build_update_sql::<M>(&values);
+    let row = q.fetch_optional(&mut *conn).await.map_err(db_err)?;
+    if let Some(row) = row {
+        // Update the row that exists (its PK), not the PK carried by `values`.
+        let existing = M::from_row(&PgRangoRow(row)).map_err(Error::from)?;
+        before_update(&mut values).await?;
+        let (update_sql, update_vals) = build_update_sql::<M>(&values, existing.pk_value());
         let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*update_sql)), update_vals);
-        let row = exec.fetch_one_query(q).await.map_err(db_err)?;
-        M::from_row(&PgRangoRow(row)).map_err(Error::from)
+        let row = q.fetch_one(&mut *conn).await.map_err(db_err)?;
+        let saved = M::from_row(&PgRangoRow(row)).map_err(Error::from)?;
+        after_update(&saved).await?;
+        Ok(saved)
     } else {
+        before_insert(&mut values).await?;
         let (insert_sql, insert_vals) = build_insert_sql::<M>(&values);
         let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*insert_sql)), insert_vals);
-        let row = exec.fetch_one_query(q).await.map_err(db_err)?;
-        M::from_row(&PgRangoRow(row)).map_err(Error::from)
+        let row = q.fetch_one(&mut *conn).await.map_err(db_err)?;
+        let saved = M::from_row(&PgRangoRow(row)).map_err(Error::from)?;
+        after_insert(&saved).await?;
+        Ok(saved)
     }
 }
 
@@ -192,10 +215,12 @@ fn build_insert_sql<M: Model + ModelValues>(model: &M) -> (String, Vec<SqlValue>
     (sql, values)
 }
 
-fn build_update_sql<M: Model + ModelValues>(model: &M) -> (String, Vec<SqlValue>) {
+fn build_update_sql<M: Model + ModelValues>(
+    model: &M,
+    pk_val: SqlValue,
+) -> (String, Vec<SqlValue>) {
     let fields = model.field_values();
     let pk_col = M::pk_column();
-    let pk_val = model.pk_value();
     let set_clauses: Vec<String> = fields
         .iter()
         .enumerate()
