@@ -570,19 +570,24 @@ pub struct Post {
 
 const DUMP_TABLES: [&str; 2] = ["e2e_dump_post", "e2e_dump_person"];
 
+/// `dump` covers the whole schema, so the dump tests start from (and leave) an empty one:
+/// tables left by other test binaries on a shared database would end up in the dump.
 async fn drop_dump_tables(pool: &PgPool) {
-    for t in DUMP_TABLES {
+    let tables: Vec<String> = sqlx::query_scalar(
+        "SELECT tablename::text FROM pg_tables WHERE schemaname = current_schema()",
+    )
+    .fetch_all(pool)
+    .await
+    .expect("list tables");
+    for t in tables {
         sqlx::query(sqlx::AssertSqlSafe(&*format!(
-            "DROP TABLE IF EXISTS {t} CASCADE"
+            "DROP TABLE IF EXISTS \"{}\" CASCADE",
+            t.replace('"', "\"\"")
         )))
         .execute(pool)
         .await
-        .expect("drop dump table");
+        .expect("drop table");
     }
-    sqlx::query("DROP TABLE IF EXISTS _rango_migrations")
-        .execute(pool)
-        .await
-        .expect("drop ledger");
 }
 
 /// Project with the dump models migrated and two persons + one post inserted.
