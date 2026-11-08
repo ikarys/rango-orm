@@ -104,21 +104,21 @@ async fn test_sqlite_prefetch_related_many_to_many() {
 
     let b1 = TestBlog {
         id: FieldUuid(Uuid::new_v4()),
-        title: FieldVarchar("rust".to_string()),
+        title: FieldVarchar::new("rust".to_string()).unwrap(),
         tags: ManyToMany::empty(),
     };
     let b2 = TestBlog {
         id: FieldUuid(Uuid::new_v4()),
-        title: FieldVarchar("empty".to_string()),
+        title: FieldVarchar::new("empty".to_string()).unwrap(),
         tags: ManyToMany::empty(),
     };
     let t1 = TestTag {
         id: FieldUuid(Uuid::new_v4()),
-        name: FieldVarchar("orm".to_string()),
+        name: FieldVarchar::new("orm".to_string()).unwrap(),
     };
     let t2 = TestTag {
         id: FieldUuid(Uuid::new_v4()),
-        name: FieldVarchar("async".to_string()),
+        name: FieldVarchar::new("async".to_string()).unwrap(),
     };
 
     insert(&pool, b1.clone()).await.unwrap();
@@ -147,7 +147,7 @@ async fn test_sqlite_prefetch_related_many_to_many() {
     let mut tag_names: Vec<String> = b1_blog
         .prefetched::<TestTag>()
         .iter()
-        .map(|t| t.name.0.clone())
+        .map(|t| t.name.to_string())
         .collect();
     tag_names.sort();
     assert_eq!(tag_names, vec!["async".to_string(), "orm".to_string()]);
@@ -187,8 +187,8 @@ async fn test_sqlite_prefetch_related_many_to_many() {
 fn user(email: &str) -> TestUser {
     TestUser {
         id: FieldUuid(Uuid::new_v4()),
-        email: FieldEmail(email.to_string()),
-        name: FieldVarchar("Test User".to_string()),
+        email: FieldEmail::new(email.to_string()).unwrap(),
+        name: FieldVarchar::new("Test User".to_string()).unwrap(),
         active: FieldBool(true),
         score: None,
     }
@@ -216,7 +216,7 @@ async fn test_sqlite_select_and_prefetch_related() {
         let post = TestPost {
             id: FieldUuid(Uuid::new_v4()),
             author_id: ForeignKey::new(alice.id.0),
-            title: FieldVarchar(title.to_string()),
+            title: FieldVarchar::new(title.to_string()).unwrap(),
         };
         insert(&pool, post).await.unwrap();
     }
@@ -230,7 +230,7 @@ async fn test_sqlite_select_and_prefetch_related() {
     assert!(plan.contains("SCAN") || plan.contains("SEARCH"), "{plan}");
     let posts = q.all().await.unwrap();
     assert_eq!(posts.len(), 1);
-    assert_eq!(posts[0].title.0, "second");
+    assert_eq!(posts[0].title.as_str(), "second");
     assert_eq!(posts[0].related::<TestUser>().email, alice.email);
 
     let users = TestUser::filter(&pool)
@@ -278,9 +278,12 @@ async fn test_sqlite_update() {
     let mut u = user("update@sqlite.com");
     insert(&pool, u.clone()).await.unwrap();
 
-    u.name = FieldVarchar("Updated".to_string());
+    u.name = FieldVarchar::new("Updated".to_string()).unwrap();
     let updated = update(&pool, u.clone()).await.expect("update failed");
-    assert_eq!(updated.name, FieldVarchar("Updated".to_string()));
+    assert_eq!(
+        updated.name,
+        FieldVarchar::new("Updated".to_string()).unwrap()
+    );
 }
 
 #[tokio::test]
@@ -321,12 +324,12 @@ async fn test_sqlite_filter_eq() {
     assert!(
         results
             .iter()
-            .any(|u| u.email == FieldEmail("active@sqlite.com".to_string()))
+            .any(|u| u.email == FieldEmail::new("active@sqlite.com".to_string()).unwrap())
     );
     assert!(
         !results
             .iter()
-            .any(|u| u.email == FieldEmail("inactive@sqlite.com".to_string()))
+            .any(|u| u.email == FieldEmail::new("inactive@sqlite.com".to_string()).unwrap())
     );
 }
 
@@ -351,10 +354,7 @@ async fn test_sqlite_subqueries() {
         .await
         .unwrap();
     assert_eq!(
-        active
-            .iter()
-            .map(|u| u.email.0.as_str())
-            .collect::<Vec<_>>(),
+        active.iter().map(|u| u.email.as_str()).collect::<Vec<_>>(),
         ["a@sqlite.com", "b@sqlite.com"]
     );
 
@@ -367,7 +367,7 @@ async fn test_sqlite_subqueries() {
     assert_eq!(
         inactive
             .iter()
-            .map(|u| u.email.0.as_str())
+            .map(|u| u.email.as_str())
             .collect::<Vec<_>>(),
         ["b@sqlite.com"]
     );
@@ -641,7 +641,7 @@ async fn setup_article(pool: &SqlitePool) {
 fn article_sqlite(title: &str, metadata: &str) -> TestArticleSqlite {
     TestArticleSqlite {
         id: FieldUuid(uuid::Uuid::new_v4()),
-        title: FieldVarchar(title.to_string()),
+        title: FieldVarchar::new(title.to_string()).unwrap(),
         metadata: FieldText(metadata.to_string()),
     }
 }
@@ -669,7 +669,7 @@ async fn test_sqlite_json_extract_eq() {
         .expect("json_extract_eq failed");
 
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].title.0, "Published");
+    assert_eq!(results[0].title.as_str(), "Published");
 }
 
 #[tokio::test]
@@ -698,7 +698,7 @@ async fn test_sqlite_json_extract_like() {
         .expect("json_extract_like failed");
 
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].title.0, "Rust ORM");
+    assert_eq!(results[0].title.as_str(), "Rust ORM");
 }
 
 #[tokio::test]
@@ -721,7 +721,7 @@ async fn test_sqlite_json_extract_exists() {
         .expect("json_extract_exists failed");
 
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].title.0, "With views");
+    assert_eq!(results[0].title.as_str(), "With views");
 }
 
 #[tokio::test]
@@ -764,7 +764,10 @@ async fn test_sqlite_typed_columns() {
         .all()
         .await
         .unwrap();
-    assert_eq!(desc[0].email, FieldEmail("b@typed.com".to_string()));
+    assert_eq!(
+        desc[0].email,
+        FieldEmail::new("b@typed.com".to_string()).unwrap()
+    );
 
     let sum = TestUser::filter(&pool).sum(TestUser::SCORE).await.unwrap();
     assert_eq!(sum, Some(3.0));
@@ -868,14 +871,14 @@ async fn test_sqlite_implicit_pk_uuid() {
     let id = FieldUuid(Uuid::new_v4());
     let row = ImplicitUuid {
         id: id.clone(),
-        title: FieldVarchar("hello".to_string()),
+        title: FieldVarchar::new("hello".to_string()).unwrap(),
     };
     insert(&pool, row).await.unwrap();
     let got = get::<_, ImplicitUuid>(&pool, &id.to_sql_value())
         .await
         .unwrap()
         .expect("row not found");
-    assert_eq!(got.title.0, "hello");
+    assert_eq!(got.title.as_str(), "hello");
 }
 
 #[tokio::test]
@@ -974,7 +977,7 @@ async fn test_sqlite_select_as_partial() {
     ] {
         let person = TestPartialPerson {
             id: FieldUuid(Uuid::new_v4()),
-            name: FieldVarchar(name.to_string()),
+            name: FieldVarchar::new(name.to_string()).unwrap(),
             age: FieldInt(age),
             nick: nick.map(|n| FieldText(n.to_string())),
         };
@@ -993,11 +996,11 @@ async fn test_sqlite_select_as_partial() {
         rows,
         vec![
             PersonLite {
-                name: FieldVarchar("Ann".to_string()),
+                name: FieldVarchar::new("Ann".to_string()).unwrap(),
                 nick: Some(FieldText("annie".to_string())),
             },
             PersonLite {
-                name: FieldVarchar("Bob".to_string()),
+                name: FieldVarchar::new("Bob".to_string()).unwrap(),
                 nick: None,
             },
         ]
@@ -1009,7 +1012,10 @@ async fn test_sqlite_select_as_partial() {
         .one()
         .await
         .unwrap();
-    assert_eq!(one.unwrap().name, FieldVarchar("Cleo".to_string()));
+    assert_eq!(
+        one.unwrap().name,
+        FieldVarchar::new("Cleo".to_string()).unwrap()
+    );
 
     let none = TestPartialPerson::filter(&pool)
         .eq(TestPartialPerson::AGE, 99)

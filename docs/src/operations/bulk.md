@@ -10,8 +10,8 @@ Insert multiple rows in one query. Automatically chunks to stay within database 
 let users: Vec<User> = (0..1000)
     .map(|i| User {
         id: FieldUuid(uuid::Uuid::new_v4()),
-        email: FieldEmail(format!("user{}@example.com", i)),
-        name: FieldVarchar(format!("User {}", i)),
+        email: FieldEmail::new(format!("user{}@example.com", i))?,
+        name: FieldVarchar::new(format!("User {}", i))?,
         active: FieldBool(true),
         created_at: FieldDateTime(chrono::Utc::now()),
     })

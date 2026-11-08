@@ -135,7 +135,7 @@ async fn teardown(pool: &PgPool) {
 fn article(title: &str, content: &str, metadata: serde_json::Value) -> TestArticle {
     TestArticle {
         id: FieldUuid(Uuid::new_v4()),
-        title: FieldVarchar(title.to_string()),
+        title: FieldVarchar::new(title.to_string()).unwrap(),
         content: FieldText(content.to_string()),
         metadata: FieldJson(metadata),
     }
@@ -192,21 +192,21 @@ async fn test_prefetch_related_many_to_many() {
 
     let b1 = TestBlog {
         id: FieldUuid(Uuid::new_v4()),
-        title: FieldVarchar("rust".to_string()),
+        title: FieldVarchar::new("rust".to_string()).unwrap(),
         tags: ManyToMany::empty(),
     };
     let b2 = TestBlog {
         id: FieldUuid(Uuid::new_v4()),
-        title: FieldVarchar("empty".to_string()),
+        title: FieldVarchar::new("empty".to_string()).unwrap(),
         tags: ManyToMany::empty(),
     };
     let t1 = TestTag {
         id: FieldUuid(Uuid::new_v4()),
-        name: FieldVarchar("orm".to_string()),
+        name: FieldVarchar::new("orm".to_string()).unwrap(),
     };
     let t2 = TestTag {
         id: FieldUuid(Uuid::new_v4()),
-        name: FieldVarchar("async".to_string()),
+        name: FieldVarchar::new("async".to_string()).unwrap(),
     };
 
     insert(&pool, b1.clone()).await.unwrap();
@@ -235,7 +235,7 @@ async fn test_prefetch_related_many_to_many() {
     let mut tag_names: Vec<String> = b1_blog
         .prefetched::<TestTag>()
         .iter()
-        .map(|t| t.name.0.clone())
+        .map(|t| t.name.to_string())
         .collect();
     tag_names.sort();
     assert_eq!(tag_names, vec!["async".to_string(), "orm".to_string()]);
@@ -288,8 +288,8 @@ async fn test_prefetch_related_many_to_many() {
 fn user(email: &str) -> TestUser {
     TestUser {
         id: FieldUuid(Uuid::new_v4()),
-        email: FieldEmail(email.to_string()),
-        name: FieldVarchar("Test User".to_string()),
+        email: FieldEmail::new(email.to_string()).unwrap(),
+        name: FieldVarchar::new("Test User".to_string()).unwrap(),
         active: FieldBool(true),
         score: None,
     }
@@ -328,7 +328,7 @@ async fn test_select_and_prefetch_related() {
         let post = TestPost {
             id: FieldUuid(Uuid::new_v4()),
             author_id: ForeignKey::new(alice.id.0),
-            title: FieldVarchar(title.to_string()),
+            title: FieldVarchar::new(title.to_string()).unwrap(),
             published: FieldBool(true),
         };
         insert(&pool, post).await.unwrap();
@@ -372,7 +372,7 @@ async fn test_select_and_prefetch_related() {
     assert!(plan.contains("actual time"), "{plan}");
     let posts = q.all().await.unwrap();
     assert_eq!(posts.len(), 1);
-    assert_eq!(posts[0].title.0, "second");
+    assert_eq!(posts[0].title.as_str(), "second");
     assert_eq!(posts[0].related::<TestUser>().email, alice.email);
 
     // EXISTS / NOT EXISTS on the reverse FK.
@@ -397,7 +397,7 @@ async fn test_select_and_prefetch_related() {
         .eq("title", "nope".to_string())
         .or()
         .in_subquery(TestPost::AUTHOR_ID, TestUser::ID, |q| {
-            q.eq(TestUser::EMAIL, alice.email.0.clone())
+            q.eq(TestUser::EMAIL, alice.email.to_string())
         })
         .eq("published", true)
         .all()
@@ -417,9 +417,12 @@ async fn test_update() {
     let mut u = user("update@test.com");
     insert(&pool, u.clone()).await.unwrap();
 
-    u.name = FieldVarchar("Updated".to_string());
+    u.name = FieldVarchar::new("Updated".to_string()).unwrap();
     let updated = update(&pool, u.clone()).await.expect("update failed");
-    assert_eq!(updated.name, FieldVarchar("Updated".to_string()));
+    assert_eq!(
+        updated.name,
+        FieldVarchar::new("Updated".to_string()).unwrap()
+    );
 
     teardown(&pool).await;
 }
@@ -491,12 +494,12 @@ async fn test_filter_eq() {
     assert!(
         results
             .iter()
-            .any(|u| u.email == FieldEmail("active@test.com".to_string()))
+            .any(|u| u.email == FieldEmail::new("active@test.com".to_string()).unwrap())
     );
     assert!(
         !results
             .iter()
-            .any(|u| u.email == FieldEmail("inactive@test.com".to_string()))
+            .any(|u| u.email == FieldEmail::new("inactive@test.com".to_string()).unwrap())
     );
 
     teardown(&pool).await;
@@ -541,7 +544,10 @@ async fn test_order_and_limit() {
         .expect("order+limit failed");
 
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].email, FieldEmail("a@test.com".to_string()));
+    assert_eq!(
+        results[0].email,
+        FieldEmail::new("a@test.com".to_string()).unwrap()
+    );
 
     teardown(&pool).await;
 }
@@ -593,8 +599,8 @@ async fn test_bulk_create_unnest_large_with_nulls() {
         .into_iter()
         .map(|r| r.inner)
         .collect();
-    fetched.sort_by(|a, b| a.email.0.cmp(&b.email.0));
-    users.sort_by(|a, b| a.email.0.cmp(&b.email.0));
+    fetched.sort_by(|a, b| a.email.as_str().cmp(&b.email.as_str()));
+    users.sort_by(|a, b| a.email.as_str().cmp(&b.email.as_str()));
     assert_eq!(fetched, users);
 
     teardown(&pool).await;
@@ -612,7 +618,7 @@ async fn test_bulk_update() {
     bulk_create(&pool, &users).await.unwrap();
 
     for u in &mut users {
-        u.name = FieldVarchar("Updated".to_string());
+        u.name = FieldVarchar::new("Updated".to_string()).unwrap();
     }
     let n = bulk_update(&pool, &users, &["name"])
         .await
@@ -858,7 +864,7 @@ async fn test_pg_fts() {
         .expect("fts failed");
 
     assert_eq!(results.len(), 1);
-    assert!(results[0].title.0.contains("Rust"));
+    assert!(results[0].title.as_str().contains("Rust"));
 
     teardown(&pool).await;
 }
@@ -932,7 +938,7 @@ async fn test_pg_json_contains() {
         .expect("json_contains failed");
 
     assert_eq!(results.len(), 1);
-    assert!(results[0].title.0.contains("Published"));
+    assert!(results[0].title.as_str().contains("Published"));
 
     teardown(&pool).await;
 }
@@ -967,7 +973,7 @@ async fn test_pg_json_has_key() {
         .expect("json_has_key failed");
 
     assert_eq!(results.len(), 1);
-    assert!(results[0].title.0.contains("With views"));
+    assert!(results[0].title.as_str().contains("With views"));
 
     teardown(&pool).await;
 }
@@ -1002,7 +1008,7 @@ async fn test_pg_json_field_eq() {
         .expect("json_field_eq failed");
 
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].title.0, "Active");
+    assert_eq!(results[0].title.as_str(), "Active");
 
     teardown(&pool).await;
 }
@@ -1316,7 +1322,7 @@ async fn test_pg_select_as_partial() {
     ] {
         let person = TestPartialPerson {
             id: FieldUuid(Uuid::new_v4()),
-            name: FieldVarchar(name.to_string()),
+            name: FieldVarchar::new(name.to_string()).unwrap(),
             age: FieldInt(age),
             nick: nick.map(|n| FieldText(n.to_string())),
         };
@@ -1335,11 +1341,11 @@ async fn test_pg_select_as_partial() {
         rows,
         vec![
             PersonLite {
-                name: FieldVarchar("Ann".to_string()),
+                name: FieldVarchar::new("Ann".to_string()).unwrap(),
                 nick: Some(FieldText("annie".to_string())),
             },
             PersonLite {
-                name: FieldVarchar("Bob".to_string()),
+                name: FieldVarchar::new("Bob".to_string()).unwrap(),
                 nick: None,
             },
         ]
@@ -1351,7 +1357,10 @@ async fn test_pg_select_as_partial() {
         .one()
         .await
         .unwrap();
-    assert_eq!(one.unwrap().name, FieldVarchar("Cleo".to_string()));
+    assert_eq!(
+        one.unwrap().name,
+        FieldVarchar::new("Cleo".to_string()).unwrap()
+    );
 
     let none = TestPartialPerson::filter(&pool)
         .eq(TestPartialPerson::AGE, 99)

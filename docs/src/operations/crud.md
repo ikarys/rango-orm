@@ -7,8 +7,8 @@ use rango::prelude::*;
 
 let user = User {
     id: FieldUuid(uuid::Uuid::new_v4()),
-    email: FieldEmail("alice@example.com".into()),
-    name: FieldVarchar("Alice".into()),
+    email: FieldEmail::new("alice@example.com".into())?,
+    name: FieldVarchar::new("Alice".into())?,
     active: FieldBool(true),
     created_at: FieldDateTime(chrono::Utc::now()),
 };
@@ -32,7 +32,7 @@ match user {
 
 ```rust
 let mut user = get::<_, User>(&pool, &id).await?.unwrap();
-user.name = FieldVarchar("Alice Updated".into());
+user.name = FieldVarchar::new("Alice Updated".into())?;
 let updated = update(&pool, user).await?;
 ```
 

@@ -473,8 +473,8 @@ pub(crate) fn field_type_to_getter(
         "FieldFloat" => quote! { row.get_f32(#col).map(#core::FieldFloat)? },
         "FieldDouble" => quote! { row.get_f64(#col).map(#core::FieldDouble)? },
         "FieldText" => quote! { row.get_string(#col).map(#core::FieldText)? },
-        "FieldEmail" => quote! { row.get_string(#col).map(#core::FieldEmail)? },
-        "FieldUrl" => quote! { row.get_string(#col).map(#core::FieldUrl)? },
+        "FieldEmail" => quote! { row.get_string(#col).map(#core::FieldEmail::from_db)? },
+        "FieldUrl" => quote! { row.get_string(#col).map(#core::FieldUrl::from_db)? },
         "FieldBytes" => quote! { row.get_bytes(#col).map(#core::FieldBytes)? },
         "FieldUuid" => quote! { row.get_uuid(#col).map(#core::FieldUuid)? },
         "FieldDateTime" => quote! { row.get_datetime(#col).map(#core::FieldDateTime)? },
@@ -489,7 +489,7 @@ pub(crate) fn field_type_to_getter(
             let (min, max) = parse_two_generics(s, "FieldVarchar");
             let min_lit = proc_macro2::Literal::usize_unsuffixed(min);
             let max_lit = proc_macro2::Literal::usize_unsuffixed(max);
-            quote! { row.get_string(#col).map(|s| #core::FieldVarchar::<#min_lit, #max_lit>(s))? }
+            quote! { row.get_string(#col).map(#core::FieldVarchar::<#min_lit, #max_lit>::from_db)? }
         }
         s if s.starts_with("FieldPassword<") => {
             let (min, max) = parse_two_generics(s, "FieldPassword");
@@ -507,7 +507,7 @@ pub(crate) fn field_type_to_getter(
             let (min, max) = parse_two_generics_i64(s, "FieldRange");
             let min_lit = proc_macro2::Literal::i64_unsuffixed(min);
             let max_lit = proc_macro2::Literal::i64_unsuffixed(max);
-            quote! { row.get_i64(#col).map(|v| #core::FieldRange::<#min_lit, #max_lit>(v))? }
+            quote! { row.get_i64(#col).map(#core::FieldRange::<#min_lit, #max_lit>::from_db)? }
         }
         _ => quote! { compile_error!("Unknown field type in FromRow") },
     };
@@ -530,7 +530,7 @@ pub(crate) fn field_type_to_getter(
                 quote! { if row.is_null(#col) { None } else { Some(row.get_string(#col).map(#core::FieldText)?) } }
             }
             "FieldEmail" => {
-                quote! { if row.is_null(#col) { None } else { Some(row.get_string(#col).map(#core::FieldEmail)?) } }
+                quote! { if row.is_null(#col) { None } else { Some(row.get_string(#col).map(#core::FieldEmail::from_db)?) } }
             }
             "FieldUuid" => {
                 quote! { if row.is_null(#col) { None } else { Some(row.get_uuid(#col).map(#core::FieldUuid)?) } }
@@ -548,7 +548,7 @@ pub(crate) fn field_type_to_getter(
                 let (min, max) = parse_two_generics(s, "FieldVarchar");
                 let min_lit = proc_macro2::Literal::usize_unsuffixed(min);
                 let max_lit = proc_macro2::Literal::usize_unsuffixed(max);
-                quote! { if row.is_null(#col) { None } else { Some(row.get_string(#col).map(|s| #core::FieldVarchar::<#min_lit, #max_lit>(s))?) } }
+                quote! { if row.is_null(#col) { None } else { Some(row.get_string(#col).map(#core::FieldVarchar::<#min_lit, #max_lit>::from_db)?) } }
             }
             _ => quote! { if row.is_null(#col) { None } else { Some(#getter) } },
         }

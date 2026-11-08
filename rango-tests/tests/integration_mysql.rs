@@ -124,21 +124,21 @@ async fn test_mysql_prefetch_related_many_to_many() {
 
     let b1 = TestBlog {
         id: FieldUuid(Uuid::new_v4()),
-        title: FieldVarchar("rust".to_string()),
+        title: FieldVarchar::new("rust".to_string()).unwrap(),
         tags: ManyToMany::empty(),
     };
     let b2 = TestBlog {
         id: FieldUuid(Uuid::new_v4()),
-        title: FieldVarchar("empty".to_string()),
+        title: FieldVarchar::new("empty".to_string()).unwrap(),
         tags: ManyToMany::empty(),
     };
     let t1 = TestTag {
         id: FieldUuid(Uuid::new_v4()),
-        name: FieldVarchar("orm".to_string()),
+        name: FieldVarchar::new("orm".to_string()).unwrap(),
     };
     let t2 = TestTag {
         id: FieldUuid(Uuid::new_v4()),
-        name: FieldVarchar("async".to_string()),
+        name: FieldVarchar::new("async".to_string()).unwrap(),
     };
 
     insert(&pool, b1.clone()).await.unwrap();
@@ -167,7 +167,7 @@ async fn test_mysql_prefetch_related_many_to_many() {
     let mut tag_names: Vec<String> = b1_blog
         .prefetched::<TestTag>()
         .iter()
-        .map(|t| t.name.0.clone())
+        .map(|t| t.name.to_string())
         .collect();
     tag_names.sort();
     assert_eq!(tag_names, vec!["async".to_string(), "orm".to_string()]);
@@ -220,8 +220,8 @@ async fn test_mysql_prefetch_related_many_to_many() {
 fn user(email: &str) -> TestUser {
     TestUser {
         id: FieldUuid(Uuid::new_v4()),
-        email: FieldEmail(email.to_string()),
-        name: FieldVarchar("Test User".to_string()),
+        email: FieldEmail::new(email.to_string()).unwrap(),
+        name: FieldVarchar::new("Test User".to_string()).unwrap(),
         active: FieldBool(true),
         score: None,
     }
@@ -250,7 +250,7 @@ async fn test_mysql_select_and_prefetch_related() {
         let post = TestPost {
             id: FieldUuid(Uuid::new_v4()),
             author: ForeignKey::new(alice.id.0),
-            title: FieldVarchar(title.to_string()),
+            title: FieldVarchar::new(title.to_string()).unwrap(),
         };
         insert(&pool, post).await.unwrap();
     }
@@ -268,7 +268,7 @@ async fn test_mysql_select_and_prefetch_related() {
     );
     let posts = q.all().await.unwrap();
     assert_eq!(posts.len(), 1);
-    assert_eq!(posts[0].title.0, "second");
+    assert_eq!(posts[0].title.as_str(), "second");
     assert_eq!(posts[0].related::<TestUser>().email, alice.email);
 
     let users = TestUser::filter(&pool)
@@ -316,9 +316,12 @@ async fn test_mysql_update() {
     let mut u = user("update@mysql.com");
     insert(&pool, u.clone()).await.unwrap();
 
-    u.name = FieldVarchar("Updated".to_string());
+    u.name = FieldVarchar::new("Updated".to_string()).unwrap();
     let updated = update(&pool, u.clone()).await.expect("update failed");
-    assert_eq!(updated.name, FieldVarchar("Updated".to_string()));
+    assert_eq!(
+        updated.name,
+        FieldVarchar::new("Updated".to_string()).unwrap()
+    );
 }
 
 #[tokio::test]
@@ -359,12 +362,12 @@ async fn test_mysql_filter_eq() {
     assert!(
         results
             .iter()
-            .any(|u| u.email == FieldEmail("active@mysql.com".to_string()))
+            .any(|u| u.email == FieldEmail::new("active@mysql.com".to_string()).unwrap())
     );
     assert!(
         !results
             .iter()
-            .any(|u| u.email == FieldEmail("inactive@mysql.com".to_string()))
+            .any(|u| u.email == FieldEmail::new("inactive@mysql.com".to_string()).unwrap())
     );
 }
 
@@ -389,10 +392,7 @@ async fn test_mysql_subqueries() {
         .await
         .unwrap();
     assert_eq!(
-        active
-            .iter()
-            .map(|u| u.email.0.as_str())
-            .collect::<Vec<_>>(),
+        active.iter().map(|u| u.email.as_str()).collect::<Vec<_>>(),
         ["a@mysql.com", "b@mysql.com"]
     );
 
@@ -405,7 +405,7 @@ async fn test_mysql_subqueries() {
     assert_eq!(
         inactive
             .iter()
-            .map(|u| u.email.0.as_str())
+            .map(|u| u.email.as_str())
             .collect::<Vec<_>>(),
         ["b@mysql.com"]
     );
@@ -739,7 +739,10 @@ async fn test_mysql_typed_columns() {
         .all()
         .await
         .unwrap();
-    assert_eq!(desc[0].email, FieldEmail("b@typed.com".to_string()));
+    assert_eq!(
+        desc[0].email,
+        FieldEmail::new("b@typed.com".to_string()).unwrap()
+    );
 
     let sum = TestUser::filter(&pool).sum(TestUser::SCORE).await.unwrap();
     assert_eq!(sum, Some(3.0));
@@ -836,7 +839,7 @@ async fn test_mysql_like_is_case_sensitive_ilike_is_not() {
     let pool = pool().await;
     setup(&pool).await;
     let mut u = user("Alice@Example.com");
-    u.name = FieldVarchar("Alice".into());
+    u.name = FieldVarchar::new("Alice").unwrap();
     insert(&pool, u).await.unwrap();
 
     let n = TestUser::filter(&pool)
@@ -896,14 +899,14 @@ async fn test_mysql_fk_cascade_and_violation() {
     let post = TestPost {
         id: FieldUuid(Uuid::new_v4()),
         author: ForeignKey::new(u.id.0),
-        title: FieldVarchar("hello".into()),
+        title: FieldVarchar::new("hello").unwrap(),
     };
     insert(&pool, post).await.unwrap();
 
     let orphan = TestPost {
         id: FieldUuid(Uuid::new_v4()),
         author: ForeignKey::new(Uuid::new_v4()),
-        title: FieldVarchar("orphan".into()),
+        title: FieldVarchar::new("orphan").unwrap(),
     };
     let err = insert(&pool, orphan).await.unwrap_err();
     assert!(
@@ -946,7 +949,7 @@ async fn test_mysql_auto_pk_is_generated() {
     .unwrap();
     let new = |l: &str| TestCounter {
         id: FieldAutoBigInt::default(),
-        label: FieldVarchar(l.into()),
+        label: FieldVarchar::new(l).unwrap(),
     };
 
     let a = insert(&pool, new("a")).await.unwrap();
@@ -964,7 +967,7 @@ async fn test_mysql_auto_pk_is_generated() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(e.label.0, "e");
+    assert_eq!(e.label.as_str(), "e");
 }
 
 #[tokio::test]
@@ -1042,7 +1045,7 @@ async fn test_mysql_select_as_partial() {
     ] {
         let person = TestPartialPerson {
             id: FieldUuid(Uuid::new_v4()),
-            name: FieldVarchar(name.to_string()),
+            name: FieldVarchar::new(name.to_string()).unwrap(),
             age: FieldInt(age),
             nick: nick.map(|n| FieldText(n.to_string())),
         };
@@ -1061,11 +1064,11 @@ async fn test_mysql_select_as_partial() {
         rows,
         vec![
             PersonLite {
-                name: FieldVarchar("Ann".to_string()),
+                name: FieldVarchar::new("Ann".to_string()).unwrap(),
                 nick: Some(FieldText("annie".to_string())),
             },
             PersonLite {
-                name: FieldVarchar("Bob".to_string()),
+                name: FieldVarchar::new("Bob".to_string()).unwrap(),
                 nick: None,
             },
         ]
@@ -1077,7 +1080,10 @@ async fn test_mysql_select_as_partial() {
         .one()
         .await
         .unwrap();
-    assert_eq!(one.unwrap().name, FieldVarchar("Cleo".to_string()));
+    assert_eq!(
+        one.unwrap().name,
+        FieldVarchar::new("Cleo".to_string()).unwrap()
+    );
 
     let none = TestPartialPerson::filter(&pool)
         .eq(TestPartialPerson::AGE, 99)
