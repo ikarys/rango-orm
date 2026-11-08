@@ -255,7 +255,7 @@ async fn test_mysql_select_and_prefetch_related() {
         insert(&pool, post).await.unwrap();
     }
 
-    let q = TestPost::filter(&pool)
+    let mut q = TestPost::filter(&pool)
         .select_related(TestPost::AUTHOR)
         .order_by("-title")
         .limit(1);
@@ -1192,4 +1192,393 @@ async fn test_keyset_after_does_not_duplicate_order_by() {
     assert_eq!(sql.matches("ORDER BY").count(), 1, "{sql}");
     let order = sql.split("ORDER BY").nth(1).unwrap();
     assert_eq!(order.matches("id").count(), 1, "{sql}");
+}
+
+// ── Model hooks ───────────────────────────────────────────────────────────────
+
+static HOOK_LOG: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+fn hook_log(event: &str, name: &str) {
+    HOOK_LOG.lock().unwrap().push(format!("{event}:{name}"));
+}
+
+fn hook_events(name: &str) -> Vec<String> {
+    let suffix = format!(":{name}");
+    let log = HOOK_LOG.lock().unwrap();
+    log.iter()
+        .filter(|e| e.ends_with(&suffix))
+        .map(|e| e.trim_end_matches(&suffix).to_string())
+        .collect()
+}
+
+#[derive(Model, Debug, Clone)]
+#[model(table = "test_hooked", hooks)]
+struct Hooked {
+    id: FieldUuid,
+    name: FieldVarchar<1, 100>,
+    slug: FieldVarchar<0, 100>,
+}
+
+impl ModelHooks for Hooked {
+    fn before_save(&mut self) -> BoxFuture<'_> {
+        Box::pin(async move {
+            self.slug = FieldVarchar::new(self.name.as_str().to_lowercase()).unwrap();
+            hook_log("before_save", self.name.as_str());
+            Ok(())
+        })
+    }
+    fn after_save(&self) -> BoxFuture<'_> {
+        Box::pin(async move {
+            hook_log("after_save", self.name.as_str());
+            if self.name.as_str().starts_with("fail_after") {
+                return Err("after_save refused".into());
+            }
+            Ok(())
+        })
+    }
+    fn before_create(&mut self) -> BoxFuture<'_> {
+        Box::pin(async move {
+            hook_log("before_create", self.name.as_str());
+            if self.name.as_str().starts_with("fail_create") {
+                return Err("before_create refused".into());
+            }
+            Ok(())
+        })
+    }
+    fn after_create(&self) -> BoxFuture<'_> {
+        Box::pin(async move {
+            hook_log("after_create", self.name.as_str());
+            Ok(())
+        })
+    }
+    fn before_update(&mut self) -> BoxFuture<'_> {
+        Box::pin(async move {
+            hook_log("before_update", self.name.as_str());
+            Ok(())
+        })
+    }
+    fn after_update(&self) -> BoxFuture<'_> {
+        Box::pin(async move {
+            hook_log("after_update", self.name.as_str());
+            Ok(())
+        })
+    }
+    fn before_delete(&self) -> BoxFuture<'_> {
+        Box::pin(async move {
+            hook_log("before_delete", self.name.as_str());
+            Ok(())
+        })
+    }
+    fn after_delete(&self) -> BoxFuture<'_> {
+        Box::pin(async move {
+            hook_log("after_delete", self.name.as_str());
+            Ok(())
+        })
+    }
+}
+
+fn hooked(name: &str) -> Hooked {
+    Hooked {
+        id: FieldUuid(Uuid::new_v4()),
+        name: FieldVarchar::new(name.to_string()).unwrap(),
+        slug: FieldVarchar::new(String::new()).unwrap(),
+    }
+}
+
+async fn hooked_setup(pool: &MySqlPool) {
+    sqlx::query("DROP TABLE IF EXISTS `test_hooked`")
+        .execute(pool)
+        .await
+        .expect("setup: drop hooked table");
+    sqlx::query(
+        "CREATE TABLE `test_hooked` (
+            `id`   BINARY(16) PRIMARY KEY,
+            `name` VARCHAR(100) NOT NULL UNIQUE,
+            `slug` VARCHAR(100) NOT NULL
+        ) ENGINE=InnoDB",
+    )
+    .execute(pool)
+    .await
+    .expect("setup: create hooked table");
+}
+
+async fn hooked_count(pool: &MySqlPool, name: &str) -> usize {
+    Hooked::filter(pool)
+        .eq("name", name)
+        .all()
+        .await
+        .unwrap()
+        .len()
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-mysql"), ignore)]
+async fn test_hooks_insert_update_delete() {
+    let pool = pool().await;
+    hooked_setup(&pool).await;
+
+    let saved = insert(&pool, hooked("Ada Lovelace")).await.unwrap();
+    // before_save mutated the model and the mutation is what was written
+    assert_eq!(saved.slug.as_str(), "ada lovelace");
+    let stored = get::<_, Hooked>(&pool, &saved.id.to_sql_value())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(stored.slug.as_str(), "ada lovelace");
+    assert_eq!(
+        hook_events("Ada Lovelace"),
+        ["before_save", "before_create", "after_create", "after_save"]
+    );
+
+    // update: save + update hooks, never create hooks
+    let mut changed = saved.clone();
+    changed.slug = FieldVarchar::new("tampered").unwrap();
+    let updated = update(&pool, changed).await.unwrap();
+    assert_eq!(updated.slug.as_str(), "ada lovelace");
+    assert_eq!(
+        hook_events("Ada Lovelace")[4..],
+        ["before_save", "before_update", "after_update", "after_save"]
+    );
+
+    delete(&pool, &updated).await.unwrap();
+    assert_eq!(hooked_count(&pool, "Ada Lovelace").await, 0);
+    assert_eq!(
+        hook_events("Ada Lovelace")[8..],
+        ["before_delete", "after_delete"]
+    );
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-mysql"), ignore)]
+async fn test_hooks_before_error_cancels_insert() {
+    let pool = pool().await;
+    hooked_setup(&pool).await;
+
+    let err = insert(&pool, hooked("fail_create_1")).await.unwrap_err();
+    assert!(matches!(err, Error::Hook(_)), "got {err:?}");
+    assert_eq!(err.to_string(), "hook failed: before_create refused");
+    assert_eq!(hooked_count(&pool, "fail_create_1").await, 0);
+    assert_eq!(
+        hook_events("fail_create_1"),
+        ["before_save", "before_create"]
+    );
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-mysql"), ignore)]
+async fn test_hooks_after_error_rolls_back_in_transaction() {
+    let pool = pool().await;
+    hooked_setup(&pool).await;
+
+    let mut tx = pool.begin().await.unwrap();
+    let err = insert(&mut *tx, hooked("fail_after_tx")).await.unwrap_err();
+    assert!(matches!(err, Error::Hook(_)), "got {err:?}");
+    tx.rollback().await.unwrap();
+    assert_eq!(hooked_count(&pool, "fail_after_tx").await, 0);
+
+    // With a plain pool the statement is already committed.
+    let err = insert(&pool, hooked("fail_after_pool")).await.unwrap_err();
+    assert!(matches!(err, Error::Hook(_)), "got {err:?}");
+    assert_eq!(hooked_count(&pool, "fail_after_pool").await, 1);
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-mysql"), ignore)]
+async fn test_hooks_get_or_create_only_on_insert() {
+    let pool = pool().await;
+    hooked_setup(&pool).await;
+
+    let lookup = vec![("name", SqlValue::Text("goc_hooked".to_string()))];
+    let (_, created) = get_or_create(&pool, lookup.clone(), hooked("goc_hooked"))
+        .await
+        .unwrap();
+    assert!(created);
+    let after_first = hook_events("goc_hooked");
+    assert!(after_first.contains(&"after_create".to_string()));
+
+    let (_, created) = get_or_create(&pool, lookup, hooked("goc_hooked"))
+        .await
+        .unwrap();
+    assert!(!created);
+    let after_second = hook_events("goc_hooked");
+    // second call: before_* ran on the defaults, after_* did not
+    assert_eq!(after_second.len(), after_first.len() + 2);
+    assert_eq!(
+        after_second[after_first.len()..],
+        ["before_save", "before_create"]
+    );
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-mysql"), ignore)]
+async fn test_model_without_hooks_attribute_still_works() {
+    let pool = pool().await;
+    setup(&pool).await;
+    let saved = insert(&pool, user("nohooks@hooks.com")).await.unwrap();
+    delete(&pool, &saved).await.unwrap();
+}
+
+// ── Transactions everywhere: filter + M2M + bulk in one rolled-back atomic ───────
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-mysql"), ignore)]
+async fn test_mysql_filter_m2m_bulk_roll_back_in_atomic() {
+    let pool = pool().await;
+    setup(&pool).await;
+
+    for t in ["test_blog_test_tag", "test_blog", "test_tag"] {
+        sqlx::query(sqlx::AssertSqlSafe(format!("DROP TABLE IF EXISTS `{t}`")))
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+    for ddl in [
+        "CREATE TABLE `test_blog` (`id` BINARY(16) PRIMARY KEY, `title` VARCHAR(100) NOT NULL) ENGINE=InnoDB",
+        "CREATE TABLE `test_tag` (`id` BINARY(16) PRIMARY KEY, `name` VARCHAR(100) NOT NULL) ENGINE=InnoDB",
+        "CREATE TABLE `test_blog_test_tag` (`test_blog_id` BINARY(16) NOT NULL, `test_tag_id` BINARY(16) NOT NULL, PRIMARY KEY (`test_blog_id`, `test_tag_id`)) ENGINE=InnoDB",
+    ] {
+        sqlx::query(ddl).execute(&pool).await.unwrap();
+    }
+
+    let blog = TestBlog {
+        id: FieldUuid(Uuid::new_v4()),
+        title: FieldVarchar::new("tx".to_string()).unwrap(),
+        tags: ManyToMany::empty(),
+    };
+    let tag = TestTag {
+        id: FieldUuid(Uuid::new_v4()),
+        name: FieldVarchar::new("tx".to_string()).unwrap(),
+    };
+    insert(&pool, blog.clone()).await.unwrap();
+    insert(&pool, tag.clone()).await.unwrap();
+    insert(&pool, user("keep@tx.com")).await.unwrap();
+
+    let (b, t) = (blog.clone(), tag.clone());
+    let err = atomic(&pool, move |tx| {
+        Box::pin(async move {
+            bulk_create(&mut **tx, &[user("a@tx.com"), user("b@tx.com")]).await?;
+            // Reads see the transaction's own writes.
+            assert_eq!(TestUser::filter(&mut **tx).count().await?, 3);
+            M2M::<TestBlog, TestTag>::add(&mut **tx, &b, &t).await?;
+            assert!(M2M::<TestBlog, TestTag>::exists(&mut **tx, &b, &t).await?);
+            M2M::<TestBlog, TestTag>::set(&mut **tx, &b, &[]).await?;
+            M2M::<TestBlog, TestTag>::add(&mut **tx, &b, &t).await?;
+            Err::<(), Error>(Error::abort("roll back"))
+        })
+    })
+    .await
+    .unwrap_err();
+    assert!(matches!(err, Error::Aborted(_)), "{err:?}");
+
+    assert_eq!(TestUser::filter(&pool).count().await.unwrap(), 1);
+    assert!(
+        !M2M::<TestBlog, TestTag>::exists(&pool, &blog, &tag)
+            .await
+            .unwrap()
+    );
+
+    // Same calls commit with the transaction.
+    atomic(&pool, move |tx| {
+        Box::pin(async move {
+            bulk_create(&mut **tx, &[user("c@tx.com")]).await?;
+            M2M::<TestBlog, TestTag>::add(&mut **tx, &blog, &tag).await?;
+            Ok(())
+        })
+    })
+    .await
+    .unwrap();
+    assert_eq!(TestUser::filter(&pool).count().await.unwrap(), 2);
+}
+
+// ── bulk_update / bulk_upsert / update_or_create ─────────────────────────────────
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-mysql"), ignore)]
+async fn test_mysql_bulk_update_bulk_upsert_update_or_create() {
+    let pool = pool().await;
+    setup(&pool).await;
+
+    let mut users: Vec<TestUser> = (0..3).map(|i| user(&format!("bu{i}@t.com"))).collect();
+    bulk_create(&pool, &users).await.unwrap();
+    for (i, u) in users.iter_mut().enumerate() {
+        u.name = FieldVarchar::new(format!("renamed{i}")).unwrap();
+        u.active = FieldBool(false);
+    }
+    assert_eq!(
+        bulk_update(&pool, &users, &["name", "active"])
+            .await
+            .unwrap(),
+        3
+    );
+    let stored = get::<_, TestUser>(&pool, &users[1].id.to_sql_value())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(stored.name.as_str(), "renamed1");
+    assert!(!stored.active.0);
+    // Unknown column and PK are rejected before any SQL runs.
+    for bad in ["nope", "id"] {
+        let err = bulk_update(&pool, &users, &[bad]).await.unwrap_err();
+        assert!(matches!(err, Error::Invalid(_)), "{err:?}");
+    }
+
+    // Upsert: existing email keeps its id and takes the new name, new email is inserted.
+    let mut again = user("bu0@t.com");
+    again.name = FieldVarchar::new("upserted".to_string()).unwrap();
+    bulk_upsert(&pool, &[again, user("bu9@t.com")], &["email"])
+        .await
+        .unwrap();
+    assert_eq!(TestUser::filter(&pool).count().await.unwrap(), 4);
+    let row = TestUser::filter(&pool)
+        .eq("email", "bu0@t.com")
+        .all()
+        .await
+        .unwrap();
+    assert_eq!(row[0].id.0, users[0].id.0);
+    assert_eq!(row[0].name.as_str(), "upserted");
+
+    // update_or_create: creates, then updates the row it finds (same PK).
+    let lookup = vec![("email", SqlValue::Text("uoc@t.com".to_string()))];
+    let mut first = user("uoc@t.com");
+    first.name = FieldVarchar::new("first".to_string()).unwrap();
+    let created = update_or_create(&pool, lookup.clone(), first)
+        .await
+        .unwrap();
+    assert_eq!(created.name.as_str(), "first");
+    let mut second = user("uoc@t.com");
+    second.name = FieldVarchar::new("second".to_string()).unwrap();
+    let updated = update_or_create(&pool, lookup, second).await.unwrap();
+    assert_eq!(updated.id.0, created.id.0);
+    assert_eq!(updated.name.as_str(), "second");
+    assert_eq!(
+        TestUser::filter(&pool)
+            .eq("email", "uoc@t.com")
+            .count()
+            .await
+            .unwrap(),
+        1
+    );
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-mysql"), ignore)]
+async fn test_hooks_update_or_create() {
+    let pool = pool().await;
+    hooked_setup(&pool).await;
+
+    let lookup = vec![("name", SqlValue::Text("uoc_hooked".to_string()))];
+    update_or_create(&pool, lookup.clone(), hooked("uoc_hooked"))
+        .await
+        .unwrap();
+    assert_eq!(
+        hook_events("uoc_hooked"),
+        ["before_save", "before_create", "after_create", "after_save"]
+    );
+    update_or_create(&pool, lookup, hooked("uoc_hooked"))
+        .await
+        .unwrap();
+    assert_eq!(
+        hook_events("uoc_hooked")[4..],
+        ["before_save", "before_update", "after_update", "after_save"]
+    );
 }

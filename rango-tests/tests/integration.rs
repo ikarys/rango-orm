@@ -363,7 +363,7 @@ async fn test_select_and_prefetch_related() {
     assert_eq!(posts_of(&bob), 0);
 
     // select_related is one LEFT JOIN; ORDER BY / LIMIT apply to posts.
-    let q = TestPost::filter(&pool)
+    let mut q = TestPost::filter(&pool)
         .select_related(TestPost::AUTHOR_ID)
         .order_by("-title")
         .limit(1);
@@ -1703,4 +1703,175 @@ async fn test_keyset_after_does_not_duplicate_order_by() {
     assert_eq!(sql.matches("ORDER BY").count(), 1, "{sql}");
     let order = sql.split("ORDER BY").nth(1).unwrap();
     assert_eq!(order.matches("id").count(), 1, "{sql}");
+}
+
+// ── Transactions everywhere: filter + M2M + bulk in one rolled-back atomic ───────
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration"), ignore)]
+async fn test_pg_filter_m2m_bulk_roll_back_in_atomic() {
+    let pool = pool().await;
+    setup(&pool).await;
+
+    for t in [
+        "rango_test_blog_rango_test_tag",
+        "rango_test_blog",
+        "rango_test_tag",
+    ] {
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            r#"DROP TABLE IF EXISTS "{t}""#
+        )))
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    for ddl in [
+        r#"CREATE TABLE "rango_test_blog" ("id" UUID PRIMARY KEY, "title" VARCHAR(100) NOT NULL)"#,
+        r#"CREATE TABLE "rango_test_tag" ("id" UUID PRIMARY KEY, "name" VARCHAR(100) NOT NULL)"#,
+        r#"CREATE TABLE "rango_test_blog_rango_test_tag" ("rango_test_blog_id" UUID NOT NULL, "rango_test_tag_id" UUID NOT NULL, PRIMARY KEY ("rango_test_blog_id", "rango_test_tag_id"))"#,
+    ] {
+        sqlx::query(ddl).execute(&pool).await.unwrap();
+    }
+
+    let blog = TestBlog {
+        id: FieldUuid(Uuid::new_v4()),
+        title: FieldVarchar::new("tx".to_string()).unwrap(),
+        tags: ManyToMany::empty(),
+    };
+    let tag = TestTag {
+        id: FieldUuid(Uuid::new_v4()),
+        name: FieldVarchar::new("tx".to_string()).unwrap(),
+    };
+    insert(&pool, blog.clone()).await.unwrap();
+    insert(&pool, tag.clone()).await.unwrap();
+    insert(&pool, user("keep@tx.com")).await.unwrap();
+
+    let (b, t) = (blog.clone(), tag.clone());
+    let err = atomic(&pool, move |tx| {
+        Box::pin(async move {
+            bulk_create(&mut **tx, &[user("a@tx.com"), user("b@tx.com")]).await?;
+            // Reads see the transaction's own writes.
+            assert_eq!(TestUser::filter(&mut **tx).count().await?, 3);
+            M2M::<TestBlog, TestTag>::add(&mut **tx, &b, &t).await?;
+            assert!(M2M::<TestBlog, TestTag>::exists(&mut **tx, &b, &t).await?);
+            M2M::<TestBlog, TestTag>::set(&mut **tx, &b, &[]).await?;
+            M2M::<TestBlog, TestTag>::add(&mut **tx, &b, &t).await?;
+            Err::<(), Error>(Error::abort("roll back"))
+        })
+    })
+    .await
+    .unwrap_err();
+    assert!(matches!(err, Error::Aborted(_)), "{err:?}");
+
+    assert_eq!(TestUser::filter(&pool).count().await.unwrap(), 1);
+    assert!(
+        !M2M::<TestBlog, TestTag>::exists(&pool, &blog, &tag)
+            .await
+            .unwrap()
+    );
+
+    // Same calls commit with the transaction.
+    atomic(&pool, move |tx| {
+        Box::pin(async move {
+            bulk_create(&mut **tx, &[user("c@tx.com")]).await?;
+            M2M::<TestBlog, TestTag>::add(&mut **tx, &blog, &tag).await?;
+            Ok(())
+        })
+    })
+    .await
+    .unwrap();
+    assert_eq!(TestUser::filter(&pool).count().await.unwrap(), 2);
+}
+
+// ── bulk_update / bulk_upsert / update_or_create ─────────────────────────────────
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration"), ignore)]
+async fn test_pg_bulk_update_bulk_upsert_update_or_create() {
+    let pool = pool().await;
+    setup(&pool).await;
+
+    let mut users: Vec<TestUser> = (0..3).map(|i| user(&format!("bu{i}@t.com"))).collect();
+    bulk_create(&pool, &users).await.unwrap();
+    for (i, u) in users.iter_mut().enumerate() {
+        u.name = FieldVarchar::new(format!("renamed{i}")).unwrap();
+        u.active = FieldBool(false);
+    }
+    assert_eq!(
+        bulk_update(&pool, &users, &["name", "active"])
+            .await
+            .unwrap(),
+        3
+    );
+    let stored = get::<_, TestUser>(&pool, &users[1].id.to_sql_value())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(stored.name.as_str(), "renamed1");
+    assert!(!stored.active.0);
+    // Unknown column and PK are rejected before any SQL runs.
+    for bad in ["nope", "id"] {
+        let err = bulk_update(&pool, &users, &[bad]).await.unwrap_err();
+        assert!(matches!(err, Error::Invalid(_)), "{err:?}");
+    }
+
+    // Upsert: existing email keeps its id and takes the new name, new email is inserted.
+    let mut again = user("bu0@t.com");
+    again.name = FieldVarchar::new("upserted".to_string()).unwrap();
+    bulk_upsert(&pool, &[again, user("bu9@t.com")], &["email"])
+        .await
+        .unwrap();
+    assert_eq!(TestUser::filter(&pool).count().await.unwrap(), 4);
+    let row = TestUser::filter(&pool)
+        .eq("email", "bu0@t.com")
+        .all()
+        .await
+        .unwrap();
+    assert_eq!(row[0].id.0, users[0].id.0);
+    assert_eq!(row[0].name.as_str(), "upserted");
+
+    // update_or_create: creates, then updates the row it finds (same PK).
+    let lookup = vec![("email", SqlValue::Text("uoc@t.com".to_string()))];
+    let mut first = user("uoc@t.com");
+    first.name = FieldVarchar::new("first".to_string()).unwrap();
+    let created = update_or_create(&pool, lookup.clone(), first)
+        .await
+        .unwrap();
+    assert_eq!(created.name.as_str(), "first");
+    let mut second = user("uoc@t.com");
+    second.name = FieldVarchar::new("second".to_string()).unwrap();
+    let updated = update_or_create(&pool, lookup, second).await.unwrap();
+    assert_eq!(updated.id.0, created.id.0);
+    assert_eq!(updated.name.as_str(), "second");
+    assert_eq!(
+        TestUser::filter(&pool)
+            .eq("email", "uoc@t.com")
+            .count()
+            .await
+            .unwrap(),
+        1
+    );
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration"), ignore)]
+async fn test_hooks_update_or_create() {
+    let pool = pool().await;
+    hooked_setup(&pool).await;
+
+    let lookup = vec![("name", SqlValue::Text("uoc_hooked".to_string()))];
+    update_or_create(&pool, lookup.clone(), hooked("uoc_hooked"))
+        .await
+        .unwrap();
+    assert_eq!(
+        hook_events("uoc_hooked"),
+        ["before_save", "before_create", "after_create", "after_save"]
+    );
+    update_or_create(&pool, lookup, hooked("uoc_hooked"))
+        .await
+        .unwrap();
+    assert_eq!(
+        hook_events("uoc_hooked")[4..],
+        ["before_save", "before_update", "after_update", "after_save"]
+    );
 }
