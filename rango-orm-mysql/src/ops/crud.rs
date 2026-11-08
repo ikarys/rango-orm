@@ -2,6 +2,9 @@
 
 use crate::error::db_err;
 use crate::row::{decode_all, MySqlRangoRow};
+use rango_orm_core::{
+    after_delete, after_insert, after_update, before_delete, before_insert, before_update,
+};
 use rango_orm_core::{quote_ident_mysql as quote_ident, FromRow, Model, ModelValues, SqlValue};
 use rango_orm_core::{Error, Result};
 use sqlx::{Executor, MySql, MySqlPool};
@@ -18,6 +21,7 @@ where
     E: Executor<'e, Database = MySql>,
     M: Model + ModelValues + FromRow,
 {
+    before_insert(&mut model).await?;
     let generated = model.pk_value().is_null();
     let (sql, values) = build_insert_sql::<M>(&model);
     let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*sql)), values);
@@ -25,23 +29,26 @@ where
     if generated {
         model.set_generated_pk(res.last_insert_id() as i64);
     }
+    after_insert(&model).await?;
     Ok(model)
 }
 
 /// Fails with [`Error::NotFound`] when no row has the model's PK
 /// (sqlx sets `CLIENT_FOUND_ROWS`, so unchanged rows still count as matched).
 #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "mysql", db.operation = "UPDATE", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
-pub async fn update<'e, E, M>(executor: E, model: M) -> Result<M>
+pub async fn update<'e, E, M>(executor: E, mut model: M) -> Result<M>
 where
     E: Executor<'e, Database = MySql>,
     M: Model + ModelValues + FromRow,
 {
+    before_update(&mut model).await?;
     let (sql, values) = build_update_sql::<M>(&model);
     let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*sql)), values);
     let res = q.execute(executor).await.map_err(db_err)?;
     if res.rows_affected() == 0 {
         return Err(Error::NotFound);
     }
+    after_update(&model).await?;
     Ok(model)
 }
 
@@ -51,16 +58,15 @@ where
     E: Executor<'e, Database = MySql>,
     M: Model + ModelValues,
 {
+    before_delete(model).await?;
     let sql = format!(
         "DELETE FROM {} WHERE {} = ?",
         quote_ident(M::table_name()),
         quote_ident(M::pk_column())
     );
-    let q = bind_sql_values(
-        sqlx::query(sqlx::AssertSqlSafe(&*sql)),
-        vec![model.pk_value()],
-    );
-    q.execute(executor).await.map(|_| ()).map_err(db_err)
+    let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*sql)), vec![model.pk_value()]);
+    q.execute(executor).await.map_err(db_err)?;
+    after_delete(model).await
 }
 
 #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "mysql", db.operation = "SELECT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
@@ -107,6 +113,7 @@ pub async fn get_or_create<M>(
 where
     M: Model + ModelValues + FromRow,
 {
+    before_insert(&mut defaults).await?;
     let generated = defaults.pk_value().is_null();
     let (insert_sql, insert_vals) = build_insert_sql::<M>(&defaults);
     let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*insert_sql)), insert_vals);
@@ -115,6 +122,7 @@ where
             if generated {
                 defaults.set_generated_pk(res.last_insert_id() as i64);
             }
+            after_insert(&defaults).await?;
             return Ok((defaults, true));
         }
         Err(Error::UniqueViolation { .. }) => {}

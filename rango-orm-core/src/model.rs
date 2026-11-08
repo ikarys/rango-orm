@@ -2,7 +2,8 @@ use crate::schema::TableSchema;
 
 /// Core trait implemented by `#[derive(Model)]`.
 /// Every model must be able to describe its own schema.
-pub trait Model {
+/// `ModelHooks` is a supertrait: the derive emits an empty impl unless `#[model(hooks)]` is set.
+pub trait Model: crate::ModelHooks {
     /// The table name in the database.
     fn table_name() -> &'static str;
 
@@ -91,6 +92,8 @@ mod fuzz_tests {
     }
 
     struct TestModel;
+
+    impl crate::ModelHooks for TestModel {}
 
     impl Model for TestModel {
         fn table_name() -> &'static str {

@@ -27,7 +27,11 @@ pub use constraints::{
 };
 pub use error::{Error, Result};
 pub use fields::*;
-pub use hooks::ModelHooks;
+pub use hooks::{BoxFuture, HookResult, ModelHooks};
+#[doc(hidden)]
+pub use hooks::{
+    after_delete, after_insert, after_update, before_delete, before_insert, before_update,
+};
 pub use model::{Model, ModelMixin, unknown_column};
 pub use query::{
     Filterable, ModelValues, SqlValue, ToSqlValue, insert_values, quote_ident, quote_ident_mysql,

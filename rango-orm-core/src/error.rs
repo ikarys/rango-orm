@@ -42,6 +42,8 @@ pub enum Error {
     },
     /// User code aborted the operation (e.g. inside `atomic`), which rolls it back.
     Aborted(Box<dyn std::error::Error + Send + Sync>),
+    /// A `ModelHooks` hook returned an error.
+    Hook(Box<dyn std::error::Error + Send + Sync>),
 }
 
 impl Error {
@@ -91,6 +93,7 @@ impl fmt::Display for Error {
                 message,
             } => write!(f, "database error: {message}"),
             Error::Aborted(e) => write!(f, "aborted: {e}"),
+            Error::Hook(e) => write!(f, "hook failed: {e}"),
         }
     }
 }
@@ -98,7 +101,7 @@ impl fmt::Display for Error {
 impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Error::Aborted(e) => Some(e.as_ref()),
+            Error::Aborted(e) | Error::Hook(e) => Some(e.as_ref()),
             _ => None,
         }
     }
@@ -123,5 +126,6 @@ mod tests {
         assert!(Error::Conflict.is_retryable());
         assert!(!Error::NotFound.is_retryable());
         assert_eq!(Error::abort("no funds").to_string(), "aborted: no funds");
+        assert_eq!(Error::Hook("nope".into()).to_string(), "hook failed: nope");
     }
 }

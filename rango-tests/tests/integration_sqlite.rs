@@ -1111,3 +1111,223 @@ async fn test_keyset_pagination_after_and_before() {
     ids.reverse();
     assert_eq!(seen, ids);
 }
+
+// ── Model hooks ───────────────────────────────────────────────────────────────
+
+static HOOK_LOG: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+fn hook_log(event: &str, name: &str) {
+    HOOK_LOG.lock().unwrap().push(format!("{event}:{name}"));
+}
+
+fn hook_events(name: &str) -> Vec<String> {
+    let suffix = format!(":{name}");
+    let log = HOOK_LOG.lock().unwrap();
+    log.iter()
+        .filter(|e| e.ends_with(&suffix))
+        .map(|e| e.trim_end_matches(&suffix).to_string())
+        .collect()
+}
+
+#[derive(Model, Debug, Clone)]
+#[model(table = "test_hooked", hooks)]
+struct Hooked {
+    id: FieldUuid,
+    name: FieldVarchar<1, 100>,
+    slug: FieldVarchar<0, 100>,
+}
+
+impl ModelHooks for Hooked {
+    fn before_save(&mut self) -> BoxFuture<'_> {
+        Box::pin(async move {
+            self.slug = FieldVarchar(self.name.0.to_lowercase());
+            hook_log("before_save", &self.name.0);
+            Ok(())
+        })
+    }
+    fn after_save(&self) -> BoxFuture<'_> {
+        Box::pin(async move {
+            hook_log("after_save", &self.name.0);
+            if self.name.0.starts_with("fail_after") {
+                return Err("after_save refused".into());
+            }
+            Ok(())
+        })
+    }
+    fn before_create(&mut self) -> BoxFuture<'_> {
+        Box::pin(async move {
+            hook_log("before_create", &self.name.0);
+            if self.name.0.starts_with("fail_create") {
+                return Err("before_create refused".into());
+            }
+            Ok(())
+        })
+    }
+    fn after_create(&self) -> BoxFuture<'_> {
+        Box::pin(async move {
+            hook_log("after_create", &self.name.0);
+            Ok(())
+        })
+    }
+    fn before_update(&mut self) -> BoxFuture<'_> {
+        Box::pin(async move {
+            hook_log("before_update", &self.name.0);
+            Ok(())
+        })
+    }
+    fn after_update(&self) -> BoxFuture<'_> {
+        Box::pin(async move {
+            hook_log("after_update", &self.name.0);
+            Ok(())
+        })
+    }
+    fn before_delete(&self) -> BoxFuture<'_> {
+        Box::pin(async move {
+            hook_log("before_delete", &self.name.0);
+            Ok(())
+        })
+    }
+    fn after_delete(&self) -> BoxFuture<'_> {
+        Box::pin(async move {
+            hook_log("after_delete", &self.name.0);
+            Ok(())
+        })
+    }
+}
+
+fn hooked(name: &str) -> Hooked {
+    Hooked {
+        id: FieldUuid(Uuid::new_v4()),
+        name: FieldVarchar(name.to_string()),
+        slug: FieldVarchar(String::new()),
+    }
+}
+
+async fn hooked_setup(pool: &SqlitePool) {
+    sqlx::query(
+        r#"CREATE TABLE IF NOT EXISTS "test_hooked" (
+            "id"   TEXT PRIMARY KEY,
+            "name" VARCHAR(100) NOT NULL UNIQUE,
+            "slug" VARCHAR(100) NOT NULL
+        )"#,
+    )
+    .execute(pool)
+    .await
+    .expect("setup: create hooked table");
+}
+
+async fn hooked_count(pool: &SqlitePool, name: &str) -> usize {
+    Hooked::filter(pool)
+        .eq("name", name)
+        .all()
+        .await
+        .unwrap()
+        .len()
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-sqlite"), ignore)]
+async fn test_hooks_insert_update_delete() {
+    let pool = pool().await;
+    hooked_setup(&pool).await;
+
+    let saved = insert(&pool, hooked("Ada Lovelace")).await.unwrap();
+    // before_save mutated the model and the mutation is what was written
+    assert_eq!(saved.slug.0, "ada lovelace");
+    let stored = get::<_, Hooked>(&pool, &saved.id.to_sql_value())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(stored.slug.0, "ada lovelace");
+    assert_eq!(
+        hook_events("Ada Lovelace"),
+        ["before_save", "before_create", "after_create", "after_save"]
+    );
+
+    // update: save + update hooks, never create hooks
+    let mut changed = saved.clone();
+    changed.slug = FieldVarchar("tampered".into());
+    let updated = update(&pool, changed).await.unwrap();
+    assert_eq!(updated.slug.0, "ada lovelace");
+    assert_eq!(
+        hook_events("Ada Lovelace")[4..],
+        ["before_save", "before_update", "after_update", "after_save"]
+    );
+
+    delete(&pool, &updated).await.unwrap();
+    assert_eq!(hooked_count(&pool, "Ada Lovelace").await, 0);
+    assert_eq!(
+        hook_events("Ada Lovelace")[8..],
+        ["before_delete", "after_delete"]
+    );
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-sqlite"), ignore)]
+async fn test_hooks_before_error_cancels_insert() {
+    let pool = pool().await;
+    hooked_setup(&pool).await;
+
+    let err = insert(&pool, hooked("fail_create_1")).await.unwrap_err();
+    assert!(matches!(err, Error::Hook(_)), "got {err:?}");
+    assert_eq!(err.to_string(), "hook failed: before_create refused");
+    assert_eq!(hooked_count(&pool, "fail_create_1").await, 0);
+    assert_eq!(
+        hook_events("fail_create_1"),
+        ["before_save", "before_create"]
+    );
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-sqlite"), ignore)]
+async fn test_hooks_after_error_rolls_back_in_transaction() {
+    let pool = pool().await;
+    hooked_setup(&pool).await;
+
+    let mut tx = pool.begin().await.unwrap();
+    let err = insert(&mut *tx, hooked("fail_after_tx")).await.unwrap_err();
+    assert!(matches!(err, Error::Hook(_)), "got {err:?}");
+    tx.rollback().await.unwrap();
+    assert_eq!(hooked_count(&pool, "fail_after_tx").await, 0);
+
+    // With a plain pool the statement is already committed.
+    let err = insert(&pool, hooked("fail_after_pool")).await.unwrap_err();
+    assert!(matches!(err, Error::Hook(_)), "got {err:?}");
+    assert_eq!(hooked_count(&pool, "fail_after_pool").await, 1);
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-sqlite"), ignore)]
+async fn test_hooks_get_or_create_only_on_insert() {
+    let pool = pool().await;
+    hooked_setup(&pool).await;
+
+    let lookup = vec![("name", SqlValue::Text("goc_hooked".to_string()))];
+    let (_, created) = get_or_create(&pool, lookup.clone(), hooked("goc_hooked"))
+        .await
+        .unwrap();
+    assert!(created);
+    let after_first = hook_events("goc_hooked");
+    assert!(after_first.contains(&"after_create".to_string()));
+
+    let (_, created) = get_or_create(&pool, lookup, hooked("goc_hooked"))
+        .await
+        .unwrap();
+    assert!(!created);
+    let after_second = hook_events("goc_hooked");
+    // second call: before_* ran on the defaults, after_* did not
+    assert_eq!(after_second.len(), after_first.len() + 2);
+    assert_eq!(
+        after_second[after_first.len()..],
+        ["before_save", "before_create"]
+    );
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-sqlite"), ignore)]
+async fn test_model_without_hooks_attribute_still_works() {
+    let pool = pool().await;
+    setup(&pool).await;
+    let saved = insert(&pool, user("nohooks@hooks.com")).await.unwrap();
+    delete(&pool, &saved).await.unwrap();
+}
