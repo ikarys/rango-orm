@@ -37,6 +37,13 @@ check:
     cargo fmt --all -- --check
     cargo clippy --workspace --all-targets --all-features -- -D warnings
 
+# Every feature combination of the facade must build (prelude has no ambiguous names)
+check-features:
+    cargo build -p rango-orm --no-default-features --features sqlite
+    cargo build -p rango-orm --no-default-features --features mysql
+    cargo build -p rango-orm --no-default-features --features postgres
+    cargo test -p rango-orm --all-features --test prelude_backends
+
 # Run SQLite benchmarks (no DB required)
 bench-sqlite:
     cargo bench -p rango-bench --bench sqlite
