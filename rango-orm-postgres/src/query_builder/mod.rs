@@ -247,7 +247,7 @@ async fn bind_and_fetch_all<'e, E>(
 where
     E: sqlx::Executor<'e, Database = sqlx::Postgres>,
 {
-    let q = sqlx::query(sql);
+    let q = sqlx::query(sqlx::AssertSqlSafe(sql));
     let q = bind_sql_values(q, binds);
     q.fetch_all(executor).await.map_err(db_err)
 }
@@ -268,7 +268,7 @@ where
                 .collect::<Vec<_>>()
         };
     }
-    let q = sqlx::query(sql);
+    let q = sqlx::query(sqlx::AssertSqlSafe(sql));
     let q = match keys.first() {
         Some(SqlValue::Uuid(_)) => q.bind(collect!(Uuid)),
         Some(SqlValue::BigInt(_)) => q.bind(collect!(BigInt)),
@@ -280,7 +280,7 @@ where
 }
 
 async fn bind_and_fetch_one(pool: &PgPool, sql: &str, binds: Vec<SqlValue>) -> Result<PgRow> {
-    let q = sqlx::query(sql);
+    let q = sqlx::query(sqlx::AssertSqlSafe(sql));
     let q = bind_sql_values(q, binds);
     q.fetch_one(pool).await.map_err(db_err)
 }

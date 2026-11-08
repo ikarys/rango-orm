@@ -87,10 +87,13 @@ impl Project {
 
 async fn reset(pool: &PgPool, project: &Project) {
     let table = project.table();
-    sqlx::query(&format!("DROP TABLE IF EXISTS \"{}\"", table))
-        .execute(pool)
-        .await
-        .expect("drop project table");
+    sqlx::query(sqlx::AssertSqlSafe(&*format!(
+        "DROP TABLE IF EXISTS \"{}\"",
+        table
+    )))
+    .execute(pool)
+    .await
+    .expect("drop project table");
     sqlx::query("DROP TABLE IF EXISTS _rango_migrations")
         .execute(pool)
         .await
@@ -99,16 +102,19 @@ async fn reset(pool: &PgPool, project: &Project) {
 
 async fn drop_table(pool: &PgPool, project: &Project) {
     let table = project.table();
-    sqlx::query(&format!("DROP TABLE IF EXISTS \"{}\"", table))
-        .execute(pool)
-        .await
-        .expect("drop project table");
+    sqlx::query(sqlx::AssertSqlSafe(&*format!(
+        "DROP TABLE IF EXISTS \"{}\"",
+        table
+    )))
+    .execute(pool)
+    .await
+    .expect("drop project table");
 }
 
 async fn column_type(pool: &PgPool, table: &str, column: &str) -> Option<String> {
     let sql =
         "SELECT data_type FROM information_schema.columns WHERE table_name=$1 AND column_name=$2";
-    sqlx::query_scalar(sql)
+    sqlx::query_scalar(sqlx::AssertSqlSafe(sql))
         .bind(table)
         .bind(column)
         .fetch_optional(pool)
@@ -159,18 +165,18 @@ pub struct Item {
     assert_success(&project.migrate(), "initial migrate");
 
     let table = project.table();
-    sqlx::query(&format!(
+    sqlx::query(sqlx::AssertSqlSafe(&*format!(
         "INSERT INTO \"{}\" (id, amount) VALUES (gen_random_uuid(), $1)",
         table
-    ))
+    )))
     .bind("42")
     .execute(&pool)
     .await
     .expect("insert 42");
-    sqlx::query(&format!(
+    sqlx::query(sqlx::AssertSqlSafe(&*format!(
         "INSERT INTO \"{}\" (id, amount) VALUES (gen_random_uuid(), $1)",
         table
-    ))
+    )))
     .bind("7")
     .execute(&pool)
     .await
@@ -201,11 +207,13 @@ pub struct Item {
     );
     assert_eq!(column_type(&pool, &table, "amount").await, None);
 
-    let prices: Vec<i32> =
-        sqlx::query_scalar(&format!("SELECT price FROM \"{}\" ORDER BY price", table))
-            .fetch_all(&pool)
-            .await
-            .expect("select prices");
+    let prices: Vec<i32> = sqlx::query_scalar(sqlx::AssertSqlSafe(&*format!(
+        "SELECT price FROM \"{}\" ORDER BY price",
+        table
+    )))
+    .fetch_all(&pool)
+    .await
+    .expect("select prices");
     assert_eq!(prices, vec![7, 42]);
 
     drop_table(&pool, &project).await;
@@ -234,10 +242,10 @@ pub struct Item {
     assert_success(&project.migrate(), "initial migrate");
 
     let table = project.table();
-    sqlx::query(&format!(
+    sqlx::query(sqlx::AssertSqlSafe(&*format!(
         "INSERT INTO \"{}\" (id, amount) VALUES (gen_random_uuid(), $1)",
         table
-    ))
+    )))
     .bind("abc")
     .execute(&pool)
     .await
@@ -262,10 +270,10 @@ pub struct Item {
     );
     assert_eq!(column_type(&pool, &table, "price").await, None);
 
-    let rows: i64 = sqlx::query_scalar(&format!(
+    let rows: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(&*format!(
         "SELECT count(*) FROM \"{}\" WHERE amount = $1",
         table
-    ))
+    )))
     .bind("abc")
     .fetch_one(&pool)
     .await
@@ -304,18 +312,18 @@ pub struct Item {
     assert_success(&project.migrate(), "initial migrate");
 
     let table = project.table();
-    sqlx::query(&format!(
+    sqlx::query(sqlx::AssertSqlSafe(&*format!(
         "INSERT INTO \"{}\" (id, amount) VALUES (gen_random_uuid(), $1)",
         table
-    ))
+    )))
     .bind("1")
     .execute(&pool)
     .await
     .expect("insert 1");
-    sqlx::query(&format!(
+    sqlx::query(sqlx::AssertSqlSafe(&*format!(
         "INSERT INTO \"{}\" (id, amount) VALUES (gen_random_uuid(), $1)",
         table
-    ))
+    )))
     .bind("2")
     .execute(&pool)
     .await
@@ -344,10 +352,13 @@ pub struct Item {
         Some("integer")
     );
 
-    let sum: i64 = sqlx::query_scalar(&format!("SELECT SUM(amount)::bigint FROM \"{}\"", table))
-        .fetch_one(&pool)
-        .await
-        .expect("sum amount");
+    let sum: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(&*format!(
+        "SELECT SUM(amount)::bigint FROM \"{}\"",
+        table
+    )))
+    .fetch_one(&pool)
+    .await
+    .expect("sum amount");
     assert_eq!(sum, 3);
 
     drop_table(&pool, &project).await;
@@ -376,10 +387,10 @@ pub struct Item {
     assert_success(&project.migrate(), "initial migrate");
 
     let table = project.table();
-    sqlx::query(&format!(
+    sqlx::query(sqlx::AssertSqlSafe(&*format!(
         "INSERT INTO \"{}\" (id, amount) VALUES (gen_random_uuid(), $1)",
         table
-    ))
+    )))
     .bind("x")
     .execute(&pool)
     .await
@@ -403,10 +414,13 @@ pub struct Item {
 
     assert_success(&project.migrate(), "v2 migrate");
 
-    let price: String = sqlx::query_scalar(&format!("SELECT price FROM \"{}\"", table))
-        .fetch_one(&pool)
-        .await
-        .expect("select price");
+    let price: String = sqlx::query_scalar(sqlx::AssertSqlSafe(&*format!(
+        "SELECT price FROM \"{}\"",
+        table
+    )))
+    .fetch_one(&pool)
+    .await
+    .expect("select price");
     assert_eq!(price, "x");
 
     drop_table(&pool, &project).await;
@@ -427,7 +441,10 @@ async fn import_does_not_inject_column_names() {
         "CREATE TABLE e2e_import_victim (id INT)",
         "CREATE TABLE e2e_import_target (id INT)",
     ] {
-        sqlx::query(sql).execute(&pool).await.expect(sql);
+        sqlx::query(sqlx::AssertSqlSafe(sql))
+            .execute(&pool)
+            .await
+            .expect(sql);
     }
 
     let evil =
@@ -453,7 +470,10 @@ async fn import_does_not_inject_column_names() {
         "DROP TABLE e2e_import_victim",
         "DROP TABLE e2e_import_target",
     ] {
-        sqlx::query(sql).execute(&pool).await.expect(sql);
+        sqlx::query(sqlx::AssertSqlSafe(sql))
+            .execute(&pool)
+            .await
+            .expect(sql);
     }
     project.remove();
 }
@@ -471,15 +491,20 @@ async fn import_inserts_parents_first_and_is_atomic() {
         "CREATE TABLE e2e_import_parent (id INT PRIMARY KEY)",
         "CREATE TABLE e2e_import_child (id INT PRIMARY KEY, parent_id INT NOT NULL REFERENCES e2e_import_parent(id))",
     ] {
-        sqlx::query(sql).execute(&pool).await.expect(sql);
+        sqlx::query(sqlx::AssertSqlSafe(sql))
+            .execute(&pool)
+            .await
+            .expect(sql);
     }
     let count = |table: &'static str| {
         let pool = pool.clone();
         async move {
-            sqlx::query_scalar::<_, i64>(&format!("SELECT count(*) FROM {table}"))
-                .fetch_one(&pool)
-                .await
-                .expect("count rows")
+            sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(&*format!(
+                "SELECT count(*) FROM {table}"
+            )))
+            .fetch_one(&pool)
+            .await
+            .expect("count rows")
         }
     };
 
@@ -509,7 +534,10 @@ async fn import_inserts_parents_first_and_is_atomic() {
         "DROP TABLE e2e_import_child",
         "DROP TABLE e2e_import_parent",
     ] {
-        sqlx::query(sql).execute(&pool).await.expect(sql);
+        sqlx::query(sqlx::AssertSqlSafe(sql))
+            .execute(&pool)
+            .await
+            .expect(sql);
     }
     project.remove();
 }
@@ -544,10 +572,12 @@ const DUMP_TABLES: [&str; 2] = ["e2e_dump_post", "e2e_dump_person"];
 
 async fn drop_dump_tables(pool: &PgPool) {
     for t in DUMP_TABLES {
-        sqlx::query(&format!("DROP TABLE IF EXISTS {t} CASCADE"))
-            .execute(pool)
-            .await
-            .expect("drop dump table");
+        sqlx::query(sqlx::AssertSqlSafe(&*format!(
+            "DROP TABLE IF EXISTS {t} CASCADE"
+        )))
+        .execute(pool)
+        .await
+        .expect("drop dump table");
     }
     sqlx::query("DROP TABLE IF EXISTS _rango_migrations")
         .execute(pool)
@@ -570,7 +600,10 @@ async fn dump_project(pool: &PgPool, name: &str) -> Project {
         "INSERT INTO e2e_dump_post (id, author, title) VALUES \
          ('00000000-0000-0000-0000-0000000000a1', '00000000-0000-0000-0000-000000000001', 'Hello')",
     ] {
-        sqlx::query(sql).execute(pool).await.expect(sql);
+        sqlx::query(sqlx::AssertSqlSafe(sql))
+            .execute(pool)
+            .await
+            .expect(sql);
     }
     project
 }
@@ -578,21 +611,24 @@ async fn dump_project(pool: &PgPool, name: &str) -> Project {
 async fn dump_state(pool: &PgPool) -> Vec<String> {
     let mut out = Vec::new();
     for t in ["e2e_dump_person", "e2e_dump_post"] {
-        let rows: Vec<String> =
-            sqlx::query_scalar(&format!("SELECT to_jsonb(t)::text FROM {t} t ORDER BY id"))
-                .fetch_all(pool)
-                .await
-                .expect("select rows");
+        let rows: Vec<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(&*format!(
+            "SELECT to_jsonb(t)::text FROM {t} t ORDER BY id"
+        )))
+        .fetch_all(pool)
+        .await
+        .expect("select rows");
         out.extend(rows);
     }
     out
 }
 
 async fn dump_count(pool: &PgPool, table: &str) -> Option<i64> {
-    sqlx::query_scalar(&format!("SELECT count(*) FROM {table}"))
-        .fetch_one(pool)
-        .await
-        .ok()
+    sqlx::query_scalar(sqlx::AssertSqlSafe(&*format!(
+        "SELECT count(*) FROM {table}"
+    )))
+    .fetch_one(pool)
+    .await
+    .ok()
 }
 
 #[tokio::test]
@@ -687,7 +723,7 @@ async fn export_import_round_trip_typed() {
     let before = dump_state(&pool).await;
     assert_success(&project.run_cli(&["export", "-o", "e.json"]), "export");
     for t in DUMP_TABLES {
-        sqlx::query(&format!("DELETE FROM {t}"))
+        sqlx::query(sqlx::AssertSqlSafe(&*format!("DELETE FROM {t}")))
             .execute(&pool)
             .await
             .unwrap();
@@ -706,10 +742,12 @@ async fn export_import_round_trip_typed() {
 
 async fn drop_named(pool: &PgPool, tables: &[&str]) {
     for t in tables {
-        sqlx::query(&format!("DROP TABLE IF EXISTS \"{t}\" CASCADE"))
-            .execute(pool)
-            .await
-            .expect("drop table");
+        sqlx::query(sqlx::AssertSqlSafe(&*format!(
+            "DROP TABLE IF EXISTS \"{t}\" CASCADE"
+        )))
+        .execute(pool)
+        .await
+        .expect("drop table");
     }
     sqlx::query("DROP TABLE IF EXISTS _rango_migrations")
         .execute(pool)
@@ -826,9 +864,9 @@ pub struct RingB {
         "00000000-0000-0000-0000-00000000000b",
     );
     assert!(
-        sqlx::query(&format!(
+        sqlx::query(sqlx::AssertSqlSafe(&*format!(
             "INSERT INTO e2e_ring_a (id, b) VALUES ('{a}', '{b}')"
-        ))
+        )))
         .execute(&pool)
         .await
         .is_err()
@@ -839,7 +877,10 @@ pub struct RingB {
         format!("INSERT INTO e2e_ring_a (id, b) VALUES ('{a}', '{b}')"),
         format!("INSERT INTO e2e_ring_b (id, a) VALUES ('{b}', '{a}')"),
     ] {
-        sqlx::query(&sql).execute(&mut *tx).await.expect(&sql);
+        sqlx::query(sqlx::AssertSqlSafe(&*sql))
+            .execute(&mut *tx)
+            .await
+            .expect(&sql);
     }
     tx.commit().await.expect("commit the cycle");
 

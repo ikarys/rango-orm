@@ -30,4 +30,4 @@ rango-orm-derive   = { workspace = true }
 rango-orm-postgres = { workspace = true, optional = true }
 rango-orm-sqlite   = { workspace = true, optional = true }
 rango-orm-mysql    = { workspace = true, optional = true }
-sqlx = { version = "0.8", default-features = false }
+sqlx = { version = "0.9", default-features = false }

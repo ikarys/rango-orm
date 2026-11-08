@@ -44,7 +44,10 @@ pub struct Book {
             "INSERT INTO t_author (id, name) VALUES ('a1', 'Ada'), ('a2', 'Bob')",
             "INSERT INTO t_book (id, title, author) VALUES ('b1', 'Notes', 'a1')",
         ] {
-            sqlx::query(sql).execute(&mut c).await.unwrap();
+            sqlx::query(sqlx::AssertSqlSafe(sql))
+                .execute(&mut c)
+                .await
+                .unwrap();
         }
         p
     }
@@ -75,10 +78,12 @@ pub struct Book {
     /// Row count, or `None` when the table does not exist.
     async fn count(&self, db: &str, table: &str) -> Option<i64> {
         let mut c = self.conn(db).await;
-        sqlx::query_scalar(&format!("SELECT count(*) FROM \"{table}\""))
-            .fetch_one(&mut c)
-            .await
-            .ok()
+        sqlx::query_scalar(sqlx::AssertSqlSafe(&*format!(
+            "SELECT count(*) FROM \"{table}\""
+        )))
+        .fetch_one(&mut c)
+        .await
+        .ok()
     }
 }
 

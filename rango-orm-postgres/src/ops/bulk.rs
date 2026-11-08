@@ -34,7 +34,9 @@ where
 
     // One statement, one array parameter per column; falls back for unsupported types.
     if let Some((sql, cols)) = build_bulk_create_unnest_sql::<M>(models) {
-        let q = cols.into_iter().fold(sqlx::query(&sql), |q, c| c.bind(q));
+        let q = cols
+            .into_iter()
+            .fold(sqlx::query(sqlx::AssertSqlSafe(&*sql)), |q, c| c.bind(q));
         let result = q.execute(&mut *conn).await.map_err(db_err)?;
         return Ok(result.rows_affected() as usize);
     }
@@ -45,7 +47,7 @@ where
 
     for chunk in models.chunks(chunk_size) {
         let (sql, values) = build_bulk_create_sql::<M>(chunk);
-        let q = bind_sql_values(sqlx::query(&sql), values);
+        let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*sql)), values);
         let result = q.execute(&mut *conn).await.map_err(db_err)?;
         total += result.rows_affected() as usize;
     }
@@ -80,7 +82,7 @@ where
 
     for chunk in models.chunks(chunk_size) {
         let (sql, values) = build_bulk_update_sql::<M>(chunk, fields);
-        let q = bind_sql_values(sqlx::query(&sql), values);
+        let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*sql)), values);
         let result = q.execute(&mut *conn).await.map_err(db_err)?;
         total += result.rows_affected() as usize;
     }
@@ -116,7 +118,7 @@ where
 
     for chunk in models.chunks(chunk_size) {
         let (sql, values) = build_bulk_upsert_sql::<M>(chunk, conflict_on);
-        let q = bind_sql_values(sqlx::query(&sql), values);
+        let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*sql)), values);
         let result = q.execute(&mut *conn).await.map_err(db_err)?;
         total += result.rows_affected() as usize;
     }

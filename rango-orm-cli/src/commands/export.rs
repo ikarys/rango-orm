@@ -137,7 +137,7 @@ async fn export_postgres(database_url: &str, requested: &[String]) -> Result<Vec
                 quote_ident(&t)
             );
         }
-        let mut query = sqlx::query_scalar::<_, String>(&sql);
+        let mut query = sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(&*sql));
         for c in &numeric {
             query = query.bind(c);
         }
@@ -188,10 +188,10 @@ async fn export_sqlite(database_url: &str, requested: &[String]) -> Result<Vec<(
         .await
         .context("Failed to connect to SQLite")?;
 
-    let edges: Vec<(String, String)> = sqlx::query_as(
+    let edges: Vec<(String, String)> = sqlx::query_as(sqlx::AssertSqlSafe(
         "SELECT m.name, f.\"table\" FROM sqlite_master m, pragma_foreign_key_list(m.name) f \
          WHERE m.type = 'table'",
-    )
+    ))
     .fetch_all(&pool)
     .await
     .context("Failed to read foreign keys")?;
@@ -200,7 +200,7 @@ async fn export_sqlite(database_url: &str, requested: &[String]) -> Result<Vec<(
     let mut out = Vec::new();
     for t in tables {
         let sql = format!("SELECT * FROM {}", quote_ident(&t));
-        let fetched = sqlx::query(&sql)
+        let fetched = sqlx::query(sqlx::AssertSqlSafe(&*sql))
             .fetch_all(&pool)
             .await
             .with_context(|| format!("Failed to export table {}", t))?;
@@ -267,11 +267,11 @@ async fn export_mysql(database_url: &str, requested: &[String]) -> Result<Vec<(S
         .await
         .context("Failed to connect to MySQL")?;
 
-    let edges: Vec<(String, String)> = sqlx::query_as(
+    let edges: Vec<(String, String)> = sqlx::query_as(sqlx::AssertSqlSafe(
         "SELECT CAST(TABLE_NAME AS CHAR), CAST(REFERENCED_TABLE_NAME AS CHAR) \
          FROM information_schema.KEY_COLUMN_USAGE \
          WHERE TABLE_SCHEMA = DATABASE() AND REFERENCED_TABLE_NAME IS NOT NULL",
-    )
+    ))
     .fetch_all(&pool)
     .await
     .context("Failed to read foreign keys")?;
@@ -280,7 +280,7 @@ async fn export_mysql(database_url: &str, requested: &[String]) -> Result<Vec<(S
     let mut out = Vec::new();
     for t in tables {
         let sql = format!("SELECT * FROM {}", quote_ident_mysql(&t));
-        let fetched = sqlx::raw_sql(&sql)
+        let fetched = sqlx::raw_sql(sqlx::AssertSqlSafe(&*sql))
             .fetch_all(&pool)
             .await
             .with_context(|| format!("Failed to export table {}", t))?;
@@ -302,11 +302,11 @@ async fn export_mysql(database_url: &str, requested: &[String]) -> Result<Vec<(S
 
 async fn list_tables_mysql(pool: &sqlx::MySqlPool) -> Result<Vec<String>> {
     use sqlx::Row;
-    let rows = sqlx::query(
+    let rows = sqlx::query(sqlx::AssertSqlSafe(
         "SELECT CAST(TABLE_NAME AS CHAR) FROM information_schema.TABLES \
          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_TYPE = 'BASE TABLE' \
          ORDER BY TABLE_NAME",
-    )
+    ))
     .fetch_all(pool)
     .await
     .context("Failed to list tables")?;
@@ -332,7 +332,7 @@ async fn text_column_kinds_mysql(
     table: &str,
 ) -> Result<HashMap<String, TextKind>> {
     use sqlx::Row;
-    let rows = sqlx::query(
+    let rows = sqlx::query(sqlx::AssertSqlSafe(
         "SELECT CAST(c.COLUMN_NAME AS CHAR), \
            c.DATA_TYPE = 'json' OR EXISTS ( \
              SELECT 1 FROM information_schema.TABLE_CONSTRAINTS tc \
@@ -345,7 +345,7 @@ async fn text_column_kinds_mysql(
          FROM information_schema.COLUMNS c \
          WHERE c.TABLE_SCHEMA = DATABASE() AND c.TABLE_NAME = ? \
            AND (c.CHARACTER_SET_NAME IS NOT NULL OR c.DATA_TYPE = 'json')",
-    )
+    ))
     .bind(table)
     .fetch_all(pool)
     .await

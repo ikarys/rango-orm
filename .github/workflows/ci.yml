@@ -46,7 +46,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install Rust MSRV
-        uses: dtolnay/rust-toolchain@1.89
+        uses: dtolnay/rust-toolchain@1.94
 
       - name: Cache cargo
         uses: actions/cache@v6
@@ -66,7 +66,7 @@ jobs:
         run: cargo +stable publish --workspace --dry-run --locked
 
       - name: cargo check (MSRV)
-        run: cargo +1.89 check --workspace --all-features --all-targets --locked
+        run: cargo +1.94 check --workspace --all-features --all-targets --locked
 
   audit:
     name: Security audit

@@ -69,7 +69,7 @@ pub async fn connect(config: &DatabaseConfig) -> rango_orm_core::Result<PgPool> 
             let stmts = after_connect.clone();
             Box::pin(async move {
                 for stmt in &stmts {
-                    conn.execute(stmt.as_str()).await?;
+                    conn.execute(sqlx::AssertSqlSafe(stmt.as_str())).await?;
                 }
                 Ok(())
             })

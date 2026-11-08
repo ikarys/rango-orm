@@ -217,7 +217,7 @@ where
     for<'c> &'c mut DB::Connection: sqlx::Executor<'c, Database = DB>,
     for<'q> String: sqlx::Encode<'q, DB> + sqlx::Decode<'q, DB> + sqlx::Type<DB>,
     usize: sqlx::ColumnIndex<DB::Row>,
-    for<'q> DB::Arguments<'q>: sqlx::IntoArguments<'q, DB>,
+    DB::Arguments: sqlx::IntoArguments<DB>,
 {
     let rows: Vec<String> = sqlx::query_scalar("SELECT name FROM _rango_migrations")
         .fetch_all(&mut *conn)
@@ -237,12 +237,12 @@ where
         let mut tx = sqlx::Connection::begin(&mut *conn)
             .await
             .with_context(|| format!("Failed to begin transaction for {}", name))?;
-        sqlx::raw_sql(&sql)
+        sqlx::raw_sql(sqlx::AssertSqlSafe(&*sql))
             .execute(&mut *tx)
             .await
             .with_context(|| format!("Failed to apply {}", name))?;
         if let Some(fk_check) = fk_check
-            && !sqlx::raw_sql(fk_check)
+            && !sqlx::raw_sql(sqlx::AssertSqlSafe(fk_check))
                 .fetch_all(&mut *tx)
                 .await
                 .with_context(|| format!("Failed to check foreign keys for {}", name))?
@@ -250,7 +250,7 @@ where
         {
             bail!("{name} leaves foreign key violations; rolled back");
         }
-        sqlx::query(record_sql)
+        sqlx::query(sqlx::AssertSqlSafe(record_sql))
             .bind(name.clone())
             .execute(&mut *tx)
             .await

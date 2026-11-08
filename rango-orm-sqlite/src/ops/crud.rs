@@ -16,7 +16,7 @@ where
     M: Model + ModelValues + FromRow,
 {
     let (sql, values) = build_insert_sql::<M>(&model);
-    let q = bind_sql_values(sqlx::query(&sql), values);
+    let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*sql)), values);
     let row = q.fetch_one(executor).await.map_err(db_err)?;
     M::from_row(&SqliteRangoRow(row)).map_err(Error::from)
 }
@@ -28,7 +28,7 @@ where
     M: Model + ModelValues + FromRow,
 {
     let (sql, values) = build_update_sql::<M>(&model);
-    let q = bind_sql_values(sqlx::query(&sql), values);
+    let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*sql)), values);
     let row = q.fetch_one(executor).await.map_err(db_err)?;
     M::from_row(&SqliteRangoRow(row)).map_err(Error::from)
 }
@@ -44,7 +44,10 @@ where
         quote_ident(M::table_name()),
         quote_ident(M::pk_column())
     );
-    let q = bind_sql_values(sqlx::query(&sql), vec![model.pk_value()]);
+    let q = bind_sql_values(
+        sqlx::query(sqlx::AssertSqlSafe(&*sql)),
+        vec![model.pk_value()],
+    );
     q.execute(executor).await.map(|_| ()).map_err(db_err)
 }
 
@@ -59,7 +62,7 @@ where
         quote_ident(M::table_name()),
         quote_ident(M::pk_column())
     );
-    let q = bind_sql_values(sqlx::query(&sql), vec![pk.clone()]);
+    let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*sql)), vec![pk.clone()]);
     let row = q.fetch_optional(executor).await.map_err(db_err)?;
     match row {
         Some(r) => Ok(Some(M::from_row(&SqliteRangoRow(r)).map_err(Error::from)?)),
@@ -74,7 +77,7 @@ where
     M: Model + ModelValues + FromRow,
 {
     let sql = format!("SELECT * FROM {}", quote_ident(M::table_name()));
-    let rows = sqlx::query(&sql)
+    let rows = sqlx::query(sqlx::AssertSqlSafe(&*sql))
         .fetch_all(executor)
         .await
         .map_err(db_err)?;
@@ -92,7 +95,7 @@ where
 {
     let conflict_cols: Vec<&str> = lookup.iter().map(|(col, _)| *col).collect();
     let (insert_sql, insert_vals) = build_get_or_create_sql(&defaults, &conflict_cols);
-    let q = bind_sql_values(sqlx::query(&insert_sql), insert_vals);
+    let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*insert_sql)), insert_vals);
     let row = q.fetch_optional(pool).await.map_err(db_err)?;
 
     if let Some(r) = row {
@@ -100,7 +103,7 @@ where
     }
 
     let (select_sql, select_vals) = build_lookup_sql::<M>(&lookup);
-    let q = bind_sql_values(sqlx::query(&select_sql), select_vals);
+    let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*select_sql)), select_vals);
     let row = q.fetch_one(pool).await.map_err(db_err)?;
     Ok((
         M::from_row(&SqliteRangoRow(row)).map_err(Error::from)?,

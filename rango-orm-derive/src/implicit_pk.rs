@@ -2,7 +2,9 @@
 use proc_macro2::TokenStream;
 use quote::quote;
 use syn::punctuated::Punctuated;
-use syn::{Expr, ExprLit, Fields, ItemStruct, Lit, Meta, Token, parse::Parser, parse_quote};
+use syn::{
+    Expr, ExprLit, Fields, ItemStruct, Lit, Meta, MetaNameValue, Token, parse::Parser, parse_quote,
+};
 
 use crate::rango_derive_path;
 
@@ -13,12 +15,14 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> syn::Result<Token
     let mut pk = "uuid".to_string();
     for meta in Punctuated::<Meta, Token![,]>::parse_terminated.parse2(args)? {
         match &meta {
-            Meta::NameValue(nv)
-                if nv.path.is_ident("pk")
-                    && let Expr::Lit(ExprLit {
+            Meta::NameValue(MetaNameValue {
+                path,
+                value:
+                    Expr::Lit(ExprLit {
                         lit: Lit::Str(s), ..
-                    }) = &nv.value =>
-            {
+                    }),
+                ..
+            }) if path.is_ident("pk") => {
                 pk = s.value();
             }
             _ => return Err(syn::Error::new_spanned(meta, USAGE)),

@@ -1,5 +1,5 @@
 use argon2::Argon2;
-use argon2::password_hash::{phc::PasswordHash, PasswordHasher, PasswordVerifier};
+use argon2::password_hash::{PasswordHasher, PasswordVerifier, phc::PasswordHash};
 use chrono::{DateTime, NaiveDate, NaiveTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;

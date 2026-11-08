@@ -32,7 +32,7 @@ where
     M: Model + ModelValues + FromRow,
 {
     let (sql, values) = build_insert_sql::<M>(&model);
-    let q = bind_sql_values(sqlx::query(&sql), values);
+    let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*sql)), values);
     let row = q.fetch_one(executor).await.map_err(db_err)?;
     M::from_row(&PgRangoRow(row)).map_err(Error::from)
 }
@@ -45,7 +45,7 @@ where
     M: Model + ModelValues + FromRow,
 {
     let (sql, values) = build_update_sql::<M>(&model);
-    let q = bind_sql_values(sqlx::query(&sql), values);
+    let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*sql)), values);
     let row = q.fetch_one(executor).await.map_err(db_err)?;
     M::from_row(&PgRangoRow(row)).map_err(Error::from)
 }
@@ -58,7 +58,7 @@ where
     M: Model + ModelValues,
 {
     let (sql, values) = build_delete_sql::<M>(model);
-    let q = bind_sql_values(sqlx::query(&sql), values);
+    let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*sql)), values);
     q.execute(executor).await.map(|_| ()).map_err(db_err)
 }
 
@@ -75,7 +75,7 @@ where
         quote_ident(M::table_name()),
         quote_ident(M::pk_column())
     );
-    let q = bind_sql_values(sqlx::query(&sql), vec![pk.clone()]);
+    let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*sql)), vec![pk.clone()]);
     let row = q.fetch_optional(executor).await.map_err(db_err)?;
     match row {
         Some(r) => Ok(Some(M::from_row(&PgRangoRow(r)).map_err(Error::from)?)),
@@ -92,7 +92,7 @@ where
     M: Model + ModelValues + FromRow,
 {
     let sql = format!("SELECT * FROM {}", quote_ident(M::table_name()));
-    let rows = sqlx::query(&sql)
+    let rows = sqlx::query(sqlx::AssertSqlSafe(&*sql))
         .fetch_all(executor)
         .await
         .map_err(db_err)?;
@@ -133,7 +133,7 @@ where
 
     let conflict_cols: Vec<&str> = lookup.iter().map(|(col, _)| *col).collect();
     let (insert_sql, insert_vals) = build_get_or_create_sql(&defaults, &conflict_cols);
-    let q = bind_sql_values(sqlx::query(&insert_sql), insert_vals);
+    let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*insert_sql)), insert_vals);
     let row = q.fetch_optional(&mut *conn).await.map_err(db_err)?;
 
     if let Some(r) = row {
@@ -142,7 +142,7 @@ where
 
     // Conflict — row already exists; fetch it
     let (select_sql, select_vals) = build_lookup_sql::<M>(&lookup);
-    let q = bind_sql_values(sqlx::query(&select_sql), select_vals);
+    let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*select_sql)), select_vals);
     let row = q.fetch_one(&mut *conn).await.map_err(db_err)?;
 
     Ok((M::from_row(&PgRangoRow(row)).map_err(Error::from)?, false))
@@ -163,16 +163,16 @@ where
     M: Model + ModelValues + FromRow,
 {
     let (lookup_sql, lookup_vals) = build_lookup_sql::<M>(&lookup);
-    let q = bind_sql_values(sqlx::query(&lookup_sql), lookup_vals);
+    let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*lookup_sql)), lookup_vals);
     let row = exec.fetch_optional_query(q).await.map_err(db_err)?;
     if row.is_some() {
         let (update_sql, update_vals) = build_update_sql::<M>(&values);
-        let q = bind_sql_values(sqlx::query(&update_sql), update_vals);
+        let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*update_sql)), update_vals);
         let row = exec.fetch_one_query(q).await.map_err(db_err)?;
         M::from_row(&PgRangoRow(row)).map_err(Error::from)
     } else {
         let (insert_sql, insert_vals) = build_insert_sql::<M>(&values);
-        let q = bind_sql_values(sqlx::query(&insert_sql), insert_vals);
+        let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*insert_sql)), insert_vals);
         let row = exec.fetch_one_query(q).await.map_err(db_err)?;
         M::from_row(&PgRangoRow(row)).map_err(Error::from)
     }

@@ -20,7 +20,7 @@ where
 {
     let generated = model.pk_value().is_null();
     let (sql, values) = build_insert_sql::<M>(&model);
-    let q = bind_sql_values(sqlx::query(&sql), values);
+    let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*sql)), values);
     let res = q.execute(executor).await.map_err(db_err)?;
     if generated {
         model.set_generated_pk(res.last_insert_id() as i64);
@@ -37,7 +37,7 @@ where
     M: Model + ModelValues + FromRow,
 {
     let (sql, values) = build_update_sql::<M>(&model);
-    let q = bind_sql_values(sqlx::query(&sql), values);
+    let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*sql)), values);
     let res = q.execute(executor).await.map_err(db_err)?;
     if res.rows_affected() == 0 {
         return Err(Error::NotFound);
@@ -56,7 +56,10 @@ where
         quote_ident(M::table_name()),
         quote_ident(M::pk_column())
     );
-    let q = bind_sql_values(sqlx::query(&sql), vec![model.pk_value()]);
+    let q = bind_sql_values(
+        sqlx::query(sqlx::AssertSqlSafe(&*sql)),
+        vec![model.pk_value()],
+    );
     q.execute(executor).await.map(|_| ()).map_err(db_err)
 }
 
@@ -71,7 +74,7 @@ where
         quote_ident(M::table_name()),
         quote_ident(M::pk_column())
     );
-    let q = bind_sql_values(sqlx::query(&sql), vec![pk.clone()]);
+    let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*sql)), vec![pk.clone()]);
     let row = q.fetch_optional(executor).await.map_err(db_err)?;
     match row {
         Some(r) => Ok(Some(M::from_row(&MySqlRangoRow(r)).map_err(Error::from)?)),
@@ -86,7 +89,7 @@ where
     M: Model + ModelValues + FromRow,
 {
     let sql = format!("SELECT * FROM {}", quote_ident(M::table_name()));
-    let rows = sqlx::query(&sql)
+    let rows = sqlx::query(sqlx::AssertSqlSafe(&*sql))
         .fetch_all(executor)
         .await
         .map_err(db_err)?;
@@ -106,7 +109,7 @@ where
 {
     let generated = defaults.pk_value().is_null();
     let (insert_sql, insert_vals) = build_insert_sql::<M>(&defaults);
-    let q = bind_sql_values(sqlx::query(&insert_sql), insert_vals);
+    let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*insert_sql)), insert_vals);
     match q.execute(pool).await.map_err(db_err) {
         Ok(res) => {
             if generated {
@@ -119,7 +122,7 @@ where
     }
 
     let (select_sql, select_vals) = build_lookup_sql::<M>(&lookup);
-    let q = bind_sql_values(sqlx::query(&select_sql), select_vals);
+    let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*select_sql)), select_vals);
     let row = q.fetch_one(pool).await.map_err(db_err)?;
     Ok((
         M::from_row(&MySqlRangoRow(row)).map_err(Error::from)?,

@@ -30,7 +30,10 @@ async fn real_project_mysql() {
                 sql.push_str(&format!("DROP TABLE IF EXISTS `{t}`; "));
             }
             sql.push_str("SET FOREIGN_KEY_CHECKS = 1;");
-            sqlx::raw_sql(&sql).execute(&pool).await.unwrap();
+            sqlx::raw_sql(sqlx::AssertSqlSafe(&*sql))
+                .execute(&pool)
+                .await
+                .unwrap();
             pool.close().await;
         }
     };
