@@ -1,6 +1,12 @@
 /// Error when reading a row.
 #[derive(Debug)]
-pub struct RowError(pub String);
+pub struct RowError(String);
+
+impl RowError {
+    pub fn new(msg: impl Into<String>) -> Self {
+        Self(msg.into())
+    }
+}
 
 impl std::fmt::Display for RowError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -30,6 +36,10 @@ pub trait RangoRow {
 }
 
 /// Implemented by `#[derive(Model)]` — reads a model from a RangoRow.
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` cannot be read from a database row",
+    note = "add `#[derive(Model)]` (or `#[rango::model]`, or `#[derive(Partial)]` for a column subset) to `{Self}`"
+)]
 pub trait FromRow: Sized {
     fn from_row(row: &dyn RangoRow) -> Result<Self, RowError>;
 }

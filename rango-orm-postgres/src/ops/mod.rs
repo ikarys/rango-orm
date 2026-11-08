@@ -5,7 +5,7 @@ use sqlx::query::Query;
 
 /// Default maximum rows returned by [`QueryBuilder::all()`].
 /// Override with `.limit(n)` or `.unlimited()`.
-pub const DEFAULT_QUERY_LIMIT: i64 = 1000;
+pub use rango_orm_core::DEFAULT_QUERY_LIMIT;
 
 // ─── Bind macro ───────────────────────────────────────────────────────────────
 macro_rules! bind {

@@ -14,12 +14,13 @@ match insert(&pool, user).await {
 | Variant | When |
 |---|---|
 | `NotFound` | A query expected a row and found none |
-| `UniqueViolation` / `ForeignKeyViolation` / `NotNullViolation` / `CheckViolation` | Constraint violated; `constraint` holds its name when the backend reports it |
+| `TableMissing { table }` | The table does not exist: run `rango makemigrations` and `rango migrate` |
+| `UniqueViolation` / `ForeignKeyViolation` / `NotNullViolation` / `CheckViolation` | Constraint violated; `constraint` holds its name when the backend reports it (on SQLite, the failing columns, e.g. `user.email`) |
 | `Conflict` | Serialization failure or deadlock (`40001` / `40P01`); `is_retryable()` is true |
 | `Timeout` | Pool acquire, `statement_timeout`, `lock_timeout`, or SQLite busy timeout |
 | `Connection` | IO, TLS, or closed pool |
 | `Decode` | A row could not be decoded into the model |
-| `Invalid` | Invalid input or configuration |
+| `Invalid` | Invalid input or configuration; an unknown column name suggests the closest one (`did you mean `email`?`) |
 | `Database { code, message }` | Any other database error (`code` is the SQLSTATE on Postgres) |
 | `Aborted` | Your code returned `Error::abort(..)` inside `atomic()`; the transaction was rolled back |
 

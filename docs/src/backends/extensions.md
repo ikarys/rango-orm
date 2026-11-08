@@ -40,7 +40,7 @@ If you migrate from Postgres to SQLite, the compiler tells you exactly where bac
 
 ## Adding to the prelude
 
-Both traits are automatically available via `use rango::prelude::*` — no extra imports needed.
+Each trait is available via `use rango::prelude::*` when its backend is enabled, whichever backend supplies the prelude's ops (see "Several backends at once" in Installation).
 
 ## Future extensions
 

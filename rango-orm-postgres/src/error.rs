@@ -16,6 +16,17 @@ pub(crate) fn db_err(e: sqlx::Error) -> Error {
                 _ => {}
             }
             let code = db.code().map(|c| c.into_owned());
+            // undefined_table: `relation "x" does not exist`
+            if code.as_deref() == Some("42P01")
+                && let Some((table, _)) = db
+                    .message()
+                    .strip_prefix("relation \"")
+                    .and_then(|r| r.split_once('"'))
+            {
+                return Error::TableMissing {
+                    table: table.to_owned(),
+                };
+            }
             match code.as_deref() {
                 Some("40001" | "40P01") => Error::Conflict,
                 // query_canceled (statement_timeout), lock_not_available (lock_timeout)

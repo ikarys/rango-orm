@@ -16,10 +16,26 @@ pub(crate) fn db_err(e: sqlx::Error) -> Error {
                 _ => {}
             }
             let code = db.code().map(|c| c.into_owned());
+            // ER_NO_SUCH_TABLE: "Table 'db.name' doesn't exist"
+            let missing = db
+                .try_downcast_ref::<sqlx::mysql::MySqlDatabaseError>()
+                .filter(|m| m.number() == 1146)
+                .and_then(|m| m.message().strip_prefix("Table '"))
+                .and_then(|r| r.split_once('\''));
+            if let Some((qualified, _)) = missing {
+                return Error::TableMissing {
+                    table: qualified.rsplit('.').next().unwrap_or(qualified).to_owned(),
+                };
+            }
             match code.as_deref() {
-                // ER_LOCK_WAIT_TIMEOUT, ER_LOCK_DEADLOCK, max_execution_time exceeded (MySQL / MariaDB)
-                Some("HY000") if is_timeout(db.as_ref()) => Error::Timeout,
-                Some("40001") => Error::Timeout,
+                // ER_LOCK_DEADLOCK (1213, SQLSTATE 40001) and ER_LOCK_WAIT_TIMEOUT (1205):
+                // retrying the whole transaction can succeed.
+                Some("40001") => Error::Conflict,
+                Some("HY000") if mysql_number(db.as_ref()) == Some(1205) => Error::Conflict,
+                // max_execution_time exceeded (MySQL / MariaDB)
+                Some("HY000") if matches!(mysql_number(db.as_ref()), Some(3024 | 1969)) => {
+                    Error::Timeout
+                }
                 _ => Error::Database {
                     code,
                     message: db.message().to_owned(),
@@ -44,7 +60,7 @@ pub(crate) fn db_err(e: sqlx::Error) -> Error {
     }
 }
 
-fn is_timeout(db: &dyn sqlx::error::DatabaseError) -> bool {
+fn mysql_number(db: &dyn sqlx::error::DatabaseError) -> Option<u16> {
     db.try_downcast_ref::<sqlx::mysql::MySqlDatabaseError>()
-        .is_some_and(|e| matches!(e.number(), 1205 | 1213 | 3024 | 1969))
+        .map(|e| e.number())
 }

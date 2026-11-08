@@ -16,7 +16,7 @@ rango-orm-sqlite   = { path = "../rango-orm-sqlite" }
 rango-orm-mysql    = { path = "../rango-orm-mysql" }
 rango-orm-core     = { path = "../rango-orm-core" }
 rango-orm-derive   = { path = "../rango-orm-derive" }
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync"] }
 uuid = { version = "1", features = ["v4"] }
 anyhow = "1"
 serde_json = "1"

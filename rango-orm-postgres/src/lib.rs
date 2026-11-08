@@ -3,7 +3,6 @@
 //! Internal crate: depend on `rango-orm` (feature `postgres`, on by default).
 #![forbid(unsafe_code)]
 mod error;
-pub mod executor;
 pub mod m2m;
 mod ops;
 pub mod pg_ext;
@@ -20,24 +19,24 @@ use sqlx::{
 };
 use std::time::Duration;
 
-pub use executor::RangoExecutor;
 pub use m2m::M2M;
 pub use ops::{
     all, bulk_create, bulk_update, bulk_upsert, delete, get, get_or_create, insert, raw,
     raw_execute, raw_scalar, update, update_or_create,
 };
 pub use pg_ext::{Pg, PgQueryExt};
-pub use query_builder::{QueryBuilder, SelectAs};
+pub use query_builder::{Conn, QueryBuilder, SelectAs};
 pub use rango_orm_core::WithRelated;
 pub use sqlx::PgPool;
-pub use transaction::{RangoTransaction, TxFuture, atomic, atomic_retry, transaction};
+pub use transaction::{RangoTransaction, atomic, atomic_retry, transaction};
 
 use rango_orm_core::{Filterable, FromRow, Model, ModelValues};
 
 /// Extension trait — adds .filter(&pool) to any Model.
 pub trait RangoFilterExt: Model + ModelValues + FromRow + Filterable + Sized {
-    fn filter(pool: &PgPool) -> QueryBuilder<Self> {
-        QueryBuilder::new(pool)
+    /// `&pool`, or `&mut **tx` inside `atomic`.
+    fn filter<'a>(conn: impl Into<Conn<'a>>) -> QueryBuilder<'a, Self> {
+        QueryBuilder::new(conn)
     }
 }
 
