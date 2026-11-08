@@ -134,9 +134,15 @@ async fn dump_then_restore_round_trips_rows() {
         .collect();
     assert_eq!(names, ["t_author", "t_book"], "parents first, no ledger");
 
+    assert_eq!(dump["migrations"].as_array().unwrap().len(), 1);
+
     assert_ok(&p.cli("b.db", &["restore", "d.json"]));
     assert_eq!(p.count("b.db", "t_author").await, Some(2));
     assert_eq!(p.count("b.db", "t_book").await, Some(1));
+    // The restored database knows its migrations: `migrate` has nothing to replay.
+    let out = p.cli("b.db", &["migrate"]);
+    assert_ok(&out);
+    assert!(String::from_utf8_lossy(&out.stdout).contains("Nothing to apply"));
     let mut c = p.conn("b.db").await;
     let title: String = sqlx::query_scalar("SELECT title FROM t_book WHERE author = 'a1'")
         .fetch_one(&mut c)
@@ -285,8 +291,22 @@ async fn restore_fails_on_conflict_instead_of_dropping_rows() {
     assert_ok(&p.cli("a.db", &["dump", "-o", "d.json"]));
     // Restoring into the database it came from collides on every primary key.
     let err = failure_stderr(&p.cli("a.db", &["restore", "d.json"]));
-    // Table order is not fixed: whichever collides first is named.
-    assert!(err.contains("Failed to insert into t_"), "{err}");
+    // Table order is not fixed (the ledger may collide first): any table may be named.
+    assert!(err.contains("Failed to insert into "), "{err}");
     assert_eq!(p.count("a.db", "t_author").await, Some(2));
     assert_eq!(p.count("a.db", "t_book").await, Some(1));
+}
+
+#[tokio::test]
+async fn restore_of_a_dump_without_migrations_warns() {
+    let p = Project::new("old_dump").await;
+    assert_ok(&p.cli("a.db", &["dump", "-o", "d.json"]));
+    let mut dump: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(p.dir.join("d.json")).unwrap()).unwrap();
+    dump.as_object_mut().unwrap().remove("migrations");
+    let f = p.write("old.json", &dump.to_string());
+    let out = p.cli("b.db", &["restore", &f]);
+    assert_ok(&out);
+    assert!(String::from_utf8_lossy(&out.stderr).contains("does not list applied migrations"));
+    assert_eq!(p.count("b.db", "t_author").await, Some(2));
 }

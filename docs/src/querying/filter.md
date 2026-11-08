@@ -187,7 +187,7 @@ let sql = User::filter(&pool)
     .explain();
 
 println!("{}", sql);
-// SELECT * FROM "myapp_user" WHERE "active" = $1 ORDER BY "name" ASC LIMIT 10
+// SELECT * FROM "user" WHERE "active" = $1 ORDER BY "name" ASC LIMIT 10
 ```
 
 A query builder takes `&pool` or `&mut **tx` (inside `atomic()`). `.explain_analyze().await?` (it takes `&mut self`, so the builder stays usable afterwards) runs the query under the engine's profiler and returns the plan:
