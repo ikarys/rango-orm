@@ -63,9 +63,6 @@ where
     A: Acquire<'a, Database = Sqlite>,
     M: Model + ModelValues,
 {
-    if models.is_empty() || fields.is_empty() {
-        return Ok(0);
-    }
     for f in fields {
         if let Some(msg) = rango_orm_core::unknown_column::<M>(f) {
             return Err(Error::Invalid(msg));
@@ -75,6 +72,9 @@ where
                 "`{f}` is the primary key and cannot be updated"
             )));
         }
+    }
+    if models.is_empty() || fields.is_empty() {
+        return Ok(0);
     }
     let chunk_size = (MAX_PARAMS / (fields.len() + 1)).max(1);
     run_chunks(executor, models, chunk_size, |chunk| {

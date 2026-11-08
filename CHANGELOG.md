@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Fix: `select_as::<P>().all()` emits the `db.query` tracing span like every other query-builder terminal (all backends).
+- Fix: `bulk_update` checks column names before the empty-input shortcut, so an unknown column is `Error::Invalid` even with an empty slice (all backends).
+- Fix: `rango makemigrations` on a plain Rust type (`bool`, `String`, `i32`, ...) names the Rango field type to use, like the derive does.
 - Fix: `rango makemigrations` detects a `CheckConstraint` (or partial unique condition) whose SQL changed while its name stayed the same: it emits a drop then an add (SQLite: table rebuild) instead of "Nothing to migrate".
 - Fix: `[models] src` in `rango.toml` is honored by `rango makemigrations` (a positional directory still overrides it).
 - Fix: the CLI reads `url` from `rango.toml` as the last fallback after `--database-url` and `DATABASE_URL`, as documented (local dev only).

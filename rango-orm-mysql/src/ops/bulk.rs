@@ -62,9 +62,6 @@ where
     A: Acquire<'a, Database = MySql>,
     M: Model + ModelValues,
 {
-    if models.is_empty() || fields.is_empty() {
-        return Ok(0);
-    }
     for f in fields {
         if let Some(msg) = rango_orm_core::unknown_column::<M>(f) {
             return Err(Error::Invalid(msg));
@@ -74,6 +71,9 @@ where
                 "`{f}` is the primary key and cannot be updated"
             )));
         }
+    }
+    if models.is_empty() || fields.is_empty() {
+        return Ok(0);
     }
     // Per row: 1 placeholder in `IN (...)` plus a WHEN/THEN pair per column.
     // A `CASE` is scanned linearly for every row, so the cost per chunk is quadratic: capping the
