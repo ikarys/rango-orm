@@ -116,12 +116,12 @@ pub struct QueryBuilder<'a, M> {
     offset: Option<i64>,
     /// True when the caller has explicitly set a limit via `.limit(n)` or `.unlimited()`.
     /// When false, `all()` applies `DEFAULT_QUERY_LIMIT` (1000 rows) automatically.
-    pub explicit_limit: bool,
+    pub(crate) explicit_limit: bool,
     next_connector: Connector,
     /// Introspection: `(fk_col, related_table, related_pk)` for each `.select_related()` call.
-    pub select_related_specs: Vec<(String, String, String)>,
+    pub(crate) select_related_specs: Vec<(String, String, String)>,
     /// Introspection: `(related_table, related_pk, fk_col)` for each `.prefetch_related()` call.
-    pub prefetch_specs: Vec<(String, String, String)>,
+    pub(crate) prefetch_specs: Vec<(String, String, String)>,
     select_related: Vec<SelectRelatedSpec>,
     prefetch_related: Vec<PrefetchSpec>,
     /// Raw WHERE clauses injected by backend-specific extensions (e.g. PgQueryExt).
