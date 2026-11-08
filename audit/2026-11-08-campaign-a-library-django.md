@@ -83,3 +83,32 @@ Rust lines (`wc -l`): `models.rs` 82, `ops.rs` 281, `db.rs` 18, `obs.rs` 49 (tra
 Score: 7/10.
 
 I would use Rango for this app. Models, schema evolution and relations were easier than I expected from Django, and nothing blocked me. What would keep me from 9: no bulk many-to-many (3600 statements to seed), a doc claim about decimals that does not compile, the ignored `[models] src` key, and rough edges when moving data between backends (#15, #16, #18). Wrong-type string filters should be an `Invalid` error like unknown columns.
+
+## (f) Decisions
+
+Checked against the tree at commit e37c896 (2026-11-08).
+
+| # | Decision | Commit or reason |
+|---|---|---|
+| 1 | fixed | 5544c15: makemigrations.md states the naming rule (`auto` when the table list is longer than 40 characters). |
+| 2 | fixed | 484e3a0: `From<FieldError> for Error`. `DatabaseConfig::from_env` keeps returning `VarError` (it runs before any database work). |
+| 3 | fixed | 61c3323: field-types.md and aggregations.md give the per-backend rule (`min`/`max::<Decimal>` on PostgreSQL and MySQL only) and the portable workaround. |
+| 4 | documented | 61c3323: defining-models.md says models may derive `Clone`, `Debug`, etc. |
+| 5 | fixed | 4de78a2: `WithRelated::into_inner`, mentioned in filter.md. |
+| 6 | documented | 61c3323: relations.md "Adding many links at once" (one multi-row `INSERT` through `raw_execute`, values bound). A bulk M2M API stays out of scope for now. |
+| 7 | documented | f85e1ad: sqlite.md "Errors" section. |
+| 8 | documented | 61c3323: visible note in hooks.md, reverse link in bulk.md. |
+| 9 | won't fix | Not a defect: the tester confirms add, rename and constraint changes kept the data. |
+| 10 | fixed | f5035ad: `[models] src` is honored; a positional path still overrides it. |
+| 11 | fixed | 8116398: `atomic_retry` is spawnable (`AsyncFnOnce + Clone`); compile test `rango-tests/tests/spawn_atomic.rs`. |
+| 12 | open | Values of the wrong type through a string column name are not checked against the schema type. Planned after 0.2.0; typed columns already catch this at compile time. |
+| 13 | documented | f85e1ad: sqlite.md "Errors" section (SQLite reports no FK constraint name). |
+| 14 | documented | e37c896: crud.md says `delete` is idempotent while `update` of a missing row is `NotFound`. |
+| 15 | fixed | 5544c15: the backend comes from the URL scheme when `-d` is given. |
+| 16 | fixed | 5544c15: `import` without `--table` on rows without `__table` asks for `--table`. |
+| 17 | fixed | 5544c15: `dump --schema-only` reports the schema's table count. |
+| 18 | documented | 5544c15: restore warns, listing the migrations recorded as applied without being run. |
+| 19 | won't fix | A JSON object has no column order; `import` maps by name. |
+| 20 | documented | e37c896: credentials.md says roles are cluster-global and `CREATE ROLE` fails if the role exists. |
+| 21 | won't fix | The PostgreSQL `COMMIT` is a real statement; per-backend counts differ by nature. |
+| 22 | won't fix | argon2id cost is a security parameter; the cost is documented in field-types.md (0520b02). Set `opt-level` for `argon2` in the dev profile if seeds are slow. |
