@@ -13,6 +13,8 @@ pub mod query;
 pub mod related;
 pub mod row;
 pub mod schema;
+#[doc(hidden)]
+pub mod type_map;
 
 pub use column::{
     Column, ColumnRef, FilterColumn, FilterValue, ForeignKeyRef, ManyToManyField, OrderRef,

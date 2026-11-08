@@ -4,6 +4,8 @@ use syn::{
     Data, DeriveInput, Field, Fields, Lit, Meta, Result, Token, Type, punctuated::Punctuated,
 };
 
+use rango_orm_core::{ColumnType, type_map};
+
 use crate::rango_core_path;
 use crate::utils::to_snake_case;
 
@@ -649,40 +651,47 @@ pub(crate) fn extract_option(ty: &Type) -> (bool, &Type) {
     (false, ty)
 }
 
-/// Map a Rango field type path to a `ColumnType` token.
+/// Map a Rango field type path to a `ColumnType` token (the table lives in `rango_orm_core::type_map`).
 fn map_field_type(ty: &Type, core: &TokenStream) -> Result<TokenStream> {
     let type_str = type_name(ty);
+    if type_str.starts_with("ForeignKey<") {
+        let target = first_generic(ty)
+            .ok_or_else(|| syn::Error::new_spanned(ty, "expected ForeignKey<Model>"))?;
+        return Ok(quote! { <<#target as #core::Model>::Pk as #core::PrimaryKey>::COLUMN_TYPE });
+    }
+    match type_map::column_type(&type_str) {
+        Ok(ct) => Ok(column_type_tokens(&ct, core)),
+        Err(type_map::TypeMapError::Unknown) => Err(unsupported_type(ty, &type_str)),
+        Err(type_map::TypeMapError::Invalid(name)) => Err(syn::Error::new(
+            proc_macro2::Span::call_site(),
+            format!("Invalid {name} syntax: `{type_str}`"),
+        )),
+    }
+}
 
-    let col_type = match type_str.as_str() {
-        "FieldBool" => quote! { #core::ColumnType::Bool },
-        "FieldSmallInt" => quote! { #core::ColumnType::SmallInt },
-        "FieldInt" => quote! { #core::ColumnType::Int },
-        "FieldBigInt" => quote! { #core::ColumnType::BigInt },
-        "FieldAutoInt" => quote! { #core::ColumnType::AutoInt },
-        "FieldAutoBigInt" => quote! { #core::ColumnType::AutoBigInt },
-        "FieldFloat" => quote! { #core::ColumnType::Float },
-        "FieldDouble" => quote! { #core::ColumnType::Double },
-        "FieldText" => quote! { #core::ColumnType::Text },
-        "FieldEmail" => quote! { #core::ColumnType::Varchar(254) },
-        "FieldUrl" => quote! { #core::ColumnType::Varchar(2048) },
-        "FieldBytes" => quote! { #core::ColumnType::Bytea },
-        "FieldUuid" => quote! { #core::ColumnType::Uuid },
-        "FieldDate" => quote! { #core::ColumnType::Date },
-        "FieldTime" => quote! { #core::ColumnType::Time },
-        "FieldDateTime" => quote! { #core::ColumnType::DateTime },
-        "FieldJson" => quote! { #core::ColumnType::Jsonb },
-        s if s.starts_with("ForeignKey<") => {
-            let target = first_generic(ty)
-                .ok_or_else(|| syn::Error::new_spanned(ty, "expected ForeignKey<Model>"))?;
-            quote! { <<#target as #core::Model>::Pk as #core::PrimaryKey>::COLUMN_TYPE }
+fn column_type_tokens(ct: &ColumnType, core: &TokenStream) -> TokenStream {
+    match ct {
+        ColumnType::Bool => quote! { #core::ColumnType::Bool },
+        ColumnType::SmallInt => quote! { #core::ColumnType::SmallInt },
+        ColumnType::Int => quote! { #core::ColumnType::Int },
+        ColumnType::BigInt => quote! { #core::ColumnType::BigInt },
+        ColumnType::AutoInt => quote! { #core::ColumnType::AutoInt },
+        ColumnType::AutoBigInt => quote! { #core::ColumnType::AutoBigInt },
+        ColumnType::Float => quote! { #core::ColumnType::Float },
+        ColumnType::Double => quote! { #core::ColumnType::Double },
+        ColumnType::Text => quote! { #core::ColumnType::Text },
+        ColumnType::Bytea => quote! { #core::ColumnType::Bytea },
+        ColumnType::Uuid => quote! { #core::ColumnType::Uuid },
+        ColumnType::Date => quote! { #core::ColumnType::Date },
+        ColumnType::Time => quote! { #core::ColumnType::Time },
+        ColumnType::DateTime => quote! { #core::ColumnType::DateTime },
+        ColumnType::Json => quote! { #core::ColumnType::Json },
+        ColumnType::Jsonb => quote! { #core::ColumnType::Jsonb },
+        ColumnType::Varchar(n) => quote! { #core::ColumnType::Varchar(#n) },
+        ColumnType::Decimal { precision, scale } => {
+            quote! { #core::ColumnType::Decimal { precision: #precision, scale: #scale } }
         }
-        s if s.starts_with("FieldVarchar<") => parse_varchar(s, core)?,
-        s if s.starts_with("FieldDecimal<") => parse_decimal(s, core)?,
-        s if s.starts_with("FieldPassword<") => parse_password(s, core)?,
-        s if s.starts_with("FieldRange<") => quote! { #core::ColumnType::BigInt },
-        _ => return Err(unsupported_type(ty, &type_str)),
-    };
-    Ok(col_type)
+    }
 }
 
 /// Error on the field type itself, naming the Rango replacement for common Rust types.
@@ -708,44 +717,4 @@ fn unsupported_type(ty: &Type, type_str: &str) -> syn::Error {
         ty,
         format!("`{type_str}` is not a Rango field type: {hint}."),
     )
-}
-
-fn parse_varchar(s: &str, core: &TokenStream) -> Result<TokenStream> {
-    let inner = s.trim_start_matches("FieldVarchar<").trim_end_matches('>');
-    let parts: Vec<&str> = inner.split(',').collect();
-    if parts.len() == 2
-        && let Ok(max) = parts[1].trim().parse::<u32>()
-    {
-        return Ok(quote! { #core::ColumnType::Varchar(#max) });
-    }
-    Err(syn::Error::new(
-        proc_macro2::Span::call_site(),
-        format!("Invalid FieldVarchar syntax: `{}`", s),
-    ))
-}
-
-fn parse_decimal(s: &str, core: &TokenStream) -> Result<TokenStream> {
-    let inner = s.trim_start_matches("FieldDecimal<").trim_end_matches('>');
-    let parts: Vec<&str> = inner.split(',').collect();
-    if parts.len() == 2
-        && let (Ok(p), Ok(sc)) = (parts[0].trim().parse::<u8>(), parts[1].trim().parse::<u8>())
-    {
-        return Ok(quote! { #core::ColumnType::Decimal { precision: #p, scale: #sc } });
-    }
-    Err(syn::Error::new(
-        proc_macro2::Span::call_site(),
-        format!("Invalid FieldDecimal syntax: `{}`", s),
-    ))
-}
-
-fn parse_password(s: &str, core: &TokenStream) -> Result<TokenStream> {
-    let inner = s.trim_start_matches("FieldPassword<").trim_end_matches('>');
-    let parts: Vec<&str> = inner.split(',').collect();
-    if parts.len() == 2 && parts[1].trim().parse::<u32>().is_ok() {
-        return Ok(quote! { #core::ColumnType::Text });
-    }
-    Err(syn::Error::new(
-        proc_macro2::Span::call_site(),
-        format!("Invalid FieldPassword syntax: `{}`", s),
-    ))
 }
