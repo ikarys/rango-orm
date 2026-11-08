@@ -10,7 +10,7 @@ rango-orm-core = { path = "../rango-orm-core" }
 rango-orm-derive = { path = "../rango-orm-derive" }
 rango-orm-postgres = { path = "../rango-orm-postgres" }
 rango-orm-sqlite = { path = "../rango-orm-sqlite" }
-criterion = { version = "0.5", features = ["async_tokio"] }
+criterion = { version = "0.8", features = ["async_tokio"] }
 tokio = { version = "1", features = ["full"] }
 uuid = { version = "1", features = ["v4"] }
 chrono = "0.4"

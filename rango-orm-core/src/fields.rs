@@ -1,7 +1,5 @@
 use argon2::Argon2;
-use argon2::password_hash::{
-    PasswordHash, PasswordHasher, PasswordVerifier, SaltString, rand_core::OsRng,
-};
+use argon2::password_hash::{phc::PasswordHash, PasswordHasher, PasswordVerifier};
 use chrono::{DateTime, NaiveDate, NaiveTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -127,9 +125,8 @@ impl<const MIN: usize, const MAX: usize> FieldPassword<MIN, MAX> {
             return Err(FieldError(format!("Password too long (max {})", MAX)));
         }
 
-        let salt = SaltString::generate(&mut OsRng);
         let hash = Argon2::default()
-            .hash_password(plain.as_bytes(), &salt)
+            .hash_password(plain.as_bytes())
             .map_err(|e| FieldError(e.to_string()))?;
 
         Ok(Self {
