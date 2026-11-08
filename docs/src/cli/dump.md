@@ -27,6 +27,8 @@ rango dump
 | `-m, --migrations <dir>` | `migrations` / `[migrations] dir` from `rango.toml` | Where the schema snapshot is read. |
 | `-d, --database-url` | `DATABASE_URL` | Database URL. |
 
+`--schema-only` prints the number of tables in the schema. The backend comes from the URL scheme, not `rango.toml`.
+
 The `_rango_migrations` bookkeeping table is not dumped as a table (unless named with `--table`); its migration names go in a separate `migrations` field. The schema part needs a snapshot; run `rango makemigrations` first.
 
 ## restore
@@ -41,6 +43,10 @@ File contents are treated as untrusted:
 - Decompressed size is capped at 8 GiB against gzip bombs.
 
 Restore creates missing tables from the schema, then inserts rows, in one transaction. When it creates the schema it also recreates `_rango_migrations` with the dumped migration names, so `rango migrate` on the restored database has nothing to replay. A dump made by an older rango has no `migrations` field: restore warns and records nothing, so check `rango migrate` before running it. On any error, such as a constraint violation or a row conflicting with existing data, nothing is restored. On MySQL/MariaDB, DDL auto-commits, so tables created before a failure stay empty.
+
+Restore works whether the target is empty or was just prepared by `rango migrate`: migration names already recorded are skipped, while any other conflicting row still fails the restore. The backend is taken from the `-d` URL scheme (`postgres://`, `mysql://`, `sqlite://`), not from `rango.toml`.
+
+The schema is rebuilt from the dump's snapshot, not by replaying migration files, so migrations that hold hand-written SQL (stored procedures, views, triggers, data changes) are recorded as applied without being run. Restore prints a warning listing the recorded migrations; re-run the custom ones by hand from your `migrations/` directory.
 
 Foreign keys are checked at the end of the transaction, so rows can come in any order, including self-references and FK cycles. On Postgres, a cycle where every FK is `NOT NULL` needs the cycle's constraints to be `DEFERRABLE`; `rango makemigrations` creates them that way, but databases migrated before 0.1.1 keep non-deferrable constraints.
 

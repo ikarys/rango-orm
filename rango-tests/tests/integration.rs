@@ -2088,3 +2088,263 @@ async fn test_fk_and_m2m_follow_the_target_pk_type() {
         1
     );
 }
+
+// ── Hostile input (docs/src/trust/security-requirements.md) ──────────────────
+
+const HOSTILE: &str = "x'); DROP TABLE rango_test_user; --";
+
+// `tags` is a TEXT[] column in the test table; only `count()` is used, so it is never decoded.
+#[derive(Model, Debug, Clone)]
+#[model(table = "rango_test_sec_arr")]
+struct SecArr {
+    id: FieldUuid,
+    tags: FieldText,
+}
+
+#[derive(Model, Debug, Clone)]
+#[model(table = "ev\"il; DROP TABLE rango_test_user; --")]
+struct EvilNames {
+    id: FieldUuid,
+    #[field(column = "na\"me); DROP TABLE rango_test_user; --")]
+    name: FieldVarchar<1, 100>,
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration"), ignore)]
+async fn test_pg_hostile_values_are_bound() {
+    let pool = pool().await;
+    setup(&pool).await;
+    let mut u = user("a@pg.com");
+    u.name = FieldVarchar::new(HOSTILE.to_string()).unwrap();
+    insert(&pool, u).await.unwrap();
+    insert(&pool, user("b@pg.com")).await.unwrap();
+
+    let q = || TestUser::filter(&pool);
+    assert_eq!(q().eq("name", HOSTILE).count().await.unwrap(), 1);
+    assert_eq!(q().like("name", "x'%--").count().await.unwrap(), 1);
+    assert_eq!(
+        q().in_values("name", vec![SqlValue::from(HOSTILE), SqlValue::from("y")])
+            .count()
+            .await
+            .unwrap(),
+        1
+    );
+    assert_eq!(q().ne("name", HOSTILE).count().await.unwrap(), 1);
+    assert_eq!(q().count().await.unwrap(), 2);
+
+    // Backend extensions: JSON keys and values, FTS config and query, array values are bound.
+    insert(
+        &pool,
+        article(
+            "A",
+            "some text",
+            serde_json::json!({ HOSTILE: "v", "k": HOSTILE }),
+        ),
+    )
+    .await
+    .unwrap();
+    let a = || TestArticle::filter(&pool);
+    assert_eq!(
+        a().json_has_key("metadata", HOSTILE).count().await.unwrap(),
+        1
+    );
+    assert_eq!(
+        a().json_has_key("metadata", "k') OR 1=1 --")
+            .count()
+            .await
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        a().json_field_eq("metadata", "k", HOSTILE)
+            .count()
+            .await
+            .unwrap(),
+        1
+    );
+    assert!(a().json_field_eq(HOSTILE, "k", "v").count().await.is_err()); // column names are checked
+    assert_eq!(
+        a().json_field_eq("metadata", "k') OR 1=1 --", "v")
+            .count()
+            .await
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        a().json_contains("metadata", serde_json::json!({"k": HOSTILE}))
+            .count()
+            .await
+            .unwrap(),
+        1
+    );
+    assert_eq!(a().fts("content", HOSTILE).count().await.unwrap(), 0);
+    assert!(
+        a().fts_lang("content", "x", "english'); DROP TABLE rango_test_user; --")
+            .count()
+            .await
+            .is_err()
+    );
+
+    sqlx::query(r#"DROP TABLE IF EXISTS "rango_test_sec_arr""#)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        r#"CREATE TABLE "rango_test_sec_arr" ("id" UUID PRIMARY KEY, "tags" TEXT[] NOT NULL)"#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO "rango_test_sec_arr" VALUES (gen_random_uuid(), ARRAY['a', 'b', $1])"#,
+    )
+    .bind(HOSTILE)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let arr = || SecArr::filter(&pool);
+    assert_eq!(
+        arr()
+            .array_contains("tags", vec!["a".into(), HOSTILE.into()])
+            .count()
+            .await
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        arr()
+            .array_contains("tags", vec!["a'}') OR 1=1 --".into()])
+            .count()
+            .await
+            .unwrap(),
+        0
+    );
+    sqlx::query(r#"DROP TABLE "rango_test_sec_arr""#)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    assert_eq!(q().count().await.unwrap(), 2); // rango_test_user still exists
+    teardown(&pool).await;
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration"), ignore)]
+async fn test_pg_hostile_identifiers_are_quoted() {
+    let pool = pool().await;
+    setup(&pool).await;
+    let s = EvilNames::schema();
+    let col = &s.columns[1].name;
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "DROP TABLE IF EXISTS {}",
+        quote_ident(&s.table_name)
+    )))
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "CREATE TABLE {} (\"id\" UUID PRIMARY KEY, {} VARCHAR(100) NOT NULL)",
+        quote_ident(&s.table_name),
+        quote_ident(col),
+    )))
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let mut e = EvilNames {
+        id: FieldUuid(Uuid::new_v4()),
+        name: FieldVarchar::new("n".to_string()).unwrap(),
+    };
+    insert(&pool, e.clone()).await.unwrap();
+    e.name = FieldVarchar::new("m".to_string()).unwrap();
+    update(&pool, e.clone()).await.unwrap();
+    let q = || EvilNames::filter(&pool);
+    assert_eq!(
+        q().eq(col.as_str(), "m")
+            .order_by(col.as_str())
+            .count()
+            .await
+            .unwrap(),
+        1
+    );
+    assert!(matches!(
+        q().eq("name\" = 1 OR \"1", "m").count().await,
+        Err(Error::Invalid(_))
+    ));
+    delete(&pool, &e).await.unwrap();
+    assert_eq!(q().count().await.unwrap(), 0);
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "DROP TABLE {}",
+        quote_ident(&s.table_name)
+    )))
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert_eq!(TestUser::filter(&pool).count().await.unwrap(), 0); // rango_test_user still exists
+    teardown(&pool).await;
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration"), ignore)]
+async fn test_pg_unknown_lookup_and_conflict_columns_are_invalid() {
+    let pool = pool().await;
+    setup(&pool).await;
+    let bogus = vec![("emial", SqlValue::Text("a@b.c".into()))];
+    let err = get_or_create(&pool, bogus.clone(), user("a@b.c"))
+        .await
+        .unwrap_err();
+    assert!(matches!(err, Error::Invalid(_)), "{err:?}");
+    let err = update_or_create(&pool, bogus, user("a@b.c"))
+        .await
+        .unwrap_err();
+    assert!(matches!(err, Error::Invalid(_)), "{err:?}");
+    let err = bulk_upsert(&pool, &[user("a@b.c")], &["emial"])
+        .await
+        .unwrap_err();
+    assert!(matches!(err, Error::Invalid(_)), "{err:?}");
+}
+
+#[derive(Model, Debug, Clone)]
+#[model(table = "dec_vals")]
+struct DecVals {
+    id: FieldUuid,
+    price: FieldDecimal<10, 2>,
+    opt: Option<FieldDecimal<10, 2>>,
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration"), ignore)]
+async fn test_pg_values_decodes_decimal_with_scale() {
+    let pool = pool().await;
+    sqlx::query("DROP TABLE IF EXISTS dec_vals")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("CREATE TABLE dec_vals (id UUID PRIMARY KEY, price NUMERIC(10,2) NOT NULL, opt NUMERIC(10,2))").execute(&pool).await.unwrap();
+    let row = DecVals {
+        id: FieldUuid(Uuid::new_v4()),
+        price: FieldDecimal::from_decimal(Decimal::new(1500, 2)),
+        opt: None,
+    };
+    insert(&pool, row).await.unwrap();
+    let rows = DecVals::filter(&pool)
+        .values(&["price", "opt"])
+        .await
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+    match &rows[0]["price"] {
+        SqlValue::Decimal(d) => {
+            assert_eq!(d.to_string(), "15.00");
+        }
+        other => panic!("expected Decimal, got {other:?}"),
+    }
+    assert!(
+        matches!(rows[0]["opt"], SqlValue::NullDecimal),
+        "{:?}",
+        rows[0]["opt"]
+    );
+    sqlx::query("DROP TABLE dec_vals")
+        .execute(&pool)
+        .await
+        .unwrap();
+}

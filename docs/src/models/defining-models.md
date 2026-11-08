@@ -15,6 +15,8 @@ pub struct Article {
 }
 ```
 
+A model is a normal struct, so it can derive other traits next to `Model`, for example `#[derive(Model, Clone, Debug)]`. A struct with a `FieldPassword` field prints `<redacted>` for it in `Debug`. `FieldPassword::new`, `verify` and `from_hash` are documented in [Field types](./field-types.md).
+
 ## Table name
 
 By default, the table name is the snake_case of the struct name. Tables are never prefixed.
@@ -117,7 +119,7 @@ pub name: FieldVarchar<1, 100>,   // NOT NULL
 #[model(managed = false)]          // exclude from migrations (external table)
 #[model(ordering = [asc("name"), desc("created_at")])]
 #[model(constraints = [
-    CheckConstraint::raw("age >= 0").name("chk_age"),
+    CheckConstraint::new("age >= 0").name("chk_age"),
     UniqueConstraint::on(&["email", "tenant_id"]).name("uniq_email_tenant"),
 ])]
 ```

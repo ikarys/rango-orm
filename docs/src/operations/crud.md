@@ -42,6 +42,8 @@ let updated = update(&pool, user).await?;
 delete(&pool, &user).await?;
 ```
 
+Delete is idempotent: deleting a row that does not exist (already deleted, or never inserted) is not an error and returns `Ok(())`. `update` of a missing row returns `Error::NotFound`.
+
 ## get_or_create
 
 Atomic — safe against race conditions:
@@ -70,7 +72,7 @@ let values = User { /* ... */ };
 let user = update_or_create(&pool, lookup, values).await?;
 ```
 
-Updates the row matching `lookup` (update hooks fire) or inserts `values` (create hooks fire). It takes a pool or a transaction (`&mut **tx`) on every backend. The lookup and the write are two statements: wrap the call in `atomic()` to make them one unit.
+Updates the row matching `lookup` (update hooks fire; the whole row is overwritten from the values of `values`, only the primary key is kept, so fields you did not mean to change are reset too) or inserts `values` (create hooks fire). It takes a pool or a transaction (`&mut **tx`) on every backend. The lookup and the write are two statements: wrap the call in `atomic()` to make them one unit.
 
 ## all()
 

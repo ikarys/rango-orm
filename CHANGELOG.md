@@ -2,9 +2,30 @@
 
 ## Unreleased
 
+- Fix: `select_as::<P>().all()` emits the `db.query` tracing span like every other query-builder terminal (all backends).
+- Fix: `bulk_update` checks column names before the empty-input shortcut, so an unknown column is `Error::Invalid` even with an empty slice (all backends).
+- Fix: `rango makemigrations` on a plain Rust type (`bool`, `String`, `i32`, ...) names the Rango field type to use, like the derive does.
+- Fix: `rango makemigrations` detects a `CheckConstraint` (or partial unique condition) whose SQL changed while its name stayed the same: it emits a drop then an add (SQLite: table rebuild) instead of "Nothing to migrate".
+- Fix: `[models] src` in `rango.toml` is honored by `rango makemigrations` (a positional directory still overrides it).
+- Fix: the CLI reads `url` from `rango.toml` as the last fallback after `--database-url` and `DATABASE_URL`, as documented (local dev only).
+- Fix: `rango restore` skips migration names already in `_rango_migrations`, so it works on a database `rango migrate` already prepared (any backend). Every other conflict still fails.
+- Feat: `rango restore` warns, listing the migrations it recorded as applied without running them: custom SQL in them (stored procedures, views, triggers) is not reproduced and must be re-run by hand.
+- Fix: commands taking a database URL (`restore`, `dump`, `backup`, `export`, `import`, `migrate`) infer the backend from its scheme (`postgres`, `postgresql`, `mysql`, `mariadb`, `sqlite`) instead of always trusting `rango.toml`.
+- Fix: `rango import` without `--table` on rows that carry no `__table` (single-table export, CSV) fails with a message asking for `--table`, instead of `relation "default" does not exist`.
+- Fix: `rango dump --schema-only` reports the number of tables of the schema instead of 0.
+- Docs: `makemigrations` migration file naming rule (`NNNN_<tables>.sql`, or `NNNN_auto.sql` above 40 characters).
+- Breaking: `atomic_retry` (Postgres, MySQL / MariaDB) takes `AsyncFnOnce + Clone` instead of `AsyncFnMut`, and clones the closure per attempt. Its future is now `Send`, so it can go in `tokio::spawn` like `atomic` (the `AsyncFnMut` bound made rustc report "`Send` is not general enough"). State shared across attempts is captured by reference (`&AtomicU32`) instead of mutated through `&mut`.
+- Feat: `impl From<FieldError> for Error` (`Error::Invalid`), so `FieldVarchar::new(..)?` works in a function returning `rango::Result`.
+- Fix: `get_or_create` / `update_or_create` lookup columns and Postgres `bulk_upsert` conflict columns are checked against the model: an unknown name is `Error::Invalid` before any SQL, not a raw database error.
+- Fix: MySQL / MariaDB `UniqueViolation`, `ForeignKeyViolation` and `CheckViolation` carry the constraint name (parsed from the server message, without the `table.` prefix MySQL 8 adds to unique keys). They were `None`.
+- Fix: `values()` returns DECIMAL columns as `SqlValue::Decimal` (`NullDecimal` for NULL) at the column scale on SQLite and MySQL / MariaDB. MySQL gave `NullText` (data loss) and SQLite `BigInt(15)` for `15.00`.
+- Feat: `WithRelated::into_inner(self) -> M`.
+- Perf: SQLite bulk operations chunk at 32,000 bound parameters instead of 999 (the bundled SQLite 3.46 allows 32,766): `bulk_create` of 1,000 rows is one statement.
+- Docs: `makemigrations` detection table lists renames, constraint, index and FK changes and the SQLite rebuild; `CheckConstraint::new` (not `raw`); partial unique indexes on Postgres and SQLite; typed columns first in the quick start with PostgreSQL / MySQL connect examples; `FieldPassword` hashing cost.
 - Perf: `bulk_create`, `bulk_update` and `bulk_upsert` no longer open a transaction when the work is a single statement (one chunk, or the Postgres `UNNEST` path): one statement is already atomic. Several chunks still share one transaction (a savepoint inside `atomic`).
 - Perf: `.exists()` runs `SELECT EXISTS(SELECT 1 ...)` instead of `SELECT COUNT(*)`, so it stops at the first matching row.
 - Fix: `rango restore` records the applied migrations. The dump carries the names from `_rango_migrations` (new optional `migrations` field, dump version unchanged); restore recreates the tracking table and inserts them in the same transaction as the schema, so `rango migrate` after a restore into a fresh database is a no-op instead of replaying 0002 (`duplicate column name`). Postgres, SQLite, MySQL / MariaDB. Dumps made before this change restore as before and print a warning. A data-only restore into an existing schema leaves the tracking table alone.
+- Docs: `SECURITY.md` (private reporting, supported versions) and a security requirements page mapping each claim to the test that proves it. New tests: hostile values and identifiers on every backend, TLS defaults, no bound values in errors or spans, `forbid(unsafe_code)` in every crate root (`rango-tests` was missing it).
 - Docs: FK / M2M follow the target primary key type, `FieldPassword` is `TEXT`, decimal filters and `sum` / `avg` return types, rename detection in `makemigrations` (prompt, `--yes`, no terminal), real CLI output in the quick start, plain table names in examples, install snippets use `0.2` (beta: `0.2.0-beta.1`).
 
 ## 0.2.0-beta.1 (2026-11-08)

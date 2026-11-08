@@ -31,15 +31,20 @@ where
 ///
 /// `max_attempts` counts total runs; `0` is treated as `1`.
 ///
+/// The closure is cloned for each attempt, so it must be `Clone` (an async closure
+/// is, when everything it captures is). To keep state across attempts, capture a
+/// reference to an atomic or a `Cell`. This bound is what keeps the future `Send`
+/// (spawnable with `tokio::spawn`), like [`atomic`]; an `AsyncFnMut` bound does not.
+///
 /// # Example
 /// ```rust,ignore
 /// let n = rango::mysql::atomic_retry(&pool, 3, async |tx| {
 ///     rango::mysql::raw_execute(&mut **tx, "UPDATE ...", vec![]).await
 /// }).await?;
 /// ```
-pub async fn atomic_retry<F, T>(pool: &MySqlPool, max_attempts: u32, mut f: F) -> Result<T>
+pub async fn atomic_retry<F, T>(pool: &MySqlPool, max_attempts: u32, f: F) -> Result<T>
 where
-    F: AsyncFnMut(&mut MySqlTransaction<'_>) -> Result<T>,
+    F: AsyncFnOnce(&mut MySqlTransaction<'_>) -> Result<T> + Clone,
 {
     let max_attempts = max_attempts.max(1);
     let mut attempt = 0u32;
@@ -47,7 +52,7 @@ where
     loop {
         attempt += 1;
 
-        match atomic(pool, &mut f).await {
+        match atomic(pool, f.clone()).await {
             Ok(result) => return Ok(result),
             Err(e) => {
                 if !e.is_retryable() || attempt >= max_attempts {

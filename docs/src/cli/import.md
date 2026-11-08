@@ -25,7 +25,7 @@ rango import data --format json --table users
 
 | Option | Default | Description |
 |---|---|---|
-| `--table` | from `__table` field | Target table |
+| `--table` | from `__table` field | Target table. Required for a single-table export (`rango export --table x`) and for CSV, which carry no `__table`; without it import stops with an error asking for it. |
 | `--format` | auto-detected | `json` or `csv` |
 | `--replace` | skip | Replace existing rows on conflict |
 | `--database-url` | `DATABASE_URL` | Database connection URL |

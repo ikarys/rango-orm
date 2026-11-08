@@ -15,7 +15,7 @@ const VERSION: u32 = 2;
 /// Upper bound on a decompressed dump, against gzip bombs.
 const MAX_DUMP_BYTES: u64 = 8 << 30;
 /// Rango's own bookkeeping table: never part of a dump unless asked for by name.
-const MIGRATIONS_TABLE: &str = "_rango_migrations";
+pub(crate) const MIGRATIONS_TABLE: &str = "_rango_migrations";
 
 #[derive(Serialize, Deserialize)]
 struct Dump {
@@ -53,7 +53,7 @@ async fn build_dump(
     migrations_dir: &str,
 ) -> Result<Dump> {
     let cfg = crate::config::RangoConfig::load().unwrap_or_default();
-    let backend = cfg.database.backend_kind();
+    let backend = cfg.backend_for(database_url);
 
     let mut schema = None;
     if with_schema {
@@ -122,7 +122,12 @@ pub async fn dump(
     match output {
         Some(path) => {
             write_private(Path::new(path), &json)?;
-            println!("✅ Dumped {} table(s) to {}", dump.tables.len(), path);
+            // `--schema-only` carries no rows: count the tables of the schema instead.
+            let tables = match &dump.schema {
+                Some(schema) if schema_only => schema.tables.len(),
+                _ => dump.tables.len(),
+            };
+            println!("✅ Dumped {} table(s) to {}", tables, path);
         }
         None => println!("{}", String::from_utf8_lossy(&json)),
     }
@@ -145,7 +150,7 @@ pub async fn backup(database_url: &str, dir: &str, migrations_dir: &str) -> Resu
 
 pub async fn restore(database_url: &str, input: &str) -> Result<()> {
     let cfg = crate::config::RangoConfig::load().unwrap_or_default();
-    let backend = cfg.database.backend_kind();
+    let backend = cfg.backend_for(database_url);
 
     let mut bytes = std::fs::read(input).with_context(|| format!("Failed to read {}", input))?;
     if bytes.starts_with(&[0x1f, 0x8b]) {
@@ -181,6 +186,17 @@ pub async fn restore(database_url: &str, input: &str) -> Result<()> {
     if let Some(sql) = &mut setup_sql {
         match &dump.migrations {
             Some(names) => {
+                if !names.is_empty() {
+                    // The schema comes from the snapshot, not from replaying the files:
+                    // hand-written SQL (procedures, views, triggers, data fixes) is lost.
+                    eprintln!(
+                        "warning: the schema was rebuilt from the dump's snapshot and these migrations \
+                         were recorded as applied without running them: {}. Any custom SQL in them \
+                         (stored procedures, views, triggers, data changes) was NOT reproduced: \
+                         re-run those statements by hand.",
+                        names.join(", ")
+                    );
+                }
                 sql.push('\n');
                 sql.push_str(tracking_table_ddl(backend));
                 sql.push(';');

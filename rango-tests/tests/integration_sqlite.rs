@@ -418,7 +418,7 @@ async fn test_sqlite_bulk_create_is_atomic_across_chunks() {
     setup(&pool).await;
 
     // Enough rows for several chunks; the last row duplicates the first email.
-    let mut users: Vec<TestUser> = (0..450)
+    let mut users: Vec<TestUser> = (0..6500)
         .map(|i| user(&format!("atomic{}@t.com", i)))
         .collect();
     users.push(user("atomic0@t.com"));
@@ -1569,6 +1569,11 @@ async fn test_sqlite_bulk_update_bulk_upsert_update_or_create() {
         let err = bulk_update(&pool, &users, &[bad]).await.unwrap_err();
         assert!(matches!(err, Error::Invalid(_)), "{err:?}");
     }
+    // ... even when the slice is empty.
+    let err = bulk_update::<_, TestUser>(&pool, &[], &["nope"])
+        .await
+        .unwrap_err();
+    assert!(matches!(err, Error::Invalid(_)), "{err:?}");
 
     // Upsert: existing email keeps its id and takes the new name, new email is inserted.
     let mut again = user("bu0@t.com");
@@ -1921,8 +1926,8 @@ async fn test_sqlite_bulk_update_mixed_types_over_several_chunks() {
     }
 
     // Enough rows for at least two chunks of the multi-row UPDATE.
-    let mut rows: Vec<BulkMix> = (0..300).map(bulk_mix).collect();
-    assert_eq!(bulk_create(&pool, &rows).await.unwrap(), 300);
+    let mut rows: Vec<BulkMix> = (0..3700).map(bulk_mix).collect();
+    assert_eq!(bulk_create(&pool, &rows).await.unwrap(), 3700);
 
     // Every column changes, NULLs become values and values become NULL.
     for (i, r) in rows.iter_mut().enumerate() {
@@ -1945,15 +1950,15 @@ async fn test_sqlite_bulk_update_mixed_types_over_several_chunks() {
     }
     let t = std::time::Instant::now();
     let cols = ["flag", "n", "big", "price", "at", "nick", "meta"];
-    assert_eq!(bulk_update(&pool, &rows, &cols).await.unwrap(), 300);
-    println!("sqlite bulk_update of 300 rows: {:?}", t.elapsed());
+    assert_eq!(bulk_update(&pool, &rows, &cols).await.unwrap(), 3700);
+    println!("sqlite bulk_update of 3700 rows: {:?}", t.elapsed());
     rows.sort_by_key(|r| r.id.0);
     assert_eq!(bulk_mix_sorted(&pool).await, rows);
 
     // Unchanged rows still count as matched; a subset of columns leaves the others alone.
     assert_eq!(
         bulk_update(&pool, &rows, &["n", "nick"]).await.unwrap(),
-        300
+        3700
     );
     for r in rows.iter_mut() {
         r.n = Some(FieldInt(5));
@@ -1961,7 +1966,7 @@ async fn test_sqlite_bulk_update_mixed_types_over_several_chunks() {
     }
     assert_eq!(
         bulk_update(&pool, &rows, &["n", "nick"]).await.unwrap(),
-        300
+        3700
     );
     assert_eq!(bulk_mix_sorted(&pool).await, rows);
 
@@ -1972,14 +1977,14 @@ async fn test_sqlite_bulk_update_mixed_types_over_several_chunks() {
     let before = bulk_mix_sorted(&pool).await;
     let snapshot = rows.clone();
     let res: Result<(), Error> = atomic(&pool, async |tx| {
-        assert_eq!(bulk_update(&mut **tx, &snapshot, &["flag"]).await?, 300);
+        assert_eq!(bulk_update(&mut **tx, &snapshot, &["flag"]).await?, 3700);
         Err(Error::Invalid("rollback".into()))
     })
     .await;
     assert!(res.is_err());
     assert_eq!(bulk_mix_sorted(&pool).await, before);
     atomic(&pool, async |tx| {
-        assert_eq!(bulk_update(&mut **tx, &snapshot, &["flag"]).await?, 300);
+        assert_eq!(bulk_update(&mut **tx, &snapshot, &["flag"]).await?, 3700);
         Ok(())
     })
     .await
@@ -2066,4 +2071,212 @@ async fn test_sqlite_decimal_filter_and_aggregates() {
     assert_eq!(sum, Some(7.5));
     let avg: Option<f64> = BulkMix::filter(&pool).avg("price").await.unwrap();
     assert_eq!(avg, Some(1.875));
+}
+
+// ── Hostile input (docs/src/trust/security-requirements.md) ──────────────────
+
+const HOSTILE: &str = "x'); DROP TABLE test_user; --";
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-sqlite"), ignore)]
+async fn test_sqlite_hostile_values_are_bound() {
+    let pool = pool().await;
+    setup(&pool).await;
+    let mut u = user("a@sqlite.com");
+    u.name = FieldVarchar::new(HOSTILE.to_string()).unwrap();
+    insert(&pool, u).await.unwrap();
+    insert(&pool, user("b@sqlite.com")).await.unwrap();
+
+    // The hostile text is matched as data, never run: exactly one row, table intact.
+    let q = || TestUser::filter(&pool);
+    assert_eq!(q().eq("name", HOSTILE).count().await.unwrap(), 1);
+    assert_eq!(q().like("name", "x'%--").count().await.unwrap(), 1);
+    assert_eq!(
+        q().in_values("name", vec![SqlValue::from(HOSTILE), SqlValue::from("y")])
+            .count()
+            .await
+            .unwrap(),
+        1
+    );
+    assert_eq!(q().ne("name", HOSTILE).count().await.unwrap(), 1);
+    assert_eq!(q().count().await.unwrap(), 2);
+
+    // Backend extensions: path, value and FTS query are bound too.
+    setup_article(&pool).await;
+    insert(&pool, article_sqlite("A", r#"{"k":"v"}"#))
+        .await
+        .unwrap();
+    let a = || TestArticleSqlite::filter(&pool);
+    assert_eq!(
+        a().json_extract_eq("metadata", "$.k", HOSTILE)
+            .count()
+            .await
+            .unwrap(),
+        0
+    );
+    // A hostile path or FTS query matches nothing (or errors): it is never extra SQL.
+    let path = a().json_extract_exists("metadata", "$.k') OR 1=1 --");
+    assert_eq!(path.count().await.unwrap_or(0), 0);
+    let fts = a().fts5("test_article", HOSTILE);
+    assert_eq!(fts.count().await.unwrap_or(0), 0);
+    assert_eq!(q().count().await.unwrap(), 2);
+}
+
+#[derive(Model, Debug, Clone)]
+#[model(table = "ev\"il; DROP TABLE test_user; --")]
+struct EvilNames {
+    id: FieldUuid,
+    #[field(column = "na\"me); DROP TABLE test_user; --")]
+    name: FieldVarchar<1, 100>,
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-sqlite"), ignore)]
+async fn test_sqlite_hostile_identifiers_are_quoted() {
+    let pool = pool().await;
+    setup(&pool).await;
+    let s = EvilNames::schema();
+    let col = &s.columns[1].name;
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "CREATE TABLE {} (\"id\" TEXT PRIMARY KEY, {} TEXT NOT NULL)",
+        quote_ident(&s.table_name),
+        quote_ident(col)
+    )))
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let mut e = EvilNames {
+        id: FieldUuid(Uuid::new_v4()),
+        name: FieldVarchar::new("n".to_string()).unwrap(),
+    };
+    insert(&pool, e.clone()).await.unwrap();
+    e.name = FieldVarchar::new("m".to_string()).unwrap();
+    update(&pool, e.clone()).await.unwrap();
+    let q = || EvilNames::filter(&pool);
+    assert_eq!(
+        q().eq(col.as_str(), "m")
+            .order_by(col.as_str())
+            .count()
+            .await
+            .unwrap(),
+        1
+    );
+    // A string column name from input is checked against the schema, not quoted blindly.
+    assert!(matches!(
+        q().eq("name\" = 1 OR \"1", "m").count().await,
+        Err(Error::Invalid(_))
+    ));
+    delete(&pool, &e).await.unwrap();
+    assert_eq!(q().count().await.unwrap(), 0);
+    assert_eq!(TestUser::filter(&pool).count().await.unwrap(), 0); // test_user still exists
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-sqlite"), ignore)]
+async fn test_sqlite_bound_values_never_logged_or_in_errors() {
+    let pool = pool().await;
+    setup(&pool).await;
+    let log = SpanLog::default();
+    let _guard = tracing::subscriber::set_default(log.clone());
+    let needle = "s3cr3t-needle";
+
+    TestUser::filter(&pool)
+        .eq("name", needle)
+        .all()
+        .await
+        .unwrap();
+    let missing = rango_orm_sqlite::raw_execute(
+        &pool,
+        "SELECT * FROM no_such_table WHERE name = ?",
+        vec![SqlValue::from(needle)],
+    )
+    .await
+    .unwrap_err();
+    let bad_sql = rango_orm_sqlite::raw_execute(
+        &pool,
+        "SELEC nonsense WHERE name = ?",
+        vec![SqlValue::from(needle)],
+    )
+    .await
+    .unwrap_err();
+
+    // Errors carry neither the bound value nor the statement text.
+    for e in [&missing, &bad_sql] {
+        let text = format!("{e} {e:?}");
+        assert!(!text.contains(needle), "{text}");
+        assert!(!text.contains("WHERE name"), "{text}");
+    }
+    // Rango's own spans never hold the value (sqlx's QueryLogger only stores the SQL text).
+    let seen = format!("{:?}", log.0.lock().unwrap());
+    assert!(seen.contains("db.query"), "no span recorded: {seen}");
+    assert!(!seen.contains(needle), "{seen}");
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-sqlite"), ignore)]
+async fn test_sqlite_unknown_lookup_and_conflict_columns_are_invalid() {
+    let pool = pool().await;
+    setup(&pool).await;
+    let bogus = vec![("emial", SqlValue::Text("a@b.c".into()))];
+    let err = get_or_create(&pool, bogus.clone(), user("a@b.c"))
+        .await
+        .unwrap_err();
+    assert!(matches!(err, Error::Invalid(_)), "{err:?}");
+    let err = update_or_create(&pool, bogus, user("a@b.c"))
+        .await
+        .unwrap_err();
+    assert!(matches!(err, Error::Invalid(_)), "{err:?}");
+    let err = bulk_upsert(&pool, &[user("a@b.c")], &["emial"])
+        .await
+        .unwrap_err();
+    assert!(matches!(err, Error::Invalid(_)), "{err:?}");
+}
+
+#[derive(Model, Debug, Clone)]
+#[model(table = "dec_vals")]
+struct DecVals {
+    id: FieldUuid,
+    price: FieldDecimal<10, 2>,
+    opt: Option<FieldDecimal<10, 2>>,
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-sqlite"), ignore)]
+async fn test_sqlite_values_decodes_decimal_with_scale() {
+    let pool = pool().await;
+    sqlx::query("DROP TABLE IF EXISTS dec_vals")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("CREATE TABLE dec_vals (id TEXT PRIMARY KEY, price NUMERIC NOT NULL, opt NUMERIC)")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let row = DecVals {
+        id: FieldUuid(Uuid::new_v4()),
+        price: FieldDecimal::from_decimal(Decimal::new(1500, 2)),
+        opt: None,
+    };
+    insert(&pool, row).await.unwrap();
+    let rows = DecVals::filter(&pool)
+        .values(&["price", "opt"])
+        .await
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+    match &rows[0]["price"] {
+        SqlValue::Decimal(d) => {
+            assert_eq!(d.to_string(), "15.00");
+        }
+        other => panic!("expected Decimal, got {other:?}"),
+    }
+    assert!(
+        matches!(rows[0]["opt"], SqlValue::NullDecimal),
+        "{:?}",
+        rows[0]["opt"]
+    );
+    sqlx::query("DROP TABLE dec_vals")
+        .execute(&pool)
+        .await
+        .unwrap();
 }

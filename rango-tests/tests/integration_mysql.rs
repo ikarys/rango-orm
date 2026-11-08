@@ -705,7 +705,7 @@ async fn test_mysql_unique_violation_is_typed() {
     insert(&pool, user("dup@mysql.com")).await.unwrap();
     let err = insert(&pool, user("dup@mysql.com")).await.unwrap_err();
     assert!(
-        matches!(err, rango_orm_core::Error::UniqueViolation { .. }),
+        matches!(&err, rango_orm_core::Error::UniqueViolation { constraint: Some(c) } if c == "email"),
         "{err:?}"
     );
 }
@@ -1823,9 +1823,10 @@ async fn test_mysql_atomic_retry_recovers_from_deadlock() {
     let worker = |first: &'static str, second: &'static str| {
         let (pool, barrier, runs) = (pool.clone(), barrier.clone(), runs.clone());
         async move {
-            let mut attempt = 0;
+            let attempt = AtomicU32::new(0);
+            let attempt = &attempt;
             atomic_retry(&pool, 5, async |tx| {
-                attempt += 1;
+                let attempt = attempt.fetch_add(1, Ordering::SeqCst) + 1;
                 runs.fetch_add(1, Ordering::SeqCst);
                 let sql = "UPDATE `test_user` SET `score` = 1 WHERE `email` = ?";
                 raw_execute(&mut **tx, sql, vec![SqlValue::Text(first.into())]).await?;
@@ -1839,7 +1840,7 @@ async fn test_mysql_atomic_retry_recovers_from_deadlock() {
             .await
         }
     };
-    // Same task, interleaved by `join!` (async closures are not `Send`-inferable for `spawn`).
+    // Same task, interleaved by `join!`.
     let (r1, r2) = tokio::join!(
         worker("dl_a@t.com", "dl_b@t.com"),
         worker("dl_b@t.com", "dl_a@t.com")
@@ -2135,4 +2136,149 @@ async fn test_mysql_missing_table_is_typed() {
         .await
         .expect_err("qualified");
     assert!(is_missing(&err), "qualified: {err:?}");
+}
+
+// ── Hostile input (docs/src/trust/security-requirements.md) ──────────────────
+
+const HOSTILE: &str = "x'); DROP TABLE test_user; --";
+
+#[derive(Model, Debug, Clone)]
+#[model(table = "ev`il; DROP TABLE test_user; --")]
+struct EvilNames {
+    id: FieldUuid,
+    #[field(column = "na`me); DROP TABLE test_user; --")]
+    name: FieldVarchar<1, 100>,
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-mysql"), ignore)]
+async fn test_mysql_hostile_values_are_bound() {
+    let pool = pool().await;
+    setup(&pool).await;
+    let mut u = user("a@mysql.com");
+    u.name = FieldVarchar::new(HOSTILE.to_string()).unwrap();
+    insert(&pool, u).await.unwrap();
+    insert(&pool, user("b@mysql.com")).await.unwrap();
+
+    let q = || TestUser::filter(&pool);
+    assert_eq!(q().eq("name", HOSTILE).count().await.unwrap(), 1);
+    assert_eq!(q().like("name", "x'%--").count().await.unwrap(), 1);
+    assert_eq!(
+        q().in_values("name", vec![SqlValue::from(HOSTILE), SqlValue::from("y")])
+            .count()
+            .await
+            .unwrap(),
+        1
+    );
+    assert_eq!(q().ne("name", HOSTILE).count().await.unwrap(), 1);
+    assert_eq!(q().count().await.unwrap(), 2); // test_user still exists
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-mysql"), ignore)]
+async fn test_mysql_hostile_identifiers_are_quoted() {
+    let pool = pool().await;
+    setup(&pool).await;
+    let s = EvilNames::schema();
+    let col = &s.columns[1].name;
+    let table = quote_ident_mysql(&s.table_name);
+    exec(&pool, &format!("DROP TABLE IF EXISTS {table}")).await;
+    exec(
+        &pool,
+        &format!(
+            "CREATE TABLE {table} (`id` BINARY(16) PRIMARY KEY, {} VARCHAR(100) NOT NULL)",
+            quote_ident_mysql(col)
+        ),
+    )
+    .await;
+
+    let mut e = EvilNames {
+        id: FieldUuid(Uuid::new_v4()),
+        name: FieldVarchar::new("n".to_string()).unwrap(),
+    };
+    insert(&pool, e.clone()).await.unwrap();
+    e.name = FieldVarchar::new("m".to_string()).unwrap();
+    update(&pool, e.clone()).await.unwrap();
+    let q = || EvilNames::filter(&pool);
+    assert_eq!(
+        q().eq(col.as_str(), "m")
+            .order_by(col.as_str())
+            .count()
+            .await
+            .unwrap(),
+        1
+    );
+    assert!(matches!(
+        q().eq("name` = 1 OR `1", "m").count().await,
+        Err(Error::Invalid(_))
+    ));
+    delete(&pool, &e).await.unwrap();
+    assert_eq!(q().count().await.unwrap(), 0);
+    exec(&pool, &format!("DROP TABLE {table}")).await;
+    assert_eq!(TestUser::filter(&pool).count().await.unwrap(), 0); // test_user still exists
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-mysql"), ignore)]
+async fn test_mysql_unknown_lookup_and_conflict_columns_are_invalid() {
+    let pool = pool().await;
+    setup(&pool).await;
+    let bogus = vec![("emial", SqlValue::Text("a@b.c".into()))];
+    let err = get_or_create(&pool, bogus.clone(), user("a@b.c"))
+        .await
+        .unwrap_err();
+    assert!(matches!(err, Error::Invalid(_)), "{err:?}");
+    let err = update_or_create(&pool, bogus, user("a@b.c"))
+        .await
+        .unwrap_err();
+    assert!(matches!(err, Error::Invalid(_)), "{err:?}");
+    let err = bulk_upsert(&pool, &[user("a@b.c")], &["emial"])
+        .await
+        .unwrap_err();
+    assert!(matches!(err, Error::Invalid(_)), "{err:?}");
+}
+
+#[derive(Model, Debug, Clone)]
+#[model(table = "dec_vals")]
+struct DecVals {
+    id: FieldUuid,
+    price: FieldDecimal<10, 2>,
+    opt: Option<FieldDecimal<10, 2>>,
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-mysql"), ignore)]
+async fn test_mysql_values_decodes_decimal_with_scale() {
+    let pool = pool().await;
+    sqlx::query("DROP TABLE IF EXISTS dec_vals")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("CREATE TABLE dec_vals (id BINARY(16) PRIMARY KEY, price DECIMAL(10,2) NOT NULL, opt DECIMAL(10,2))").execute(&pool).await.unwrap();
+    let row = DecVals {
+        id: FieldUuid(Uuid::new_v4()),
+        price: FieldDecimal::from_decimal(Decimal::new(1500, 2)),
+        opt: None,
+    };
+    insert(&pool, row).await.unwrap();
+    let rows = DecVals::filter(&pool)
+        .values(&["price", "opt"])
+        .await
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+    match &rows[0]["price"] {
+        SqlValue::Decimal(d) => {
+            assert_eq!(d.to_string(), "15.00");
+        }
+        other => panic!("expected Decimal, got {other:?}"),
+    }
+    assert!(
+        matches!(rows[0]["opt"], SqlValue::NullDecimal),
+        "{:?}",
+        rows[0]["opt"]
+    );
+    sqlx::query("DROP TABLE dec_vals")
+        .execute(&pool)
+        .await
+        .unwrap();
 }

@@ -19,6 +19,19 @@ let avg_active = User::filter(&pool)
 
 Generic over the return type — works for numbers, strings, dates.
 
+### Exact decimals
+
+`FieldDecimal` columns: `min::<Decimal>` and `max::<Decimal>` compile on PostgreSQL and MySQL / MariaDB only. On SQLite `Decimal` cannot be decoded, so they do not compile. `sum` and `avg` return `f64` on every backend, never an exact decimal.
+
+The portable way to get an exact extreme is to read the row:
+
+```rust
+let priciest = Order::filter(&pool).order_by("-fee").limit(1).one().await?; // Option<Order>
+let max_fee: Option<Decimal> = priciest.map(|o| o.fee.0);
+```
+
+For an exact total, read the rows (or `values()`) and add the `Decimal`s in Rust.
+
 ```rust
 // Numeric
 let lowest: Option<f64>  = Order::filter(&pool).min::<f64>("price").await?;
