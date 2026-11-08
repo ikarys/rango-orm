@@ -2166,3 +2166,44 @@ async fn test_sqlite_hostile_identifiers_are_quoted() {
     assert_eq!(q().count().await.unwrap(), 0);
     assert_eq!(TestUser::filter(&pool).count().await.unwrap(), 0); // test_user still exists
 }
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-sqlite"), ignore)]
+async fn test_sqlite_bound_values_never_logged_or_in_errors() {
+    let pool = pool().await;
+    setup(&pool).await;
+    let log = SpanLog::default();
+    let _guard = tracing::subscriber::set_default(log.clone());
+    let needle = "s3cr3t-needle";
+
+    TestUser::filter(&pool)
+        .eq("name", needle)
+        .all()
+        .await
+        .unwrap();
+    let missing = rango_orm_sqlite::raw_execute(
+        &pool,
+        "SELECT * FROM no_such_table WHERE name = ?",
+        vec![SqlValue::from(needle)],
+    )
+    .await
+    .unwrap_err();
+    let bad_sql = rango_orm_sqlite::raw_execute(
+        &pool,
+        "SELEC nonsense WHERE name = ?",
+        vec![SqlValue::from(needle)],
+    )
+    .await
+    .unwrap_err();
+
+    // Errors carry neither the bound value nor the statement text.
+    for e in [&missing, &bad_sql] {
+        let text = format!("{e} {e:?}");
+        assert!(!text.contains(needle), "{text}");
+        assert!(!text.contains("WHERE name"), "{text}");
+    }
+    // Rango's own spans never hold the value (sqlx's QueryLogger only stores the SQL text).
+    let seen = format!("{:?}", log.0.lock().unwrap());
+    assert!(seen.contains("db.query"), "no span recorded: {seen}");
+    assert!(!seen.contains(needle), "{seen}");
+}
