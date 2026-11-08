@@ -23,7 +23,7 @@ All field types live in `rango::prelude::*`.
 | `FieldVarchar<MIN, MAX>` | `VARCHAR(MAX)` | `TEXT` | Compile-time length bounds |
 | `FieldEmail` | `VARCHAR(254)` | `TEXT` | |
 | `FieldUrl` | `VARCHAR(2048)` | `TEXT` | |
-| `FieldPassword<MIN, MAX>` | `VARCHAR(MAX)` | `TEXT` | |
+| `FieldPassword<MIN, MAX>` | `TEXT` | `TEXT` | MIN / MAX bound the plain password, which is stored as an argon2id hash: the column is always `TEXT` (`LONGTEXT` on MySQL / MariaDB) |
 
 ## Numeric types
 
@@ -31,6 +31,22 @@ All field types live in `rango::prelude::*`.
 |---|---|---|---|---|
 | `FieldDecimal<P, S>` | `NUMERIC` | `NUMERIC` | `DECIMAL(P, S)` | P = precision, S = scale. Wraps `rango::Decimal` (exact). Only MySQL / MariaDB enforce P and S in the column; on Postgres and SQLite the column is a plain `NUMERIC`, and `FieldDecimal::from_decimal` rescales the value to S in Rust. SQLite is exact up to 15 digits through the numeric column, beyond that the digits are kept as text |
 | `FieldRange<MIN, MAX>` | `BIGINT` | `INTEGER` | `BIGINT` | Checked when built (`FieldRange::new`) |
+
+### Working with decimals
+
+`rango::Decimal` is `rust_decimal::Decimal`. Build one from an integer and a scale, or wrap it in the field with `FieldDecimal::from_decimal`, which rescales to `S`:
+
+```rust
+use rango::prelude::*;
+
+let price = FieldDecimal::<10, 2>::from_decimal(Decimal::new(1250, 2)); // 12.50
+
+// Filters take a plain `Decimal`, typed column or string name.
+let pricey = Product::filter(&pool).gte(Product::PRICE, Decimal::new(2000, 2)).all().await?; // >= 20.00
+let exact = Product::filter(&pool).eq("price", Decimal::new(1999, 2)).all().await?;         // = 19.99
+```
+
+`sum()` and `avg()` return `Result<Option<f64>>` (the database casts the result to a float), so they are not exact; use `min` / `max` or read the rows when you need exact decimals. See [Aggregations](../querying/aggregations.md).
 
 ## Date/time types
 
@@ -52,8 +68,8 @@ All field types live in `rango::prelude::*`.
 
 | Rust type | Description |
 |---|---|
-| `ForeignKey<M>` | Foreign key to model `M` — stored as UUID |
-| `ManyToMany<M>` | Many-to-many relation — pivot table auto-generated |
+| `ForeignKey<M>` | Foreign key to model `M`; the column has the type of `M`'s primary key (`UUID`, `INTEGER` or `BIGINT`). `M` needs a `FieldUuid`, `FieldInt`, `FieldAutoInt`, `FieldBigInt` or `FieldAutoBigInt` key |
+| `ManyToMany<M>` | Many-to-many relation: pivot table auto-generated, its key columns follow both primary key types. Same target key types as `ForeignKey` |
 
 ## Nullable
 

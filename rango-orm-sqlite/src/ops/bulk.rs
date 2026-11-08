@@ -18,18 +18,10 @@ where
     }
     let n_cols = rango_orm_core::insert_values(&models[0]).len();
     let chunk_size = (999 / n_cols).max(1); // SQLite limit: 999 bound params
-    let mut total = 0usize;
-    // One transaction for all chunks (a savepoint when `executor` is already a transaction):
-    // a failure in a later chunk must not leave the earlier rows behind.
-    let mut tx = executor.begin().await.map_err(db_err)?;
-    for chunk in models.chunks(chunk_size) {
-        let (sql, values) = build_bulk_create_sql::<M>(chunk);
-        let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*sql)), values);
-        let result = q.execute(&mut *tx).await.map_err(db_err)?;
-        total += result.rows_affected() as usize;
-    }
-    tx.commit().await.map_err(db_err)?;
-    Ok(total)
+    run_chunks(executor, models, chunk_size, |chunk| {
+        build_bulk_create_sql::<M>(chunk)
+    })
+    .await
 }
 
 /// Columns come from the first model: give every model a PK, or none (auto-increment).
@@ -55,8 +47,8 @@ fn build_bulk_create_sql<M: Model + ModelValues>(models: &[M]) -> (String, Vec<S
     (sql, all_values)
 }
 
-/// UPDATE multiple rows by primary key: one `UPDATE ... FROM (VALUES ...)` per chunk, all chunks in
-/// one transaction (a savepoint inside `atomic`).
+/// UPDATE multiple rows by primary key: one `UPDATE ... FROM (VALUES ...)` per chunk; several chunks run in
+/// one transaction (a savepoint inside `atomic`), a single chunk in none (one statement is atomic).
 ///
 /// `fields` lists the columns to update (never the PK, it is the join key). Auto-chunked under the placeholder limit.
 /// Returns the number of rows matched; unknown columns fail with `Error::Invalid` before
@@ -81,15 +73,10 @@ where
         }
     }
     let chunk_size = (999 / (fields.len() + 1)).max(1);
-    let mut total = 0usize;
-    let mut tx = executor.begin().await.map_err(db_err)?;
-    for chunk in models.chunks(chunk_size) {
-        let (sql, values) = build_bulk_update_sql::<M>(chunk, fields);
-        let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*sql)), values);
-        total += q.execute(&mut *tx).await.map_err(db_err)?.rows_affected() as usize;
-    }
-    tx.commit().await.map_err(db_err)?;
-    Ok(total)
+    run_chunks(executor, models, chunk_size, |chunk| {
+        build_bulk_update_sql::<M>(chunk, fields)
+    })
+    .await
 }
 
 /// `WITH v(pk, c1, ..) AS (VALUES (?, ?, ..), ..) UPDATE t SET c1 = v.c1, .. FROM v WHERE t.pk = v.pk`
@@ -127,7 +114,7 @@ fn build_bulk_update_sql<M: Model + ModelValues>(
 
 /// INSERT multiple rows with `ON CONFLICT ... DO UPDATE`.
 ///
-/// `conflict_on` names the columns that detect a conflict (UNIQUE index or PK); every other column is overwritten on conflict. Auto-chunked under the placeholder limit, in one transaction. Returns the number
+/// `conflict_on` names the columns that detect a conflict (UNIQUE index or PK); every other column is overwritten on conflict. Auto-chunked under the placeholder limit; several chunks share one transaction, a single chunk needs none. Returns the number
 /// of rows affected.
 #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "sqlite", db.operation = "INSERT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
 pub async fn bulk_upsert<'a, A, M>(executor: A, models: &[M], conflict_on: &[&str]) -> Result<usize>
@@ -145,15 +132,10 @@ where
     }
     let n_cols = rango_orm_core::insert_values(&models[0]).len();
     let chunk_size = (999 / n_cols).max(1);
-    let mut total = 0usize;
-    let mut tx = executor.begin().await.map_err(db_err)?;
-    for chunk in models.chunks(chunk_size) {
-        let (sql, values) = build_bulk_upsert_sql::<M>(chunk, conflict_on);
-        let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*sql)), values);
-        total += q.execute(&mut *tx).await.map_err(db_err)?.rows_affected() as usize;
-    }
-    tx.commit().await.map_err(db_err)?;
-    Ok(total)
+    run_chunks(executor, models, chunk_size, |chunk| {
+        build_bulk_upsert_sql::<M>(chunk, conflict_on)
+    })
+    .await
 }
 
 fn build_bulk_upsert_sql<M: Model + ModelValues>(
@@ -190,4 +172,34 @@ fn build_bulk_upsert_sql<M: Model + ModelValues>(
         format!("{insert} ON CONFLICT ({conflict}) {action}"),
         values,
     )
+}
+
+/// Runs one statement per chunk. A single chunk is one statement, already atomic: no
+/// transaction. Several chunks share one transaction (a savepoint when `executor` is already
+/// a transaction), so a later failure does not leave the earlier rows behind.
+async fn run_chunks<'a, A, M>(
+    executor: A,
+    models: &[M],
+    chunk_size: usize,
+    build: impl Fn(&[M]) -> (String, Vec<SqlValue>),
+) -> Result<usize>
+where
+    A: Acquire<'a, Database = Sqlite>,
+{
+    let run = |sql: String, values| bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(sql)), values);
+    if models.len() <= chunk_size {
+        let mut conn = executor.acquire().await.map_err(db_err)?;
+        let (sql, values) = build(models);
+        let result = run(sql, values).execute(&mut *conn).await.map_err(db_err)?;
+        return Ok(result.rows_affected() as usize);
+    }
+    let mut total = 0usize;
+    let mut tx = executor.begin().await.map_err(db_err)?;
+    for chunk in models.chunks(chunk_size) {
+        let (sql, values) = build(chunk);
+        let result = run(sql, values).execute(&mut *tx).await.map_err(db_err)?;
+        total += result.rows_affected() as usize;
+    }
+    tx.commit().await.map_err(db_err)?;
+    Ok(total)
 }
