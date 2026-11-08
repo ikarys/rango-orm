@@ -411,6 +411,23 @@ async fn test_sqlite_bulk_create() {
     assert_eq!(n, 5);
 }
 
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-sqlite"), ignore)]
+async fn test_sqlite_bulk_create_is_atomic_across_chunks() {
+    let pool = pool().await;
+    setup(&pool).await;
+
+    // Enough rows for several chunks; the last row duplicates the first email.
+    let mut users: Vec<TestUser> = (0..450)
+        .map(|i| user(&format!("atomic{}@t.com", i)))
+        .collect();
+    users.push(user("atomic0@t.com"));
+
+    let err = bulk_create(&pool, &users).await;
+    assert!(err.is_err());
+    assert_eq!(TestUser::filter(&pool).count().await.unwrap(), 0);
+}
+
 // ── Transactions ──────────────────────────────────────────────────────────────
 
 #[tokio::test]

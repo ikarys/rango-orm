@@ -44,13 +44,16 @@ where
     let n_cols = rango_orm_core::insert_values(&models[0]).len();
     let chunk_size = (65535 / n_cols).max(1);
     let mut total = 0usize;
+    // All chunks in one transaction: a later failure must not leave earlier rows behind.
+    let mut tx = (&mut *conn).begin().await.map_err(db_err)?;
 
     for chunk in models.chunks(chunk_size) {
         let (sql, values) = build_bulk_create_sql::<M>(chunk);
         let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*sql)), values);
-        let result = q.execute(&mut *conn).await.map_err(db_err)?;
+        let result = q.execute(&mut *tx).await.map_err(db_err)?;
         total += result.rows_affected() as usize;
     }
+    tx.commit().await.map_err(db_err)?;
     Ok(total)
 }
 
@@ -79,13 +82,15 @@ where
     let n_cols = fields.len() + 1; // +1 for pk
     let chunk_size = (65535 / n_cols).max(1);
     let mut total = 0usize;
+    let mut tx = (&mut *conn).begin().await.map_err(db_err)?;
 
     for chunk in models.chunks(chunk_size) {
         let (sql, values) = build_bulk_update_sql::<M>(chunk, fields);
         let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*sql)), values);
-        let result = q.execute(&mut *conn).await.map_err(db_err)?;
+        let result = q.execute(&mut *tx).await.map_err(db_err)?;
         total += result.rows_affected() as usize;
     }
+    tx.commit().await.map_err(db_err)?;
     Ok(total)
 }
 
@@ -115,13 +120,15 @@ where
     let n_cols = 1 + models[0].field_values().len();
     let chunk_size = (65535 / n_cols).max(1);
     let mut total = 0usize;
+    let mut tx = (&mut *conn).begin().await.map_err(db_err)?;
 
     for chunk in models.chunks(chunk_size) {
         let (sql, values) = build_bulk_upsert_sql::<M>(chunk, conflict_on);
         let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*sql)), values);
-        let result = q.execute(&mut *conn).await.map_err(db_err)?;
+        let result = q.execute(&mut *tx).await.map_err(db_err)?;
         total += result.rows_affected() as usize;
     }
+    tx.commit().await.map_err(db_err)?;
     Ok(total)
 }
 
