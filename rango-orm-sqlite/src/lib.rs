@@ -30,27 +30,6 @@ mod row;
 mod sqlite_ext;
 mod transaction;
 
-/// Newtype wrapper around SqlitePool that implements RangoBackend.
-/// Use this when you need the backend trait — for direct DB calls use SqlitePool directly.
-#[derive(Clone)]
-pub struct RangoSqlitePool(pub SqlitePool);
-
-impl std::ops::Deref for RangoSqlitePool {
-    type Target = SqlitePool;
-    fn deref(&self) -> &SqlitePool {
-        &self.0
-    }
-}
-
-impl rango_orm_core::RangoBackend for RangoSqlitePool {
-    fn backend_kind(&self) -> rango_orm_core::BackendKind {
-        rango_orm_core::BackendKind::Sqlite
-    }
-    fn placeholder(&self, _n: usize) -> String {
-        "?".to_string()
-    }
-}
-
 /// Connect with WAL (concurrent readers, one writer), `synchronous=NORMAL`, a 5s busy timeout to avoid SQLITE_BUSY, and foreign keys.
 pub async fn connect(url: &str) -> rango_orm_core::Result<SqlitePool> {
     let opts = SqliteConnectOptions::from_str(url)
