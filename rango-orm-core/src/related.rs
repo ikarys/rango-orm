@@ -41,6 +41,11 @@ pub struct WithRelated<M> {
 }
 
 impl<M> WithRelated<M> {
+    /// The model, dropping the loaded relations.
+    pub fn into_inner(self) -> M {
+        self.inner
+    }
+
     /// Used by backends; relations are attached by `QueryBuilder::all()`.
     #[doc(hidden)]
     pub fn new(inner: M) -> Self {

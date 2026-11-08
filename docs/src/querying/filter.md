@@ -168,6 +168,8 @@ The cap applies to the query builder only (`all()`, `values()`, `select_as::<P>(
 
 ## Terminal methods
 
+`WithRelated<M>` derefs to `M`; call `.into_inner()` to get the owned `M` (models can `#[derive(Model, Clone, Debug)]`).
+
 | Method | Returns |
 |---|---|
 | `.all()` | `Vec<WithRelated<M>>` |

@@ -181,11 +181,36 @@ where
         let rows = self.conn.fetch_all(&sql, binds).await?;
         self.warn_if_capped(rows.len());
 
+        // DECIMAL columns are decoded by schema type: the driver type is ambiguous (SQLite
+        // NUMERIC may come back as an integer, MySQL's is not an i64/f64/String).
+        let schema = M::schema();
+        let scale_of = |col: &str| {
+            schema
+                .columns
+                .iter()
+                .find(|c| c.name == col)
+                .and_then(|c| match c.col_type {
+                    rango_orm_core::ColumnType::Decimal { scale, .. } => Some(scale),
+                    _ => None,
+                })
+        };
         rows.into_iter()
             .map(|row| {
                 let mut map = std::collections::HashMap::new();
                 for &col in cols {
-                    let val: SqlValue = if let Ok(Some(v)) = row.try_get::<Option<i64>, _>(col) {
+                    let val: SqlValue = if let Some(scale) = scale_of(col) {
+                        if row
+                            .try_get_raw(col)
+                            .map(|v| sqlx::ValueRef::is_null(&v))
+                            .unwrap_or(true)
+                        {
+                            SqlValue::NullDecimal
+                        } else {
+                            let mut d = crate::row::SqliteRowRef(&row).get_decimal(col)?;
+                            d.rescale(u32::from(scale));
+                            SqlValue::Decimal(d)
+                        }
+                    } else if let Ok(Some(v)) = row.try_get::<Option<i64>, _>(col) {
                         SqlValue::BigInt(v)
                     } else if let Ok(Some(v)) = row.try_get::<Option<f64>, _>(col) {
                         SqlValue::Double(v)

@@ -11,6 +11,12 @@
 - Fix: `rango import` without `--table` on rows that carry no `__table` (single-table export, CSV) fails with a message asking for `--table`, instead of `relation "default" does not exist`.
 - Fix: `rango dump --schema-only` reports the number of tables of the schema instead of 0.
 - Docs: `makemigrations` migration file naming rule (`NNNN_<tables>.sql`, or `NNNN_auto.sql` above 40 characters).
+- Breaking: `atomic_retry` (Postgres, MySQL / MariaDB) takes `AsyncFnOnce + Clone` instead of `AsyncFnMut`, and clones the closure per attempt. Its future is now `Send`, so it can go in `tokio::spawn` like `atomic` (the `AsyncFnMut` bound made rustc report "`Send` is not general enough"). State shared across attempts is captured by reference (`&AtomicU32`) instead of mutated through `&mut`.
+- Feat: `impl From<FieldError> for Error` (`Error::Invalid`), so `FieldVarchar::new(..)?` works in a function returning `rango::Result`.
+- Fix: `get_or_create` / `update_or_create` lookup columns and Postgres `bulk_upsert` conflict columns are checked against the model: an unknown name is `Error::Invalid` before any SQL, not a raw database error.
+- Fix: MySQL / MariaDB `UniqueViolation`, `ForeignKeyViolation` and `CheckViolation` carry the constraint name (parsed from the server message, without the `table.` prefix MySQL 8 adds to unique keys). They were `None`.
+- Fix: `values()` returns DECIMAL columns as `SqlValue::Decimal` (`NullDecimal` for NULL) at the column scale on SQLite and MySQL / MariaDB. MySQL gave `NullText` (data loss) and SQLite `BigInt(15)` for `15.00`.
+- Feat: `WithRelated::into_inner(self) -> M`.
 - Perf: SQLite bulk operations chunk at 32,000 bound parameters instead of 999 (the bundled SQLite 3.46 allows 32,766): `bulk_create` of 1,000 rows is one statement.
 - Docs: `makemigrations` detection table lists renames, constraint, index and FK changes and the SQLite rebuild; `CheckConstraint::new` (not `raw`); partial unique indexes on Postgres and SQLite; typed columns first in the quick start with PostgreSQL / MySQL connect examples; `FieldPassword` hashing cost.
 - Perf: `bulk_create`, `bulk_update` and `bulk_upsert` no longer open a transaction when the work is a single statement (one chunk, or the Postgres `UNNEST` path): one statement is already atomic. Several chunks still share one transaction (a savepoint inside `atomic`).
