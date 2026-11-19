@@ -146,6 +146,7 @@ Design rules:
 | **Implicit PK** ✅ | `#[rango::model]` attribute macro injects `pub id: FieldUuid` (`pk = "bigint"` / `"int"` → auto-increment) and derives `Model`. Per model, not in `rango.toml` (cargo does not track it) |
 | **CLI dump / restore / backup** ✅ | Rango JSON (schema snapshot + rows), backend-independent; restore in one transaction, input untrusted; backup = gzip + UTC timestamp, `0600` |
 | **Keyset pagination** ✅ | `.after(col, value)` / `.before(col, value)` |
+| **QuerySet update / delete** ✅ | `filter().set(col, v).update()` / `filter().delete()` → one `UPDATE` / `DELETE` statement, rows affected returned; filter only (no `order_by` / `limit` / relations), hooks not fired |
 | **Stored procedures** ✅ | No `rango::call`: `raw_scalar` / `raw` cover `CALL` and set-returning functions (tested on PG, MySQL, MariaDB). Create procedures in a migration file (MySQL cannot prepare `CREATE PROCEDURE`) |
 
 ## Principes non-négociables
@@ -174,7 +175,7 @@ let active_users = User::filter(&pool)
 
 ## Non-goals (for now)
 
-- Async streaming / cursors
+- Async streaming / cursors (deferred, not refused: keyset pagination covers batch processing with bounded memory; a `.stream()` over sqlx `fetch()` comes when `rango dump` on a huge table needs it)
 - Multi-DB joins across backends
 - Admin UI (that's Django's job, not ours)
 - ORM for NoSQL

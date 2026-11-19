@@ -151,6 +151,8 @@ pub struct Filter<M> {
     prefetch_related: Vec<PrefetchSpec>,
     /// Raw WHERE clauses from backend extensions; on Postgres `$__` becomes `$N`.
     raw_conditions: Vec<(String, Vec<SqlValue>)>,
+    /// `SET col = value` pairs for `update()`, in call order.
+    sets: Vec<(String, SqlValue)>,
     /// First unknown column met while building; returned as `Error::Invalid` on execution.
     invalid: Option<String>,
     _phantom: PhantomData<fn() -> M>,
@@ -169,6 +171,7 @@ impl<M: Model + ModelValues> Filter<M> {
             select_related: Vec::new(),
             prefetch_related: Vec::new(),
             raw_conditions: Vec::new(),
+            sets: Vec::new(),
             invalid: None,
             _phantom: PhantomData,
         }
@@ -306,6 +309,14 @@ impl<M: Model + ModelValues> Filter<M> {
 
     pub fn is_not_null(self, col: impl ColumnRef<M>) -> Self {
         self.push_condition(col.column_name(), Op::IsNotNull, None, None)
+    }
+
+    /// `SET col = value` for `update_sql`; typed like `eq`, string names checked at run time.
+    pub fn set<V>(mut self, col: impl FilterColumn<M, V>, val: V) -> Self {
+        self.check_col::<M>(col.column_name());
+        let val = col.bind(val);
+        self.sets.push((col.column_name().to_string(), val));
+        self
     }
 
     pub fn or(mut self) -> Self {
@@ -505,12 +516,78 @@ impl<M: Model + ModelValues> Filter<M> {
     /// `WHERE ...` (empty when there is no filter) and its binds, in placeholder order.
     pub fn build_where(&self) -> (String, Vec<SqlValue>) {
         let mut binds = Vec::new();
-        let body = self.where_body(&self.conditions, &self.raw_conditions, &mut binds, &mut 1);
+        let clause = self.where_clause_from(&mut binds, &mut 1);
+        (clause, binds)
+    }
+
+    /// `WHERE ...` continuing an existing placeholder numbering (`idx`) and bind list.
+    fn where_clause_from(&self, binds: &mut Vec<SqlValue>, idx: &mut usize) -> String {
+        let body = self.where_body(&self.conditions, &self.raw_conditions, binds, idx);
         if body.is_empty() {
-            (body, binds)
+            body
         } else {
-            (format!("WHERE {body}"), binds)
+            format!("WHERE {body}")
         }
+    }
+
+    /// `update()` / `delete()` take a filter only: no ordering, paging or relations.
+    fn ensure_write_shape(&self) -> Result<()> {
+        self.ensure_valid()?;
+        if !self.order_by.is_empty()
+            || self.limit.is_some()
+            || self.offset.is_some()
+            || !self.select_related.is_empty()
+            || !self.prefetch_related.is_empty()
+        {
+            return Err(Error::Invalid(
+                "update() / delete() do not accept order_by, limit, offset, select_related or prefetch_related".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// `UPDATE t SET .. WHERE ..` from the `set()` pairs; set binds first, then the filter's.
+    pub fn update_sql(&self) -> Result<(String, Vec<SqlValue>)> {
+        self.ensure_write_shape()?;
+        if self.sets.is_empty() {
+            return Err(Error::Invalid(
+                "update() needs at least one set(column, value)".into(),
+            ));
+        }
+        let mut binds = Vec::with_capacity(self.sets.len());
+        let mut idx = 1usize;
+        let assignments: Vec<String> = self
+            .sets
+            .iter()
+            .map(|(col, val)| {
+                binds.push(val.clone());
+                format!("{} = {}", self.q(col), self.dialect.placeholder(&mut idx))
+            })
+            .collect();
+        let mut sql = format!(
+            "UPDATE {} SET {}",
+            self.q(M::table_name()),
+            assignments.join(", ")
+        );
+        let where_clause = self.where_clause_from(&mut binds, &mut idx);
+        if !where_clause.is_empty() {
+            sql.push(' ');
+            sql.push_str(&where_clause);
+        }
+        Ok((sql, binds))
+    }
+
+    /// `DELETE FROM t WHERE ..`; no WHERE when the builder has no filter (Django semantics).
+    pub fn delete_sql(&self) -> Result<(String, Vec<SqlValue>)> {
+        self.ensure_write_shape()?;
+        let mut binds = Vec::new();
+        let mut sql = format!("DELETE FROM {}", self.q(M::table_name()));
+        let where_clause = self.where_clause_from(&mut binds, &mut 1);
+        if !where_clause.is_empty() {
+            sql.push(' ');
+            sql.push_str(&where_clause);
+        }
+        Ok((sql, binds))
     }
 
     fn conditions_sql(
@@ -830,6 +907,11 @@ macro_rules! impl_filter_methods {
                 self.map(|f| f.is_not_null(col))
             }
 
+            /// `SET col = value` for `.update()`. Typed like `eq`: `.set(User::ACTIVE, false)`.
+            pub fn set<V>(self, col: impl $crate::FilterColumn<M, V>, val: V) -> Self {
+                self.map(|f| f.set(col, val))
+            }
+
             /// Next condition uses OR
             pub fn or(self) -> Self {
                 self.map(|f| f.or())
@@ -1027,6 +1109,55 @@ mod tests {
         }
     }
 
+    /// Model with declared columns: `update_sql` / `delete_sql` run `ensure_valid`.
+    struct W;
+
+    impl crate::ModelHooks for W {}
+
+    impl Model for W {
+        type Pk = uuid::Uuid;
+        fn table_name() -> &'static str {
+            "test_model"
+        }
+        fn schema() -> TableSchema {
+            let col = |name: &str| crate::ColumnDef {
+                name: name.to_string(),
+                col_type: crate::ColumnType::Text,
+                nullable: false,
+                primary_key: false,
+                unique: false,
+                default: None,
+                references: None,
+                index: false,
+            };
+            TableSchema {
+                columns: ["a", "age", "active", "note"]
+                    .into_iter()
+                    .map(col)
+                    .collect(),
+                ..TableSchema::default()
+            }
+        }
+    }
+
+    impl ModelValues for W {
+        fn field_values(&self) -> Vec<(&'static str, SqlValue)> {
+            Vec::new()
+        }
+        fn pk_value(&self) -> SqlValue {
+            SqlValue::BigInt(1)
+        }
+        fn pk_column() -> &'static str {
+            "id"
+        }
+    }
+
+    impl FromRow for W {
+        fn from_row(_row: &dyn RangoRow) -> std::result::Result<Self, RowError> {
+            Ok(Self)
+        }
+    }
+
     fn nested(d: Dialect) -> Filter<T> {
         Filter::<T>::new(d)
             .eq("a", 1i32)
@@ -1034,6 +1165,71 @@ mod tests {
             .where_exists::<T>("parent_id", |q| q.eq("b", 2i32))
             .in_subquery::<T>("c", "id", |q| q)
             .eq("d", 3i32)
+    }
+
+    #[test]
+    fn update_sql_binds_sets_then_filters() {
+        let (sql, binds) = Filter::<W>::new(Dialect::Postgres)
+            .lt("age", 18i32)
+            .set("active", false)
+            .set("note", "minor")
+            .update_sql()
+            .unwrap();
+        assert_eq!(
+            sql,
+            "UPDATE \"test_model\" SET \"active\" = $1, \"note\" = $2 WHERE \"age\" < $3"
+        );
+        assert_eq!(binds.len(), 3);
+        assert!(matches!(binds[0], SqlValue::Bool(false)));
+
+        let (sql, _) = Filter::<W>::new(Dialect::Sqlite)
+            .set("active", false)
+            .eq("a", 1i32)
+            .update_sql()
+            .unwrap();
+        assert_eq!(
+            sql,
+            "UPDATE \"test_model\" SET \"active\" = ? WHERE \"a\" = ?"
+        );
+    }
+
+    #[test]
+    fn delete_sql_with_and_without_filter() {
+        let (sql, binds) = Filter::<W>::new(Dialect::Postgres)
+            .eq("a", 1i32)
+            .delete_sql()
+            .unwrap();
+        assert_eq!(sql, "DELETE FROM \"test_model\" WHERE \"a\" = $1");
+        assert_eq!(binds.len(), 1);
+
+        let (sql, binds) = Filter::<W>::new(Dialect::Mysql).delete_sql().unwrap();
+        assert_eq!(sql, "DELETE FROM `test_model`");
+        assert!(binds.is_empty());
+    }
+
+    #[test]
+    fn write_shape_is_a_filter_only() {
+        assert!(matches!(
+            Filter::<W>::new(Dialect::Postgres).update_sql(),
+            Err(Error::Invalid(_))
+        ));
+        assert!(matches!(
+            Filter::<W>::new(Dialect::Postgres).limit(1).delete_sql(),
+            Err(Error::Invalid(_))
+        ));
+        assert!(matches!(
+            Filter::<W>::new(Dialect::Postgres)
+                .order_by("a")
+                .set("a", 1i32)
+                .update_sql(),
+            Err(Error::Invalid(_))
+        ));
+        assert!(
+            Filter::<W>::new(Dialect::Postgres)
+                .unlimited()
+                .delete_sql()
+                .is_ok()
+        );
     }
 
     #[test]

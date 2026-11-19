@@ -127,6 +127,35 @@ where
         }
     }
 
+    /// `UPDATE .. SET .. WHERE ..` on every matching row, from the `.set(col, value)` pairs.
+    /// Returns the number of rows affected. Model hooks are not fired (same as Django).
+    ///
+    /// ```rust,ignore
+    /// let n = User::filter(&pool).lt(User::AGE, 18).set(User::ACTIVE, false).update().await?;
+    /// ```
+    #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "sqlite", db.operation = "UPDATE", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
+    pub async fn update(mut self) -> Result<u64> {
+        let (sql, binds) = self.f.update_sql()?;
+        let rows = self.conn.execute(&sql, binds).await?;
+        tracing::Span::current().record("db.rows", rows);
+        Ok(rows)
+    }
+
+    /// `DELETE FROM .. WHERE ..` on every matching row (all rows when there is no filter).
+    /// Returns the number of rows affected. Model hooks are not fired (same as Django);
+    /// `ON DELETE` actions run in the database.
+    ///
+    /// ```rust,ignore
+    /// let n = Session::filter(&pool).lt(Session::EXPIRES_AT, now).delete().await?;
+    /// ```
+    #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "sqlite", db.operation = "DELETE", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
+    pub async fn delete(mut self) -> Result<u64> {
+        let (sql, binds) = self.f.delete_sql()?;
+        let rows = self.conn.execute(&sql, binds).await?;
+        tracing::Span::current().record("db.rows", rows);
+        Ok(rows)
+    }
+
     /// Count matching rows.
     #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "sqlite", db.operation = "SELECT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
     pub async fn count(mut self) -> Result<i64> {

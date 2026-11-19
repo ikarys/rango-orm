@@ -196,6 +196,49 @@ fn user(email: &str) -> TestUser {
 
 #[tokio::test]
 #[cfg_attr(not(feature = "integration-sqlite"), ignore)]
+async fn test_sqlite_queryset_update_and_delete() {
+    let pool = pool().await;
+    setup(&pool).await;
+
+    insert(&pool, user("u1@upd.test")).await.unwrap();
+    insert(&pool, user("u2@upd.test")).await.unwrap();
+    insert(&pool, user("keep@other.test")).await.unwrap();
+
+    let n = TestUser::filter(&pool)
+        .like(TestUser::EMAIL, "%@upd.test")
+        .set(TestUser::ACTIVE, false)
+        .update()
+        .await
+        .expect("update failed");
+    assert_eq!(n, 2);
+    let inactive = TestUser::filter(&pool)
+        .eq(TestUser::ACTIVE, false)
+        .count()
+        .await
+        .unwrap();
+    assert_eq!(inactive, 2);
+
+    assert!(matches!(
+        TestUser::filter(&pool).update().await,
+        Err(Error::Invalid(_))
+    ));
+    assert!(matches!(
+        TestUser::filter(&pool).limit(1).delete().await,
+        Err(Error::Invalid(_))
+    ));
+
+    let n = TestUser::filter(&pool)
+        .eq(TestUser::ACTIVE, false)
+        .delete()
+        .await
+        .expect("delete failed");
+    assert_eq!(n, 2);
+    let left = TestUser::filter(&pool).count().await.unwrap();
+    assert_eq!(left, 1);
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-sqlite"), ignore)]
 async fn test_sqlite_select_and_prefetch_related() {
     let pool = pool().await;
     setup(&pool).await;
