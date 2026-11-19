@@ -71,3 +71,50 @@ if has_admins {
     println!("At least one admin exists");
 }
 ```
+
+## Grouping: `group_by`, `annotate_*`, `having`
+
+One query with `GROUP BY` and several aggregates, the Django `annotate()` + `aggregate()` pair in one call:
+
+```rust
+use rango::Cmp;
+
+let rows = Order::filter(&pool)
+    .eq(Order::PAID, true)
+    .group_by(Order::COUNTRY)              // repeatable
+    .annotate_count("n")                   // COUNT(*) AS "n"
+    .annotate_sum("total", Order::AMOUNT)  // SUM("amount") AS "total"
+    .having("total", Cmp::Gt, 100.0)       // HAVING SUM("amount") > $2
+    .order_by("-total")                    // an annotation alias works here
+    .aggregate()
+    .await?;                               // Vec<HashMap<String, SqlValue>>
+
+for row in &rows {
+    println!("{:?}: {:?} orders, {:?} total", row["country"], row["n"], row["total"]);
+}
+```
+
+```sql
+SELECT "country", COUNT(*) AS "n", SUM("amount")::float8 AS "total"
+FROM "order" WHERE "paid" = $1
+GROUP BY "country" HAVING SUM("amount")::float8 > $2
+ORDER BY "total" DESC LIMIT 1000
+```
+
+Without `group_by`, `aggregate()` returns one row holding every aggregate:
+
+```rust
+let row = Order::filter(&pool)
+    .annotate_count("n")
+    .annotate_max("latest", Order::CREATED_AT)
+    .aggregate()
+    .await?;
+```
+
+Rules:
+
+- Each map holds the group columns and the aliases. `COUNT` is `SqlValue::BigInt`, `SUM` / `AVG` are `SqlValue::Double`, `MIN` / `MAX` keep the column type (a `FieldDecimal` column stays exact). A `FieldBool` group column comes back as `Bool` on Postgres and as an integer on SQLite and MySQL.
+- `having()` takes an alias declared by an `annotate_*` call; the SQL repeats the aggregate expression (Postgres cannot use an output alias in `HAVING`). Several calls are joined with `AND`, values are bound.
+- `where` conditions (`eq`, `like`, ...) filter rows before grouping, `having` filters groups after.
+- `order_by`, `limit`, `offset` and the default cap of 1000 rows apply to the groups. `select_related` / `prefetch_related` are `Error::Invalid`.
+- An unknown column, alias or shape is `Error::Invalid` before any SQL runs.
