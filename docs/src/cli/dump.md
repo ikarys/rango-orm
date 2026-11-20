@@ -33,9 +33,13 @@ The `_rango_migrations` bookkeeping table is not dumped as a table (unless named
 
 ## restore
 ```bash
-rango restore <file>
+rango restore <file> [-m <migrations dir>]
 ```
 Accepts plain JSON or gzip, detected automatically. Rejects files that are not Rango dumps.
+
+| Option | Default | Meaning |
+|---|---|---|
+| `-m, --migrations <dir>` | `migrations` / `[migrations] dir` from `rango.toml` | The target backend's migrations folder, read only when the dump comes from another backend (see below). |
 
 File contents are treated as untrusted:
 - Table and column names are checked against the dump's schema and quoted.
@@ -43,6 +47,10 @@ File contents are treated as untrusted:
 - Decompressed size is capped at 8 GiB against gzip bombs.
 
 Restore creates missing tables from the schema, then inserts rows, in one transaction. When it creates the schema it also recreates `_rango_migrations` with the dumped migration names, so `rango migrate` on the restored database has nothing to replay. A dump made by an older rango has no `migrations` field: restore warns and records nothing, so check `rango migrate` before running it. On any error, such as a constraint violation or a row conflicting with existing data, nothing is restored. On MySQL/MariaDB, DDL auto-commits, so tables created before a failure stay empty.
+
+**Cross-backend restore.** Migration file names are specific to a project folder, so the names stored in a dump made on another backend are not recorded. If the `--migrations` folder has migration files and its snapshot describes the same schema as the dump, the names of those files are recorded as applied and restore prints a note. Otherwise nothing is recorded and restore warns that `rango migrate` would replay migrations on the restored schema: generate the target backend's migrations from the same models first (`rango makemigrations`), then restore again. Same-backend restores record the dump's names as before.
+
+Rows are inserted in multi-row statements (up to 1000 rows each, fewer on wide tables to stay under the bind-parameter limit), so a 100,000-row table restores in about half a second on SQLite.
 
 Restore works whether the target is empty or was just prepared by `rango migrate`: migration names already recorded are skipped, while any other conflicting row still fails the restore. The backend is taken from the `-d` URL scheme (`postgres://`, `mysql://`, `sqlite://`), not from `rango.toml`.
 

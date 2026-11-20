@@ -175,3 +175,30 @@ fn insert_columns(row: &serde_json::Map<String, serde_json::Value>) -> Vec<&str>
         .map(String::as_str)
         .collect()
 }
+
+/// Rows per multi-row `INSERT`: at most 1000, and few enough that `rows * cols` bind
+/// parameters stay under the backend's limit (65535 Postgres / MySQL, 32766 SQLite).
+fn rows_per_statement(param_limit: usize, cols: usize) -> usize {
+    (param_limit / cols.max(1)).clamp(1, 1000)
+}
+
+/// `(?, ?), (?, ?), ...`: `rows` groups of `cols` placeholders.
+fn values_placeholders(rows: usize, cols: usize) -> String {
+    let group = format!("({})", vec!["?"; cols].join(", "));
+    vec![group; rows].join(", ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn chunk_size_respects_param_limit() {
+        assert_eq!(rows_per_statement(65535, 3), 1000);
+        assert_eq!(rows_per_statement(65535, 100), 655);
+        assert_eq!(rows_per_statement(32766, 100), 327);
+        assert_eq!(rows_per_statement(32766, 40000), 1);
+        assert_eq!(rows_per_statement(65535, 0), 1000);
+        assert_eq!(values_placeholders(2, 3), "(?, ?, ?), (?, ?, ?)");
+    }
+}

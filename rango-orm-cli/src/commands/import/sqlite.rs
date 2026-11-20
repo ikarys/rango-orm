@@ -1,4 +1,4 @@
-//! SQLite import: row-by-row inserts, foreign keys deferred to COMMIT.
+//! SQLite import: multi-row inserts, foreign keys deferred to COMMIT.
 
 use super::*;
 
@@ -52,46 +52,44 @@ pub(super) async fn insert_rows_sqlite(
     let cols = insert_columns(rows[0]);
 
     let binary = binary_columns_sqlite(&mut *conn, table).await?;
-    let mut count = 0;
-    for row in rows {
-        let col_list = cols
-            .iter()
-            .map(|c| quote_ident(c))
-            .collect::<Vec<_>>()
-            .join(", ");
-        let placeholders = cols.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
-        // INSERT OR REPLACE replaces the whole row. Skipping uses ON CONFLICT DO NOTHING,
-        // not INSERT OR IGNORE, which would also swallow NOT NULL / CHECK violations.
-        let (verb, suffix) = match on_conflict {
-            OnConflict::Replace => ("INSERT OR REPLACE", ""),
-            OnConflict::Skip => ("INSERT", " ON CONFLICT DO NOTHING"),
-            OnConflict::Fail => ("INSERT", ""),
-        };
+    // INSERT OR REPLACE replaces the whole row. Skipping uses ON CONFLICT DO NOTHING,
+    // not INSERT OR IGNORE, which would also swallow NOT NULL / CHECK violations.
+    let (verb, suffix) = match on_conflict {
+        OnConflict::Replace => ("INSERT OR REPLACE", ""),
+        OnConflict::Skip => ("INSERT", " ON CONFLICT DO NOTHING"),
+        OnConflict::Fail => ("INSERT", ""),
+    };
+    let col_list = cols
+        .iter()
+        .map(|c| quote_ident(c))
+        .collect::<Vec<_>>()
+        .join(", ");
+    for chunk in rows.chunks(rows_per_statement(32766, cols.len())) {
         let sql = format!(
-            "{} INTO {} ({}) VALUES ({}){}",
+            "{} INTO {} ({}) VALUES {}{}",
             verb,
             quote_ident(table),
             col_list,
-            placeholders,
+            values_placeholders(chunk.len(), cols.len()),
             suffix
         );
-
         let mut q = sqlx::query(sqlx::AssertSqlSafe(&*sql));
-        for col in &cols {
-            let val = row.get(*col).unwrap_or(&serde_json::Value::Null);
-            q = match val {
-                serde_json::Value::String(s) if binary.contains(*col) => {
-                    q.bind(decode_binary(col, s)?)
-                }
-                _ => bind_json_value_sqlite(q, val),
-            };
+        for row in chunk {
+            for col in &cols {
+                let val = row.get(*col).unwrap_or(&serde_json::Value::Null);
+                q = match val {
+                    serde_json::Value::String(s) if binary.contains(*col) => {
+                        q.bind(decode_binary(col, s)?)
+                    }
+                    _ => bind_json_value_sqlite(q, val),
+                };
+            }
         }
         q.execute(&mut *conn)
             .await
             .with_context(|| format!("Failed to insert into {}", table))?;
-        count += 1;
     }
-    Ok(count)
+    Ok(rows.len())
 }
 
 /// Columns declared `BLOB`.
