@@ -1357,7 +1357,7 @@ dependencies = [
 
 [[package]]
 name = "rango-orm"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "chrono",
  "rango-orm-core",
@@ -1372,7 +1372,7 @@ dependencies = [
 
 [[package]]
 name = "rango-orm-cli"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
@@ -1397,7 +1397,7 @@ dependencies = [
 
 [[package]]
 name = "rango-orm-core"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "argon2",
  "chrono",
@@ -1409,7 +1409,7 @@ dependencies = [
 
 [[package]]
 name = "rango-orm-derive"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -1420,7 +1420,7 @@ dependencies = [
 
 [[package]]
 name = "rango-orm-mysql"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "chrono",
  "log",
@@ -1434,7 +1434,7 @@ dependencies = [
 
 [[package]]
 name = "rango-orm-postgres"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "chrono",
  "log",
@@ -1448,7 +1448,7 @@ dependencies = [
 
 [[package]]
 name = "rango-orm-sqlite"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "chrono",
  "log",

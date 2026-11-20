@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.1 (2026-11-20)
+
+- Security: sqlx 0.9.1 with `libsqlite3-sys` 0.40.0 (bundled SQLite 3.54.1) for RUSTSEC-2026-0459, where SQLite before 3.54 could return uninitialized memory when opening a crafted `-wal` file. Users of 0.3.0 on SQLite can also run `cargo update -p sqlx -p libsqlite3-sys`.
+- Chore: the project follows the [Vibecoding Convention](VIBECODING.md) at level 2: declaration, `CONTRIBUTING.md`, gitleaks secrets scan (pre-commit hook and CI), clippy cognitive complexity lint, `just evidence`; CI now runs on every push to `develop` / `main` and on pull requests.
+
 ## 0.3.0 (2026-11-20)
 
 - Feat: `M2M::add_many(&pool, &from, &to_list)` links one row to a list in multi-row `INSERT`s (1000 pairs per statement, one transaction), idempotent like `add`; `M2M::set` uses the same statements (all backends).

@@ -187,7 +187,7 @@ let active_users = User::filter(&pool)
 |---|---|---|
 | PostgreSQL | `rango-orm-postgres` | ✅ backend + CLI (default backend, PostgreSQL 14+) |
 | MySQL / MariaDB | `rango-orm-mysql` | ✅ backend + CLI (MySQL 8.0+, MariaDB 10.6+) |
-| SQLite | `rango-orm-sqlite` | ✅ (SQLite 3.35+, sqlx bundles 3.46) |
+| SQLite | `rango-orm-sqlite` | ✅ (SQLite 3.35+, sqlx 0.9.1 bundles 3.54) |
 | MSSQL | `rango-mssql` | 🔮 futur — SQLx a droppé le support MSSQL en 0.7, backend custom via `tiberius` |
 
 Note : PostgreSQL, MySQL, SQLite passent par SQLx. MSSQL nécessitera un backend séparé basé sur `tiberius`.
@@ -275,7 +275,7 @@ Known-CVE checklist (reviewed 2026-11-01) — keep new APIs out of these classes
 | Protocol length overflow (> 4 GiB values) | RUSTSEC-2024-0363 (sqlx), RUSTSEC-2024-0365 (diesel) | sqlx ≥ 0.8.1 required (`cargo audit` in CI) |
 | Object names from a dump turned into SQL on restore | PostgreSQL CVE-2025-8714, CVE-2025-8715 | `import`/`restore` treat file contents as untrusted: names quoted, values bound; covered by an e2e test |
 | TLS downgrade (`sslmode=prefer`, MySQL `PREFERRED`) | — | Remote hosts default to `require` / `REQUIRED` |
-| Bundled SQLite engine bugs | SQLite CVE-2025-6965, CVE-2025-29087 (fixed in 3.50.2 / 3.49.1) | Need attacker-controlled SQL, which Rango never runs; bump `libsqlite3-sys` with sqlx (0.8 bundles 3.46) |
+| Bundled SQLite engine bugs | SQLite CVE-2025-6965, CVE-2025-29087 (fixed in 3.50.2 / 3.49.1) | Need attacker-controlled SQL, which Rango never runs; bump `libsqlite3-sys` with sqlx (0.9.1 bundles 3.54.1) |
 
 ### Observability
 
