@@ -211,9 +211,10 @@ DROP TABLE "user";
 <div class="container">
 <h2 id="rest">Everything else, built in</h2>
 <div class="cards">
-<div class="card"><h3>Transactions</h3><p>Wrap your code in <code>rango::atomic</code>: everything commits together or nothing does. <code>atomic_retry</code> retries deadlocks for you (Postgres).</p></div>
+<div class="card"><h3>Transactions</h3><p>Wrap your code in <code>rango::atomic</code>: everything commits together or nothing does. <code>atomic_retry</code> retries deadlocks for you (Postgres, MySQL, MariaDB).</p></div>
 <div class="card"><h3>Bulk operations</h3><p>Insert or update thousands of rows with one call: <code>bulk_create</code>, <code>bulk_update</code>, <code>bulk_upsert</code>. Rango picks the fast path.</p></div>
-<div class="card"><h3>Raw SQL, safely</h3><p>When you do want SQL, <code>raw</code> is there, and your parameters are always bound safely.</p></div>
+<div class="card"><h3>Reports and batch changes</h3><p><code>group_by</code>, <code>having</code> and <code>group_by_date</code> build a report in one query. <code>filter().set(..).update()</code> and <code>filter().delete()</code> change thousands of rows in one statement.</p></div>
+<div class="card"><h3>Raw SQL, safely</h3><p>When you do want SQL, <code>raw</code> and <code>raw_values</code> are there, and your parameters are always bound safely.</p></div>
 <div class="card"><h3>Dump, restore, backup</h3><p>One command, same on every database. No more digging through <code>pg_dump</code> or <code>mysqldump</code> flags.</p></div>
 <div class="card"><h3>Passwords</h3><p>Use <code>FieldPassword</code> and it is hashed with Argon2id automatically. It never shows up in your logs.</p></div>
 <div class="card"><h3>Typed errors</h3><p>Match on <code>NotFound</code> or <code>UniqueViolation</code> instead of parsing database error codes.</p></div>

@@ -4,13 +4,13 @@ A Django-inspired async ORM for Rust: define a struct, Rango generates the schem
 
 [![CI](https://github.com/ikarys/rango-orm/actions/workflows/ci.yml/badge.svg)](https://github.com/ikarys/rango-orm/actions/workflows/ci.yml) [![codecov](https://codecov.io/gh/ikarys/rango-orm/graph/badge.svg)](https://codecov.io/gh/ikarys/rango-orm)
 
-> `0.2.0` is the latest release on crates.io as [`rango-orm`](https://crates.io/crates/rango-orm). Pre-1.0: a `0.x` minor release may still break the API.
+> `0.3.0` is the latest release on crates.io as [`rango-orm`](https://crates.io/crates/rango-orm). Pre-1.0: a `0.x` minor release may still break the API.
 
 ## Why Rango
 
 - Models first: the struct is the schema.
 - Migrations generated, never written: `rango makemigrations` diffs typed schema snapshots against the models.
-- Typed queries: columns are generated per field; a wrong column or wrong value type is a compile error, and string names are still accepted.
+- Typed queries: columns are generated per field; a wrong column or wrong value type is a compile error; string names are still accepted and checked against the model before any SQL runs.
 - Real SQL semantics: `ON DELETE CASCADE` in the DB, every FK indexed, `RETURNING *` where the database has it.
 - 100% async on sqlx, with PostgreSQL, SQLite and MySQL / MariaDB using the same API.
 - Secure by default: bound parameters everywhere, identifiers always quoted, passwords hashed with Argon2id, TLS required for remote Postgres.
@@ -71,11 +71,11 @@ Rango is pre-1.0: a `0.x` minor release may still break the API. The package is 
 
 ```toml
 [dependencies]
-rango-orm = "0.2" # PostgreSQL, default
+rango-orm = "0.3" # PostgreSQL, default
 # SQLite variant:
-# rango-orm = { version = "0.2", default-features = false, features = ["sqlite"] }
+# rango-orm = { version = "0.3", default-features = false, features = ["sqlite"] }
 # MySQL / MariaDB variant:
-# rango-orm = { version = "0.2", default-features = false, features = ["mysql"] }
+# rango-orm = { version = "0.3", default-features = false, features = ["mysql"] }
 tokio = { version = "1", features = ["full"] }
 ```
 
@@ -104,10 +104,10 @@ In production, pass the URL via `DATABASE_URL`; never put credentials in `rango.
 | Relations: `ForeignKey`, `ManyToMany`, `select_related`, `prefetch_related` | ✅ |
 | Constraints: check, unique, partial unique | ✅ |
 | Transactions (`atomic`, `atomic_retry` on serialization failure) | ✅ |
-| Bulk create / update / upsert | ✅ |
-| Aggregations | ✅ |
+| Bulk create / update / upsert, QuerySet `update()` / `delete()` in one statement | ✅ |
+| Aggregations, `group_by` / `having` / `group_by_date` | ✅ |
 | Model hooks (`ModelHooks`) | ✅ |
-| Raw SQL escape hatch | ✅ |
+| Raw SQL escape hatch (`raw`, `raw_values`) | ✅ |
 | `export` / `import` CLI | ✅ |
 | PostgreSQL backend | ✅ |
 | SQLite backend | ✅ (ALTER via table rebuild) |
