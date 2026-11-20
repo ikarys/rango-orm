@@ -47,8 +47,13 @@ A typed column accepts its field type or the plain Rust equivalent: `i32` for `F
 Filter values are not validated like field constructors: searching for
 `"not-an-email"` is allowed.
 
-String names (`"email"`, `"-created_at"`) are still accepted everywhere; they accept any
-value and are checked by the database at runtime.
+String names (`"email"`, `"-created_at"`) are still accepted everywhere. The name is checked
+against the model at runtime (`Error::Invalid` for an unknown column), but the value is not:
+its type is left to the database, and the backends disagree. With
+`.eq("seats", "lots")` on an integer column, Postgres returns an `Error::Database`
+(`operator does not exist`), while SQLite, MySQL and MariaDB coerce the value and silently
+return no rows (or the wrong rows). Use typed columns (`Booking::SEATS`) when you can: the
+same mistake is then a compile error.
 
 ## Operators
 
@@ -180,6 +185,10 @@ The cap applies to the query builder only (`all()`, `values()`, `select_as::<P>(
 | `.explain_analyze()` | `String` — the plan with real timings (runs the query) |
 
 ## Inspecting the SQL
+
+`.explain()` returns the SQL text only, with placeholders; it does not ask the database for a
+plan. To check that a query uses an index, use `.explain_analyze()` (below), which runs the
+query. After `.select_as::<P>()`, call `.explain()` on the result to see the real column list.
 
 ```rust
 let sql = User::filter(&pool)

@@ -2,6 +2,8 @@
 
 All field types live in `rango::prelude::*`.
 
+The primitive, text and date tables below show Postgres and SQLite; the MySQL / MariaDB column types are in [MySQL](../backends/mysql.md#type-mapping).
+
 ## Primitive types
 
 | Rust type | SQL (Postgres) | SQL (SQLite) | Notes |

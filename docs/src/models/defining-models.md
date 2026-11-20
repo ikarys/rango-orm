@@ -112,6 +112,8 @@ pub name: FieldVarchar<1, 100>,   // NOT NULL
 #[field(default = "0")]           // SQL default value
 ```
 
+`default` is the column's SQL `DEFAULT`, used by rows inserted outside Rango (raw SQL, an older app version, a new column on existing rows). It does not make the field optional in Rust: a struct literal still sets every field, and `insert` sends the value you set.
+
 ## Model attributes
 
 ```rust

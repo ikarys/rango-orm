@@ -21,7 +21,7 @@ pub struct Post {
 }
 ```
 
-The column is stored as `UUID` (Postgres) or `TEXT` (SQLite). Every FK column is indexed.
+The column takes the type of the target's primary key: for a `FieldUuid` key, `UUID` on Postgres, `TEXT` on SQLite and `BINARY(16)` on MySQL / MariaDB; for an integer key, `INT` or `BIGINT` everywhere. Every FK column is indexed.
 
 Pointing at an integer key works the same way; the FK holds an `i32` / `i64`:
 
@@ -145,6 +145,26 @@ M2M::<Article, Tag>::add_many(&pool, &article, &tags).await?;
 ```
 
 `M2M::set` uses the same statements after clearing the row's links: use it when you want to replace all links of one row, `add_many` when you only add.
+
+`add_many` goes from one row to many. To seed many rows each with a few links (5,000 books with 2 or 3 tags each), one `add_many` per book means one statement per book. For a one-off load, insert the pairs into the pivot table directly with `rango::raw_execute`: the pivot `article_tag` has the columns `article_id` and `tag_id`.
+
+```rust
+use rango::SqlValue;
+
+// Postgres placeholders; on SQLite and MySQL use `?` for each value.
+// `pairs: Vec<(Uuid, Uuid)>` = (article id, tag id). Values are bound, never formatted into the SQL.
+for chunk in pairs.chunks(1000) {
+    let mut sql = String::from("INSERT INTO article_tag (article_id, tag_id) VALUES ");
+    let mut params = Vec::with_capacity(chunk.len() * 2);
+    for (i, (article, tag)) in chunk.iter().enumerate() {
+        if i > 0 { sql.push_str(", "); }
+        sql.push_str(&format!("(${}, ${})", 2 * i + 1, 2 * i + 2));
+        params.push(SqlValue::Uuid(*article));
+        params.push(SqlValue::Uuid(*tag));
+    }
+    rango::raw_execute(&pool, &sql, params).await?;
+}
+```
 
 ### Self-referencing ManyToMany
 
