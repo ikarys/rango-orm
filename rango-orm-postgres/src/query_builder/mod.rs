@@ -17,7 +17,6 @@ pub use exec::SelectAs;
 /// the connection and the sqlx execution.
 pub struct QueryBuilder<'a, M> {
     conn: Conn<'a>,
-    // TODO: cache backend trait (level 2 — Redis, Memcached, custom)
     f: Filter<M>,
 }
 

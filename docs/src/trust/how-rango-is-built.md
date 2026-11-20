@@ -6,6 +6,8 @@ Rango is written with AI assistance: AI coding agents write most of the code. Th
 
 So you do not have to trust the process: every check on this page can be re-run from a clone of the repository.
 
+Rango follows the [Vibecoding Convention](https://github.com/ikarys/vibecoding-convention) at level 2. The declaration, with the measured thresholds and the declared exceptions, is [`VIBECODING.md`](https://github.com/ikarys/rango-orm/blob/main/VIBECODING.md). `vibecheck` writes the result to `audit/status.json`, which feeds the README badge, and `just evidence` regenerates the tool outputs it reads. The contribution rules for AI-assisted changes are in [`CONTRIBUTING.md`](https://github.com/ikarys/rango-orm/blob/main/CONTRIBUTING.md).
+
 ## Requirements
 
 Each requirement names what enforces it. "Review" means the maintainer checks it by hand; everything else fails a build or a test.
@@ -38,17 +40,20 @@ The full list, with the test behind each claim and what Rango does *not* protect
 - Formatting and lints: `cargo fmt --check`, `cargo clippy -D warnings`; `cargo doc` with warnings as errors.
 - Minimal dependencies: every dependency must earn its place. Enforced by: review, `cargo deny`.
 
-## What CI runs on every push
+## What CI runs on every change
+
+CI runs on every push to `develop` and `main` and on every pull request.
 
 | Job | What it checks |
 |---|---|
-| Check & Lint | `cargo fmt --check`, `cargo clippy -D warnings` |
+| Check & Lint | `cargo fmt --check`, `cargo clippy -D warnings` with `cognitive_complexity` (threshold 35, `clippy.toml`) |
 | Package, docs & MSRV | `cargo doc` with warnings as errors, `cargo publish --dry-run`, `cargo check` on MSRV Rust 1.94 |
 | Security audit | `cargo audit`, `cargo-deny` for licenses, sources, and advisories |
+| Secrets scan | `gitleaks` over the full git history (the same scan runs as a pre-commit hook after `just hooks`) |
 | Unit tests | unit tests and the SQLite integration suite (in memory) |
 | Integration tests (PostgreSQL 14, 18) | integration and CLI migration tests on PostgreSQL 14 and 18 |
 | Integration tests (MySQL / MariaDB) | integration and CLI migration tests on MySQL 8.0, 8.4 and MariaDB 10.6, 11.4 |
-| Coverage | `cargo llvm-cov` over the workspace, uploaded to Codecov (badge in the README); informative, no threshold |
+| Coverage | `cargo llvm-cov` over the workspace, uploaded to Codecov (badge in the README); the 75 % line threshold of `VIBECODING.md` is checked by `vibecheck` on `audit/evidence/coverage.txt` |
 
 A change is merged only when every job passes.
 
@@ -57,6 +62,7 @@ A change is merged only when every job passes.
 - Run A/B benchmarks against the previous release; the method is in `benchmarks/README.md`.
 - Run a blind usability test: an agent reads only the user docs, builds a real app, and logs every friction; the protocol and reports are in the `audit/` directory of the repository.
 - Run a security review against the checklist in [Security requirements](./security-requirements.md).
+- Run `just evidence` (coverage, `cargo audit`, `cargo outdated`, duplication, then `vibecheck . --write-status`).
 - Fix findings or record a decision.
 
 ## What this does not prove
