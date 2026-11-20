@@ -316,7 +316,7 @@ fn pending_migrations(
     Ok(pending)
 }
 
-fn collect_migration_files(dir: &str) -> Result<Vec<PathBuf>> {
+pub(crate) fn collect_migration_files(dir: &str) -> Result<Vec<PathBuf>> {
     let entries =
         fs::read_dir(dir).with_context(|| format!("Cannot read migrations directory: {}", dir))?;
     let mut files: Vec<PathBuf> = entries
