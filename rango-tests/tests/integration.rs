@@ -529,6 +529,78 @@ async fn test_count_and_exists() {
 
 #[tokio::test]
 #[cfg_attr(not(feature = "integration"), ignore)]
+async fn test_group_by_having_aggregate() {
+    let pool = pool().await;
+    setup(&pool).await;
+
+    let mut a = user("a@grp.test");
+    a.score = Some(FieldInt(10));
+    let mut b = user("b@grp.test");
+    b.score = Some(FieldInt(30));
+    let mut c = user("c@grp.test");
+    c.active = FieldBool(false);
+    c.score = Some(FieldInt(5));
+    for u in [a, b, c] {
+        insert(&pool, u).await.unwrap();
+    }
+
+    // One row per group, ordered by the alias.
+    let rows = TestUser::filter(&pool)
+        .group_by(TestUser::ACTIVE)
+        .annotate_count("n")
+        .annotate_sum("total", TestUser::SCORE)
+        .annotate_max("best", TestUser::SCORE)
+        .order_by("-n")
+        .aggregate()
+        .await
+        .expect("aggregate failed");
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].get("active"), Some(&SqlValue::Bool(true)));
+    assert_eq!(rows[0].get("n"), Some(&SqlValue::BigInt(2)));
+    assert_eq!(rows[0].get("total"), Some(&SqlValue::Double(40.0)));
+    assert_eq!(rows[0].get("best"), Some(&SqlValue::BigInt(30)));
+    assert_eq!(rows[1].get("n"), Some(&SqlValue::BigInt(1)));
+
+    // HAVING keeps only the active group.
+    let rows = TestUser::filter(&pool)
+        .group_by(TestUser::ACTIVE)
+        .annotate_count("n")
+        .having("n", Cmp::Gt, 1i64)
+        .aggregate()
+        .await
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].get("active"), Some(&SqlValue::Bool(true)));
+
+    // No group_by: one row with every aggregate.
+    let rows = TestUser::filter(&pool)
+        .annotate_count("n")
+        .annotate_avg("mean", TestUser::SCORE)
+        .aggregate()
+        .await
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].get("n"), Some(&SqlValue::BigInt(3)));
+    assert_eq!(rows[0].get("mean"), Some(&SqlValue::Double(15.0)));
+
+    assert!(matches!(
+        TestUser::filter(&pool).aggregate().await,
+        Err(Error::Invalid(_))
+    ));
+    assert!(matches!(
+        TestUser::filter(&pool)
+            .annotate_count("n")
+            .having("nope", Cmp::Gt, 1i64)
+            .aggregate()
+            .await,
+        Err(Error::Invalid(_))
+    ));
+
+    teardown(&pool).await;
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration"), ignore)]
 async fn test_queryset_update_and_delete() {
     let pool = pool().await;
     setup(&pool).await;

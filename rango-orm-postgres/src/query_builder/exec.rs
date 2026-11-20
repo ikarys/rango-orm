@@ -201,79 +201,38 @@ where
                 return Err(Error::Invalid(msg));
             }
         }
-        use sqlx::Row;
         let (sql, binds) = self.f.values_sql(cols);
 
         let rows = self.conn.fetch_all(&sql, binds).await?;
         self.warn_if_capped(rows.len());
 
-        rows.into_iter()
-            .map(|row| {
-                use sqlx::{Column, TypeInfo};
-                let mut map = std::collections::HashMap::new();
-                for &col in cols {
-                    let type_name = row.column(col).type_info().name().to_uppercase();
-                    let val: SqlValue = match type_name.as_str() {
-                        "BOOL" => row
-                            .try_get::<Option<bool>, _>(col)
-                            .ok()
-                            .map(|v| v.map(SqlValue::Bool).unwrap_or(SqlValue::NullBool))
-                            .unwrap_or(SqlValue::NullBool),
-                        "INT2" => row
-                            .try_get::<Option<i16>, _>(col)
-                            .ok()
-                            .map(|v| {
-                                v.map(|n| SqlValue::BigInt(n as i64))
-                                    .unwrap_or(SqlValue::NullBigInt)
-                            })
-                            .unwrap_or(SqlValue::NullBigInt),
-                        "INT4" | "SERIAL" => row
-                            .try_get::<Option<i32>, _>(col)
-                            .ok()
-                            .map(|v| {
-                                v.map(|n| SqlValue::BigInt(n as i64))
-                                    .unwrap_or(SqlValue::NullBigInt)
-                            })
-                            .unwrap_or(SqlValue::NullBigInt),
-                        "INT8" | "BIGSERIAL" => row
-                            .try_get::<Option<i64>, _>(col)
-                            .ok()
-                            .map(|v| v.map(SqlValue::BigInt).unwrap_or(SqlValue::NullBigInt))
-                            .unwrap_or(SqlValue::NullBigInt),
-                        "FLOAT4" => row
-                            .try_get::<Option<f32>, _>(col)
-                            .ok()
-                            .map(|v| {
-                                v.map(|n| SqlValue::Double(n as f64))
-                                    .unwrap_or(SqlValue::NullDouble)
-                            })
-                            .unwrap_or(SqlValue::NullDouble),
-                        "NUMERIC" => row
-                            .try_get::<Option<rango_orm_core::Decimal>, _>(col)
-                            .ok()
-                            .map(|v| v.map(SqlValue::Decimal).unwrap_or(SqlValue::NullDecimal))
-                            .unwrap_or(SqlValue::NullDecimal),
-                        "FLOAT8" => row
-                            .try_get::<Option<f64>, _>(col)
-                            .ok()
-                            .map(|v| v.map(SqlValue::Double).unwrap_or(SqlValue::NullDouble))
-                            .unwrap_or(SqlValue::NullDouble),
-                        "UUID" => row
-                            .try_get::<Option<uuid::Uuid>, _>(col)
-                            .ok()
-                            .map(|v| v.map(SqlValue::Uuid).unwrap_or(SqlValue::NullUuid))
-                            .unwrap_or(SqlValue::NullUuid),
-                        _ => row
-                            .try_get::<Option<String>, _>(col)
-                            .ok()
-                            .map(|v| v.map(SqlValue::Text).unwrap_or(SqlValue::NullText))
-                            .unwrap_or(SqlValue::NullText),
-                    };
-                    map.insert(col.to_string(), val);
-                }
-                Ok(map)
-            })
-            .collect()
+        rows.iter().map(|row| row_to_map(row, cols)).collect()
+    }
+
+    /// One `SELECT` with `GROUP BY` / `HAVING` built from `group_by()`, `annotate_*()` and
+    /// `having()`: one map per group (a single row when there is no `group_by`), keyed by
+    /// the group columns and the annotation aliases. `COUNT` is `SqlValue::BigInt`,
+    /// `SUM` / `AVG` are `SqlValue::Double`, `MIN` / `MAX` keep the column type.
+    ///
+    /// ```rust,ignore
+    /// let rows = Order::filter(&pool)
+    ///     .group_by(Order::COUNTRY)
+    ///     .annotate_count("n")
+    ///     .annotate_sum("total", Order::AMOUNT)
+    ///     .having("total", Cmp::Gt, 100.0)
+    ///     .order_by("-total")
+    ///     .aggregate()
+    ///     .await?;
+    /// ```
+    #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "postgresql", db.operation = "SELECT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
+    pub async fn aggregate(mut self) -> Result<Vec<std::collections::HashMap<String, SqlValue>>> {
+        let (sql, binds) = self.f.group_sql()?;
+        let rows = self.conn.fetch_all(&sql, binds).await?;
+        self.warn_if_capped(rows.len());
+        tracing::Span::current().record("db.rows", rows.len());
+        let keys = self.f.aggregate_keys();
+        let names: Vec<&str> = keys.iter().map(|(k, _)| k.as_str()).collect();
+        rows.iter().map(|row| row_to_map(row, &names)).collect()
     }
 
     /// SELECT SUM(col) FROM ... WHERE ... — returns None if the table is empty or all values are NULL.
@@ -425,4 +384,74 @@ where
             .collect::<Result<Vec<_>>>()?;
         Ok(lines.join("\n"))
     }
+}
+
+/// One row of `values()` / `aggregate()` as `key → SqlValue`, decoded from the driver type.
+fn row_to_map(
+    row: &sqlx::postgres::PgRow,
+    cols: &[&str],
+) -> Result<std::collections::HashMap<String, SqlValue>> {
+    use sqlx::{Column, Row, TypeInfo};
+    let mut map = std::collections::HashMap::new();
+    for &col in cols {
+        let type_name = row.column(col).type_info().name().to_uppercase();
+        let val: SqlValue = match type_name.as_str() {
+            "BOOL" => row
+                .try_get::<Option<bool>, _>(col)
+                .ok()
+                .map(|v| v.map(SqlValue::Bool).unwrap_or(SqlValue::NullBool))
+                .unwrap_or(SqlValue::NullBool),
+            "INT2" => row
+                .try_get::<Option<i16>, _>(col)
+                .ok()
+                .map(|v| {
+                    v.map(|n| SqlValue::BigInt(n as i64))
+                        .unwrap_or(SqlValue::NullBigInt)
+                })
+                .unwrap_or(SqlValue::NullBigInt),
+            "INT4" | "SERIAL" => row
+                .try_get::<Option<i32>, _>(col)
+                .ok()
+                .map(|v| {
+                    v.map(|n| SqlValue::BigInt(n as i64))
+                        .unwrap_or(SqlValue::NullBigInt)
+                })
+                .unwrap_or(SqlValue::NullBigInt),
+            "INT8" | "BIGSERIAL" => row
+                .try_get::<Option<i64>, _>(col)
+                .ok()
+                .map(|v| v.map(SqlValue::BigInt).unwrap_or(SqlValue::NullBigInt))
+                .unwrap_or(SqlValue::NullBigInt),
+            "FLOAT4" => row
+                .try_get::<Option<f32>, _>(col)
+                .ok()
+                .map(|v| {
+                    v.map(|n| SqlValue::Double(n as f64))
+                        .unwrap_or(SqlValue::NullDouble)
+                })
+                .unwrap_or(SqlValue::NullDouble),
+            "NUMERIC" => row
+                .try_get::<Option<rango_orm_core::Decimal>, _>(col)
+                .ok()
+                .map(|v| v.map(SqlValue::Decimal).unwrap_or(SqlValue::NullDecimal))
+                .unwrap_or(SqlValue::NullDecimal),
+            "FLOAT8" => row
+                .try_get::<Option<f64>, _>(col)
+                .ok()
+                .map(|v| v.map(SqlValue::Double).unwrap_or(SqlValue::NullDouble))
+                .unwrap_or(SqlValue::NullDouble),
+            "UUID" => row
+                .try_get::<Option<uuid::Uuid>, _>(col)
+                .ok()
+                .map(|v| v.map(SqlValue::Uuid).unwrap_or(SqlValue::NullUuid))
+                .unwrap_or(SqlValue::NullUuid),
+            _ => row
+                .try_get::<Option<String>, _>(col)
+                .ok()
+                .map(|v| v.map(SqlValue::Text).unwrap_or(SqlValue::NullText))
+                .unwrap_or(SqlValue::NullText),
+        };
+        map.insert(col.to_string(), val);
+    }
+    Ok(map)
 }

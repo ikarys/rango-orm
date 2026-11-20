@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Feat: `group_by()`, `annotate_count/sum/avg/min/max()`, `having(alias, Cmp, value)` and the `aggregate()` terminal: one `SELECT ... GROUP BY ... HAVING` statement returning one map per group (one row without `group_by`), on all backends. Aliases are accepted by `order_by`.
 - Feat: `filter().set(col, value).update()` and `filter().delete()` on the query builder: one `UPDATE` / `DELETE` statement run by the database, returning the rows affected (all backends). A filter only (`order_by`, `limit`, `offset`, relations are `Error::Invalid`); model hooks are not fired, like bulk ops.
 
 ## 0.2.0 (2026-11-08)

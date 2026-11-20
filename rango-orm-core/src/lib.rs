@@ -34,7 +34,7 @@ pub use constraints::{
 pub use error::{Error, Result};
 pub use fields::*;
 #[doc(hidden)]
-pub use filter::{DEFAULT_QUERY_LIMIT, Dialect, Filter, PrefetchSpec, SelectRelatedSpec};
+pub use filter::{Cmp, DEFAULT_QUERY_LIMIT, Dialect, Filter, PrefetchSpec, SelectRelatedSpec};
 pub use hooks::{BoxFuture, HookResult, ModelHooks};
 #[doc(hidden)]
 pub use hooks::{

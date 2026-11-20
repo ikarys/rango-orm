@@ -147,6 +147,7 @@ Design rules:
 | **CLI dump / restore / backup** ✅ | Rango JSON (schema snapshot + rows), backend-independent; restore in one transaction, input untrusted; backup = gzip + UTC timestamp, `0600` |
 | **Keyset pagination** ✅ | `.after(col, value)` / `.before(col, value)` |
 | **QuerySet update / delete** ✅ | `filter().set(col, v).update()` / `filter().delete()` → one `UPDATE` / `DELETE` statement, rows affected returned; filter only (no `order_by` / `limit` / relations), hooks not fired |
+| **GROUP BY / HAVING** ✅ | `group_by(col)` + `annotate_count/sum/avg/min/max(alias, col)` + `having(alias, Cmp::Gt, v)` → `.aggregate()`: one `SELECT … GROUP BY … HAVING` per call, `Vec<HashMap<String, SqlValue>>` (one row without `group_by`, Django `aggregate()`); aliases usable in `order_by`; all backends |
 | **Stored procedures** ✅ | No `rango::call`: `raw_scalar` / `raw` cover `CALL` and set-returning functions (tested on PG, MySQL, MariaDB). Create procedures in a migration file (MySQL cannot prepare `CREATE PROCEDURE`) |
 
 ## Principes non-négociables
