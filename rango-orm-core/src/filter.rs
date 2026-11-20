@@ -930,7 +930,10 @@ impl<M: Model + ModelValues> Filter<M> {
             }
             sql.push_str(&format!(" HAVING {}", parts.join(" AND ")));
         }
-        sql.push_str(&self.order_by_sql());
+        // Explicit `order_by` only: the model's default ordering would break GROUP BY.
+        if !self.order_by.is_empty() {
+            sql.push_str(&format!(" ORDER BY {}", self.order_by.join(", ")));
+        }
         sql.push_str(&self.limit_offset_sql());
         Ok((sql, binds))
     }
@@ -1419,6 +1422,42 @@ mod tests {
         }
     }
 
+    /// Model with a default `ordering`.
+    struct O;
+
+    impl crate::ModelHooks for O {}
+
+    impl Model for O {
+        type Pk = uuid::Uuid;
+        fn table_name() -> &'static str {
+            "test_model"
+        }
+        fn schema() -> TableSchema {
+            TableSchema {
+                ordering: vec![crate::asc("a")],
+                ..W::schema()
+            }
+        }
+    }
+
+    impl ModelValues for O {
+        fn field_values(&self) -> Vec<(&'static str, SqlValue)> {
+            Vec::new()
+        }
+        fn pk_value(&self) -> SqlValue {
+            SqlValue::BigInt(1)
+        }
+        fn pk_column() -> &'static str {
+            "id"
+        }
+    }
+
+    impl FromRow for O {
+        fn from_row(_row: &dyn RangoRow) -> std::result::Result<Self, RowError> {
+            Ok(Self)
+        }
+    }
+
     fn nested(d: Dialect) -> Filter<T> {
         Filter::<T>::new(d)
             .eq("a", 1i32)
@@ -1518,6 +1557,17 @@ mod tests {
                 ("total".to_string(), None),
             ]
         );
+    }
+
+    #[test]
+    fn group_sql_ignores_default_ordering() {
+        let f = Filter::<O>::new(Dialect::Postgres)
+            .group_by("note")
+            .annotate_count("n");
+        let (sql, _) = f.group_sql().unwrap();
+        assert!(!sql.contains("ORDER BY"), "{sql}");
+        let (sql, _) = f.order_by("-n").group_sql().unwrap();
+        assert!(sql.contains("ORDER BY \"n\" DESC"), "{sql}");
     }
 
     #[test]

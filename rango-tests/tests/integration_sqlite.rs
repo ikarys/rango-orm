@@ -1147,6 +1147,15 @@ async fn test_sqlite_select_as_partial() {
         insert(&pool, person).await.unwrap();
     }
 
+    // explain() shows the partial's columns, not `SELECT *`.
+    let sql = TestPartialPerson::filter(&pool)
+        .select_as::<PersonLite>()
+        .explain();
+    assert!(
+        sql.starts_with(r#"SELECT "full_name", "nick" FROM"#),
+        "{sql}"
+    );
+
     // Filter + order; the renamed `full_name` column and the NULL nick both decode.
     let rows: Vec<PersonLite> = TestPartialPerson::filter(&pool)
         .eq(TestPartialPerson::AGE, 30)
