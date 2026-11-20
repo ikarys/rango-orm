@@ -129,9 +129,9 @@ Design rules:
 
 | Feature | Notes |
 |---|---|
-| **Query builder** ✅ | `eq/ne/gt/gte/lt/lte/like/in_values/is_null`, `or()` / `not()` / `xor()` / `group()`, `order_by`, `limit`/`offset`, default cap of 1000 rows (`unlimited()`), `.explain()`. Typed columns (`User::EMAIL`) checked at compile time; string names checked against `M::schema()` at run time (`Error::Invalid`) |
+| **Query builder** ✅ | `eq/ne/gt/gte/lt/lte/like/in_values/is_null`, `or()` / `not()` / `xor()` / `group()`, `order_by`, `limit`/`offset`, default cap of 1000 rows (`unlimited()`), `.explain()`. Typed columns (`User::EMAIL`) checked at compile time; string names and their value types checked against `M::schema()` at run time (`Error::Invalid`) |
 | **Relations FK** ✅ | `ForeignKey<User>` → real `REFERENCES … ON DELETE` in SQL, FK columns indexed; the column follows the target's PK type (UUID default, INT, BIGINT) |
-| **ManyToMany** ✅ | Auto-generated pivot table (key columns follow the target PK types); `add` / `add_many` (multi-row `INSERT`, chunks of 1000 pairs, one transaction) / `remove` / `set` / `all` / `reverse` / `clear` / `exists` |
+| **ManyToMany** ✅ | Auto-generated pivot table (key columns follow the target PK types); `add` / `add_many` / `add_pairs` (multi-row `INSERT`, chunks of 1000 pairs, one transaction) / `remove` / `set` / `all` / `reverse` / `clear` / `exists` |
 | **Constraints** ✅ | `#[model(constraints = [CheckConstraint::new("age >= 18").name("chk_age"), UniqueConstraint::on(&["room", "date"]).name("uniq_booking")])]`: `CHECK` and `UNIQUE` inline in `CREATE TABLE`; `UNIQUE … WHERE cond` → partial unique index (Postgres, SQLite; skipped with a comment on MySQL). `managed = false` → ignored by migrations. `ordering = [asc("col"), desc("other")]` → default order |
 | **Subqueries** ✅ | `where_exists(Article::AUTHOR_ID, \|q\| ..)` (correlated `EXISTS`, `.not()` → `NOT EXISTS`) and `in_subquery(col, sub_col, \|q\| ..)`; decision rules for subquery vs `JOIN` vs `prefetch` documented in `docs/src/querying/filter.md`. Left (P2): Rango auto-picks the cheapest shape from a cost model |
 | **select_related** ✅ | One `LEFT JOIN` (filtered/paginated M in a subquery, R's columns prefixed `__r{i}_`); `all()` returns `Vec<WithRelated<M>>` |
@@ -140,14 +140,14 @@ Design rules:
 | **Aggregations** ✅ | `.count()` `.exists()` `.sum()` `.avg()` `.min()` `.max()` |
 | **Transactions** ✅ | `rango::atomic/transaction(&pool, async \|tx\| { ... }).await?` (async closure, `Send` future); crud, `filter`, M2M and bulk ops accept a pool or a transaction (`&mut **tx`) on all three backends; `get_or_create` is atomic (`INSERT … ON CONFLICT DO NOTHING RETURNING *` on Postgres); `update_or_create` on every backend; `atomic_retry` on Postgres and MySQL |
 | **Bulk ops** ✅ | `rango::bulk_create/update/upsert(&pool, &models, ...)`: multi-row `INSERT`, `UPDATE … FROM (VALUES …)` (Postgres, SQLite) or `CASE pk WHEN … END … WHERE pk IN (…)` (MySQL / MariaDB): one statement per chunk, upsert (MySQL rejects it with `Error::Invalid` when the table has a unique key other than `conflict_on`, since `ON DUPLICATE KEY` cannot target one); all three backends; atomic (savepoint inside a transaction); auto-chunked under the parameter limit; pool or transaction |
-| **Raw SQL escape hatch** ✅ | `rango::raw` / `raw_scalar` / `raw_execute(&pool, "SELECT ...", params)`, values always bound |
+| **Raw SQL escape hatch** ✅ | `rango::raw` / `raw_scalar` / `raw_values` / `raw_execute(&pool, "SELECT ...", params)`, values always bound |
 | **Auto-increment PK** ✅ | `FieldAutoInt` / `FieldAutoBigInt`, id assigned by the database |
 | **Partial selects (only / defer)** ✅ | `#[derive(Partial)] #[partial(model = User)] struct UserLite { .. }` + `.select_as::<UserLite>()`; columns and types checked at compile time. Not a Model with defaults (`update()` would overwrite), not a `HashMap` (that is `.values()`) |
 | **Implicit PK** ✅ | `#[rango::model]` attribute macro injects `pub id: FieldUuid` (`pk = "bigint"` / `"int"` → auto-increment) and derives `Model`. Per model, not in `rango.toml` (cargo does not track it) |
 | **CLI dump / restore / backup** ✅ | Rango JSON (schema snapshot + rows), backend-independent; restore in one transaction, input untrusted; backup = gzip + UTC timestamp, `0600` |
 | **Keyset pagination** ✅ | `.after(col, value)` / `.before(col, value)` |
 | **QuerySet update / delete** ✅ | `filter().set(col, v).update()` / `filter().delete()` → one `UPDATE` / `DELETE` statement, rows affected returned; filter only (no `order_by` / `limit` / relations), hooks not fired |
-| **GROUP BY / HAVING** ✅ | `group_by(col)` + `annotate_count/sum/avg/min/max(alias, col)` + `having(alias, Cmp::Gt, v)` → `.aggregate()`: one `SELECT … GROUP BY … HAVING` per call, `Vec<HashMap<String, SqlValue>>` (one row without `group_by`, Django `aggregate()`); aliases usable in `order_by`; all backends |
+| **GROUP BY / HAVING** ✅ | `group_by(col)` + `annotate_count/sum/avg/min/max(alias, col)` + `having(alias, Cmp::Gt, v)` → `.aggregate()`: one `SELECT … GROUP BY … HAVING` per call, `Vec<HashMap<String, SqlValue>>` (one row without `group_by`, Django `aggregate()`); aliases usable in `order_by`; `group_by_date(col, DateTrunc, alias)` (key as `YYYY-MM-DD` text); all backends |
 | **Stored procedures** ✅ | No `rango::call`: `raw_scalar` / `raw` cover `CALL` and set-returning functions (tested on PG, MySQL, MariaDB). Create procedures in a migration file (MySQL cannot prepare `CREATE PROCEDURE`) |
 
 ## Principes non-négociables
