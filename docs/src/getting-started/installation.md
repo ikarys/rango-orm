@@ -75,4 +75,4 @@ migrations/       ← SQL migration files (generated)
 | PostgreSQL | 14+ | 14, 18 | `gen_random_uuid()` is built in from 13; 13 is end-of-life |
 | MySQL | 8.0+ | 8.0, 8.4 | oldest version tested |
 | MariaDB | 10.6+ | 10.6, 11.4 | oldest version tested |
-| SQLite | 3.35+ | bundled 3.46 | `RETURNING` (3.35), `UPDATE … FROM` (3.33); sqlx bundles SQLite, so nothing to install |
+| SQLite | 3.35+ | bundled 3.54 | `RETURNING` (3.35), `UPDATE … FROM` (3.33); sqlx bundles SQLite, so nothing to install |

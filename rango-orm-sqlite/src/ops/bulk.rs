@@ -8,7 +8,7 @@ use sqlx::{Acquire, Sqlite};
 use super::*;
 
 /// Bound parameters per statement. SQLite >= 3.32 defaults `SQLITE_MAX_VARIABLE_NUMBER` to 32766
-/// (sqlx bundles 3.46); this keeps a margin below it.
+/// (sqlx 0.9.1 bundles 3.54); this keeps a margin below it.
 const MAX_PARAMS: usize = 32_000;
 
 #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "sqlite", db.operation = "INSERT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
