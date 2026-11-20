@@ -9,6 +9,9 @@ Reports from the usability tests described in [Blind usability tests](../docs/sr
 | 2026-11-08 | [campaign A](2026-11-08-campaign-a-library-django.md) ([brief](2026-11-08-campaign-a-library-django.brief.md)) | A: library, Django developer | bd5de84 | SQLite, PostgreSQL | 7/10 | 1 |
 | 2026-11-08 | [campaign B](2026-11-08-campaign-b-saas-billing-pg.md) ([brief](2026-11-08-campaign-b-saas-billing-pg.brief.md)) | B: SaaS billing, backend engineer | bd5de84 | PostgreSQL | 7/10 | 2 |
 | 2026-11-08 | [campaign C](2026-11-08-campaign-c-event-booking-mysql.md) ([brief](2026-11-08-campaign-c-event-booking-mysql.brief.md)) | C: event booking, indie developer | bd5de84 | MySQL 8.4, MariaDB 11.4, SQLite | 6.5/10 | 4 |
+| 2026-11-20 | [campaign A](2026-11-20-campaign-a-library-django.md) ([brief](2026-11-20-campaign-a-library-django.brief.md)) | A: library, Django developer, 100k loans | 7e0d1ec | SQLite, PostgreSQL | 8/10 | 12 |
+| 2026-11-20 | [campaign B](2026-11-20-campaign-b-saas-billing-pg.md) ([brief](2026-11-20-campaign-b-saas-billing-pg.brief.md)) | B: SaaS billing, backend engineer, 100k invoice lines | 7e0d1ec | PostgreSQL | 7/10 | 12 |
+| 2026-11-20 | [campaign C](2026-11-20-campaign-c-event-booking-mysql.md) ([brief](2026-11-20-campaign-c-event-booking-mysql.brief.md)) | C: event booking, indie developer, 100k bookings | 7e0d1ec | MySQL 8.4, MariaDB 11.4, SQLite | 8/10 | 15 |
 
 ## Open findings
 
