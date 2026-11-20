@@ -2,9 +2,11 @@
 
 A Django-inspired async ORM for Rust: define a struct, Rango generates the schema, the migrations and a typed query API.
 
-[![CI](https://github.com/ikarys/rango-orm/actions/workflows/ci.yml/badge.svg)](https://github.com/ikarys/rango-orm/actions/workflows/ci.yml) [![codecov](https://codecov.io/gh/ikarys/rango-orm/graph/badge.svg)](https://codecov.io/gh/ikarys/rango-orm)
+[![CI](https://github.com/ikarys/rango-orm/actions/workflows/ci.yml/badge.svg)](https://github.com/ikarys/rango-orm/actions/workflows/ci.yml) [![codecov](https://codecov.io/gh/ikarys/rango-orm/graph/badge.svg)](https://codecov.io/gh/ikarys/rango-orm) [![Vibecoding Convention](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/ikarys/rango-orm/main/audit/status.json)](VIBECODING.md)
 
-> `0.3.0` is the latest release on crates.io as [`rango-orm`](https://crates.io/crates/rango-orm). Pre-1.0: a `0.x` minor release may still break the API.
+> **AI assistance:** Rango is written with AI assistance under the [Vibecoding Convention](VIBECODING.md) (level 2); every quality claim comes with the check that backs it: [how Rango is built and verified](docs/src/trust/how-rango-is-built.md).
+
+> `0.3.1` is the latest release on crates.io as [`rango-orm`](https://crates.io/crates/rango-orm). Pre-1.0: a `0.x` minor release may still break the API.
 
 ## Why Rango
 
@@ -92,7 +94,7 @@ In production, pass the URL via `DATABASE_URL`; never put credentials in `rango.
 | PostgreSQL | 14+ | 14, 18 | `gen_random_uuid()` is built in from 13; 13 is end-of-life |
 | MySQL | 8.0+ | 8.0, 8.4 | oldest version tested |
 | MariaDB | 10.6+ | 10.6, 11.4 | oldest version tested |
-| SQLite | 3.35+ | bundled 3.46 | `RETURNING` (3.35), `UPDATE … FROM` (3.33); sqlx bundles SQLite, so nothing to install |
+| SQLite | 3.35+ | bundled 3.54 | `RETURNING` (3.35), `UPDATE … FROM` (3.33); sqlx bundles SQLite, so nothing to install |
 
 ## Features
 

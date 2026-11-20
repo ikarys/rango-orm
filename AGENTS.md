@@ -187,7 +187,7 @@ let active_users = User::filter(&pool)
 |---|---|---|
 | PostgreSQL | `rango-orm-postgres` | ✅ backend + CLI (default backend, PostgreSQL 14+) |
 | MySQL / MariaDB | `rango-orm-mysql` | ✅ backend + CLI (MySQL 8.0+, MariaDB 10.6+) |
-| SQLite | `rango-orm-sqlite` | ✅ (SQLite 3.35+, sqlx bundles 3.46) |
+| SQLite | `rango-orm-sqlite` | ✅ (SQLite 3.35+, sqlx 0.9.1 bundles 3.54) |
 | MSSQL | `rango-mssql` | 🔮 futur — SQLx a droppé le support MSSQL en 0.7, backend custom via `tiberius` |
 
 Note : PostgreSQL, MySQL, SQLite passent par SQLx. MSSQL nécessitera un backend séparé basé sur `tiberius`.
@@ -275,7 +275,7 @@ Known-CVE checklist (reviewed 2026-11-01) — keep new APIs out of these classes
 | Protocol length overflow (> 4 GiB values) | RUSTSEC-2024-0363 (sqlx), RUSTSEC-2024-0365 (diesel) | sqlx ≥ 0.8.1 required (`cargo audit` in CI) |
 | Object names from a dump turned into SQL on restore | PostgreSQL CVE-2025-8714, CVE-2025-8715 | `import`/`restore` treat file contents as untrusted: names quoted, values bound; covered by an e2e test |
 | TLS downgrade (`sslmode=prefer`, MySQL `PREFERRED`) | — | Remote hosts default to `require` / `REQUIRED` |
-| Bundled SQLite engine bugs | SQLite CVE-2025-6965, CVE-2025-29087 (fixed in 3.50.2 / 3.49.1) | Need attacker-controlled SQL, which Rango never runs; bump `libsqlite3-sys` with sqlx (0.8 bundles 3.46) |
+| Bundled SQLite engine bugs | SQLite CVE-2025-6965, CVE-2025-29087 (fixed in 3.50.2 / 3.49.1) | Need attacker-controlled SQL, which Rango never runs; bump `libsqlite3-sys` with sqlx (0.9.1 bundles 3.54.1) |
 
 ### Observability
 
@@ -324,3 +324,36 @@ Known-CVE checklist (reviewed 2026-11-01) — keep new APIs out of these classes
 ---
 
 _Rango is also the name of a chameleon who became a sheriff by accident. We like that energy._
+
+## Vibecoding Convention (level 2)
+
+This project follows the Vibecoding Convention at level 2; see `VIBECODING.md`.
+
+Before calling a change done, these must pass:
+- `cargo test --workspace`, and `just test-all` when the change touches a backend, the CLI or SQL
+- `just check` (`cargo fmt --all -- --check` and `cargo clippy --workspace --all-targets --all-features -- -W clippy::cognitive_complexity -D warnings`)
+- `gitleaks git --no-banner --redact .` (`just secrets`)
+
+Rules while editing:
+- Every commit with AI-written content ends with the attribution trailer this
+  project uses, naming the tool and model: `Assisted-by: <Tool>:<model>`, for example
+  `Assisted-by: Claude Code:claude-opus-5-5`. Never `Co-Authored-By` for a model.
+- Deleting, skipping or weakening a test requires the reason in the commit message.
+- A new dependency is checked against the registry (exists under that exact name,
+  established, the one the code needs) and taken at the registry's current
+  version, not the one you remember; the check is noted in the commit. Existing
+  dependencies are not held back without a reason written in `VIBECODING.md`.
+- No secret in any file, prompt or config.
+- Every input is hostile: arguments, files, environment, network, model output.
+  Follow the security model above and `SECURITY.md`; a change that touches
+  parsing, SQL or command building, credentials or file import (`import`, `restore`)
+  names the vulnerability class it guards against and its test.
+- Signal over noise. A comment states a reason, a constraint or a trap, never
+  what the line does. A docstring tells the caller what the signature does
+  not. The public API is documented. No TODO, placeholder, commented-out or
+  dead code in a delivered change. Documentation proportionate to the
+  project: a README says what it is, how to install, how to use, where to go
+  next; nothing written to fill space.
+
+Never without a human: release to `main`, publish to crates.io, change the CI, delete data.
+Merging a finished branch into `develop` follows the Git workflow above.

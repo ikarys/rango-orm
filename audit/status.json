@@ -1,0 +1,34 @@
+{
+  "color": "yellow",
+  "label": "vibecoding",
+  "message": "level 2 · checked 2026-11-20 · 765491d",
+  "schemaVersion": 1,
+  "vibecoding": {
+    "checked_by": "vibecheck 0.4.0",
+    "commit": "765491d",
+    "date": "2026-11-20",
+    "evidence": {
+      "audit": "audit/evidence/audit.json",
+      "coverage": "audit/evidence/coverage.txt",
+      "maintainability": "audit/evidence/jscpd-report.json",
+      "outdated": "audit/evidence/outdated.txt"
+    },
+    "level": 2,
+    "metrics": {
+      "coverage": 77.21,
+      "file_max": 2592,
+      "function_max": 50,
+      "markers": 254,
+      "outdated": 0
+    },
+    "open_findings": {
+      "BLOCKER": 0,
+      "DOC-WRONG": 0,
+      "MINOR": 0,
+      "PAINFUL": 0
+    },
+    "read_by": null,
+    "report": null,
+    "verdict": "pass with findings"
+  }
+}
