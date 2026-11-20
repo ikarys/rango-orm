@@ -29,6 +29,32 @@ pub(crate) async fn columns_of_type_postgres(
     Ok(cols.into_iter().collect())
 }
 
+/// Turn the text of `json` / `jsonb` columns (CSV fields) back into JSON values when it is an
+/// object or an array.
+pub(super) async fn csv_json_columns(
+    database_url: &str,
+    table: &str,
+    rows: &mut [serde_json::Map<String, serde_json::Value>],
+) -> Result<()> {
+    use sqlx::Connection;
+    let mut conn = sqlx::PgConnection::connect(database_url)
+        .await
+        .context("Failed to connect to Postgres")?;
+    let mut cols = columns_of_type_postgres(&mut conn, table, "jsonb").await?;
+    cols.extend(columns_of_type_postgres(&mut conn, table, "json").await?);
+    for row in rows {
+        for c in &cols {
+            if let Some(serde_json::Value::String(s)) = row.get(c)
+                && s.starts_with(['{', '['])
+                && let Ok(v) = serde_json::from_str(s)
+            {
+                row.insert(c.clone(), v);
+            }
+        }
+    }
+    Ok(())
+}
+
 pub(super) async fn import_postgres(
     database_url: &str,
     rows: &[serde_json::Map<String, serde_json::Value>],

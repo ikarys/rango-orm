@@ -48,7 +48,7 @@ enum Command {
 
     /// Export data to JSON or CSV
     Export {
-        /// Table to export (default: all tables)
+        /// Table to export (default: all tables; required for csv)
         #[arg(short, long)]
         table: Option<String>,
 

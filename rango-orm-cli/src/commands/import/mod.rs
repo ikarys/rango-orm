@@ -32,7 +32,7 @@ pub async fn run(
         }
     };
 
-    let rows = match fmt.as_str() {
+    let mut rows = match fmt.as_str() {
         "json" => parse::parse_json(&content)?,
         "csv" => parse::parse_csv(&content, table)?,
         other => bail!("Unknown format '{}'. Use 'json' or 'csv'.", other),
@@ -48,6 +48,15 @@ pub async fn run(
             "Rows have no `__table` field (a single-table export, or a CSV, does not record \
              its table): pass the target table with --table <name>"
         );
+    }
+
+    // CSV carries JSON as quoted text; jsonb_populate_record would store it as a JSON string.
+    if let (true, Some(t), false) = (
+        fmt == "csv",
+        table,
+        matches!(backend, BackendKind::Sqlite | BackendKind::Mysql),
+    ) {
+        postgres::csv_json_columns(database_url, t, &mut rows).await?;
     }
 
     let count = insert_rows(

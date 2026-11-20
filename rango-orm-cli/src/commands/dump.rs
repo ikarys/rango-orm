@@ -68,7 +68,7 @@ async fn build_dump(
     let mut tables = Vec::new();
     let mut migrations = None;
     if with_data {
-        for (name, rows) in export::fetch_tables(backend, database_url, requested).await? {
+        for (name, _, rows) in export::fetch_tables(backend, database_url, requested).await? {
             if name != MIGRATIONS_TABLE || requested.contains(&name) {
                 tables.push(DumpTable { name, rows });
             } else {
@@ -80,7 +80,7 @@ async fn build_dump(
         if migrations.is_none() && !requested.is_empty() {
             let ledger = [MIGRATIONS_TABLE.to_string()];
             if let Ok(found) = export::fetch_tables(backend, database_url, &ledger).await {
-                migrations = found.first().map(|(_, rows)| migration_names(rows));
+                migrations = found.first().map(|(_, _, rows)| migration_names(rows));
             }
         }
     }
@@ -129,7 +129,7 @@ pub async fn dump(
             };
             println!("✅ Dumped {} table(s) to {}", tables, path);
         }
-        None => println!("{}", String::from_utf8_lossy(&json)),
+        None => super::print_stdout(&format!("{}\n", String::from_utf8_lossy(&json)))?,
     }
     Ok(())
 }

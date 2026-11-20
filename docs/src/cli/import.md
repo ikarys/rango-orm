@@ -54,6 +54,15 @@ With `__table` (multi-table import without `--table`):
 ]
 ```
 
+## CSV format
+
+The first line is the header. Fields follow RFC 4180: quoted fields may contain commas, doubled quotes and line breaks; both LF and CRLF end a record. CSV carries no `__table`, so pass `--table`.
+
+- An unquoted field is typed: empty is `NULL`, then integer, float, `true`/`false`, otherwise text.
+- A quoted field is always text (`"42"` stays the string `42`, `""` is an empty string). A quoted JSON object or array is bound to a JSON column as JSON (on Postgres it is parsed first, so `jsonb` gets an object, not a string).
+
+`rango import` reads what `rango export --format csv` writes.
+
 ## Fixtures / loaddata
 
 `rango import` is Rango's equivalent of Django's `loaddata`. Use it to seed development databases:

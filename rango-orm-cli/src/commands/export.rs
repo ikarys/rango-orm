@@ -26,12 +26,17 @@ pub async fn run(
     output: Option<&str>,
 ) -> Result<()> {
     let cfg = crate::config::RangoConfig::load().unwrap_or_default();
+    if matches!(format, Format::Csv) && table.is_none() {
+        bail!("CSV export needs --table <name>; use --format json to export several tables");
+    }
     let requested: Vec<String> = table.map(str::to_string).into_iter().collect();
 
     let mut data = Vec::new();
-    for (name, rows) in
+    let mut columns = Vec::new();
+    for (name, cols, rows) in
         fetch_tables(cfg.backend_for(database_url), database_url, &requested).await?
     {
+        columns = cols;
         for mut row in rows {
             // Add table name for multi-table exports
             if table.is_none() {
@@ -46,7 +51,7 @@ pub async fn run(
 
     let content = match format {
         Format::Json => serialize_json(&data)?,
-        Format::Csv => serialize_csv(&data, table)?,
+        Format::Csv => serialize_csv(&data, &columns),
     };
 
     match output {
@@ -54,20 +59,22 @@ pub async fn run(
             fs::write(path, &content).with_context(|| format!("Failed to write to {}", path))?;
             println!("✅ Exported {} row(s) to {}", data.len(), path);
         }
-        None => print!("{}", content),
+        None => super::print_stdout(&content)?,
     }
 
     Ok(())
 }
 
 pub(crate) type Rows = Vec<serde_json::Map<String, serde_json::Value>>;
+/// A table's name, its columns in table order, and its rows.
+pub(crate) type Table = (String, Vec<String>, Rows);
 
 /// Rows of `requested` tables (all tables when empty), in foreign-key order: parents first.
 pub(crate) async fn fetch_tables(
     backend: BackendKind,
     database_url: &str,
     requested: &[String],
-) -> Result<Vec<(String, Rows)>> {
+) -> Result<Vec<Table>> {
     match backend {
         BackendKind::Sqlite => export_sqlite(database_url, requested).await,
         BackendKind::Mysql => export_mysql(database_url, requested).await,
@@ -139,7 +146,7 @@ where
 
 // ─── Postgres export ──────────────────────────────────────────────────────────
 
-async fn export_postgres(database_url: &str, requested: &[String]) -> Result<Vec<(String, Rows)>> {
+async fn export_postgres(database_url: &str, requested: &[String]) -> Result<Vec<Table>> {
     let pool = sqlx::PgPool::connect(database_url)
         .await
         .context("Failed to connect to Postgres")?;
@@ -194,6 +201,15 @@ async fn export_postgres(database_url: &str, requested: &[String]) -> Result<Vec
             .fetch_all(&pool)
             .await
             .with_context(|| format!("Failed to export table {}", t))?;
+        // to_jsonb sorts keys alphabetically: the catalog gives the table order.
+        let columns: Vec<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(
+            "SELECT column_name::text FROM information_schema.columns \
+             WHERE table_schema = current_schema() AND table_name = $1 ORDER BY ordinal_position",
+        ))
+        .bind(&t)
+        .fetch_all(&pool)
+        .await
+        .with_context(|| format!("Failed to read the columns of {}", t))?;
         let mut rows = Vec::with_capacity(texts.len());
         for text in texts {
             match serde_json::from_str(&text)? {
@@ -209,14 +225,14 @@ async fn export_postgres(database_url: &str, requested: &[String]) -> Result<Vec
                 _ => bail!("Unexpected row shape in table {}", t),
             }
         }
-        out.push((t, rows));
+        out.push((t, columns, rows));
     }
     Ok(out)
 }
 
 // ─── SQLite export ────────────────────────────────────────────────────────────
 
-async fn export_sqlite(database_url: &str, requested: &[String]) -> Result<Vec<(String, Rows)>> {
+async fn export_sqlite(database_url: &str, requested: &[String]) -> Result<Vec<Table>> {
     use sqlx::{Column, Row, SqlitePool};
 
     let pool = SqlitePool::connect(database_url)
@@ -243,6 +259,10 @@ async fn export_sqlite(database_url: &str, requested: &[String]) -> Result<Vec<(
             .await
             .with_context(|| format!("Failed to export table {}", t))?;
 
+        let columns = fetched
+            .first()
+            .map(|r| r.columns().iter().map(|c| c.name().to_string()).collect())
+            .unwrap_or_default();
         let mut rows = Vec::with_capacity(fetched.len());
         for row in fetched {
             let mut map = serde_json::Map::new();
@@ -251,7 +271,7 @@ async fn export_sqlite(database_url: &str, requested: &[String]) -> Result<Vec<(
             }
             rows.push(map);
         }
-        out.push((t, rows));
+        out.push((t, columns, rows));
     }
     Ok(out)
 }
@@ -284,7 +304,7 @@ fn sqlite_column_to_json(row: &sqlx::sqlite::SqliteRow, i: usize) -> serde_json:
 
 // ─── MySQL export ─────────────────────────────────────────────────────────────
 
-async fn export_mysql(database_url: &str, requested: &[String]) -> Result<Vec<(String, Rows)>> {
+async fn export_mysql(database_url: &str, requested: &[String]) -> Result<Vec<Table>> {
     use sqlx::{Column, Row};
 
     let pool = rango_orm_mysql::connect(database_url)
@@ -313,6 +333,10 @@ async fn export_mysql(database_url: &str, requested: &[String]) -> Result<Vec<(S
             .with_context(|| format!("Failed to export table {}", t))?;
         let kinds = text_column_kinds_mysql(&pool, &t).await?;
 
+        let columns = fetched
+            .first()
+            .map(|r| r.columns().iter().map(|c| c.name().to_string()).collect())
+            .unwrap_or_default();
         let mut rows = Vec::with_capacity(fetched.len());
         for row in fetched {
             let mut map = serde_json::Map::new();
@@ -322,7 +346,7 @@ async fn export_mysql(database_url: &str, requested: &[String]) -> Result<Vec<(S
             }
             rows.push(map);
         }
-        out.push((t, rows));
+        out.push((t, columns, rows));
     }
     Ok(out)
 }
@@ -495,51 +519,46 @@ fn serialize_json(rows: &[serde_json::Map<String, serde_json::Value>]) -> Result
     serde_json::to_string_pretty(rows).context("Failed to serialize JSON")
 }
 
+/// One CSV field per RFC 4180: quoted when it holds `,` `"` or a line break (inner quotes doubled).
+/// An empty string is quoted too (an empty unquoted field is NULL), and so is a string the
+/// importer would read back as a number or a bool.
+fn csv_field(v: &serde_json::Value) -> String {
+    let text = match v {
+        serde_json::Value::Null => return String::new(),
+        serde_json::Value::String(s) => s.clone(),
+        other => other.to_string(),
+    };
+    let looks_typed = text.parse::<f64>().is_ok() || text == "true" || text == "false";
+    let forced = matches!(v, serde_json::Value::String(_)) && (text.is_empty() || looks_typed);
+    if forced || text.contains([',', '"', '\r', '\n']) {
+        format!("\"{}\"", text.replace('"', "\"\""))
+    } else {
+        text
+    }
+}
+
 fn serialize_csv(
     rows: &[serde_json::Map<String, serde_json::Value>],
-    _table: Option<&str>,
-) -> Result<String> {
+    columns: &[String],
+) -> String {
     if rows.is_empty() {
-        return Ok(String::new());
+        return String::new();
     }
-
-    let headers: Vec<String> = rows[0]
-        .keys()
-        .filter(|k| *k != "__table")
-        .cloned()
-        .collect();
-
-    let mut out = headers.join(",");
+    let mut out = columns
+        .iter()
+        .map(|c| csv_field(&serde_json::Value::String(c.clone())))
+        .collect::<Vec<_>>()
+        .join(",");
     out.push('\n');
-
     for row in rows {
-        let values: Vec<String> = headers
+        let line: Vec<String> = columns
             .iter()
-            .map(|h| {
-                match row.get(h) {
-                    Some(serde_json::Value::String(s)) => {
-                        // Quote strings containing commas or newlines
-                        if s.contains(',')
-                            || s.contains('\n')
-                            || s.contains('"')
-                            || s.contains('\r')
-                        {
-                            format!("\"{}\"", s.replace('"', "\"\""))
-                        } else {
-                            s.clone()
-                        }
-                    }
-                    Some(serde_json::Value::Null) => String::new(),
-                    Some(v) => v.to_string(),
-                    None => String::new(),
-                }
-            })
+            .map(|c| row.get(c).map(csv_field).unwrap_or_default())
             .collect();
-        out.push_str(&values.join(","));
+        out.push_str(&line.join(","));
         out.push('\n');
     }
-
-    Ok(out)
+    out
 }
 
 #[cfg(test)]
@@ -555,6 +574,25 @@ mod tests {
         assert_eq!(
             bytes_to_uuid_string(&bytes),
             "123e4567-e89b-12d3-a456-426614174000"
+        );
+    }
+
+    #[test]
+    fn csv_writer_quotes_per_rfc_4180() {
+        use serde_json::json;
+        let cols: Vec<String> = ["b", "a", "n"].map(String::from).to_vec();
+        let mut row = serde_json::Map::new();
+        row.insert("a".into(), json!("x,\"y\"\nz"));
+        row.insert("b".into(), json!({"bulk": true, "plan": "pro"}));
+        row.insert("n".into(), json!(null));
+        let mut row2 = serde_json::Map::new();
+        row2.insert("a".into(), json!(""));
+        row2.insert("b".into(), json!("12"));
+        row2.insert("n".into(), json!(7));
+        let out = serialize_csv(&[row, row2], &cols);
+        assert_eq!(
+            out,
+            "b,a,n\n\"{\"\"bulk\"\":true,\"\"plan\"\":\"\"pro\"\"}\",\"x,\"\"y\"\"\nz\",\n\"12\",\"\",7\n"
         );
     }
 }
