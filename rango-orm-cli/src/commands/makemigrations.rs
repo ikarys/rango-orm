@@ -130,6 +130,18 @@ pub fn run(
     // Detect renames, Django-style.
     if check {
         diffs = detect_renames(diffs, &old_snapshot, |_, _, _| false);
+    } else if dry_run {
+        // No prompt in a dry run: every possible rename counts as a rename.
+        let mut assumed = false;
+        diffs = detect_renames(diffs, &old_snapshot, |_, _, _| {
+            assumed = true;
+            true
+        });
+        if assumed {
+            eprintln!(
+                "note: dry run assumed every possible rename is a rename; makemigrations will ask for confirmation."
+            );
+        }
     } else {
         diffs = detect_renames(diffs, &old_snapshot, |table, from, to| {
             confirm(&format!(
