@@ -114,16 +114,16 @@ Checked against the tree at commit 86a9183 (2026-11-20).
 
 | # | Decision | Commit or reason |
 |---|---|---|
-| 1 | documented | be190cb: raw-sql.md shows the unmanaged-model pattern for result sets that are not a model. A raw function returning maps stays open. |
+| 1 | fixed | 8370226: `raw_values(&pool, sql, params)` returns `Vec<HashMap<String, SqlValue>>`; raw-sql.md shows it next to the unmanaged-model pattern. |
 | 2 | fixed | afca4bf: multi-row inserts in restore and import (see A #11). |
 | 3 | documented | be190cb: bulk.md says ids are not returned and how to get them (keys generated in Rust, or re-read by natural key). |
-| 4 | fixed | be190cb: filter.md states that MySQL, MariaDB and SQLite coerce silently. The value check stays open (A #4). |
+| 4 | fixed | be190cb documents it; 8370226 rejects the wrong-type value with `Error::Invalid` on every backend. |
 | 5 | fixed | be190cb: relations.md, the FK type follows the target key, MySQL included. |
-| 6 | open | `makemigrations` should warn on stderr when a partial unique index is skipped on MySQL / MariaDB. |
+| 6 | fixed | 1222129: `makemigrations` prints a `warning:` on stderr for each partial unique index skipped on MySQL / MariaDB. |
 | 7 | documented | be190cb: aggregations.md, `having` compares to a constant; raw SQL or two queries otherwise. |
 | 8 | fixed | be190cb: tracing.md, "Counting statements". |
 | 9 | fixed | be190cb: transactions.md sentence rewritten. No `atomic_retry` on SQLite: there is no retryable conflict error to catch. |
-| 10 | documented | be190cb: same as A #10. |
+| 10 | fixed | Same as A #10 (1222129). |
 | 11 | fixed | 68d43e4: CSV columns in table order, broken pipe exits quietly. Booleans follow each backend's storage (SQLite has no boolean type): not changed. |
 | 12 | fixed | be190cb: credentials.md has MySQL grants and the note on `migrate` with the app role. |
 | 13 | fixed | be190cb: field-types.md links the MySQL type table; migrate.md has the MySQL tracking table. |
