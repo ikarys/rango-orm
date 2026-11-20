@@ -67,61 +67,59 @@ pub(super) async fn insert_rows_mysql(
 
     let uuid_cols = fetch_uuid_columns_mysql(&mut *conn, table).await?;
     let binary = binary_columns_mysql(&mut *conn, table).await?;
-    let mut count = 0;
+    let col_list = cols
+        .iter()
+        .map(|c| quote_ident_mysql(c))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let conflict = match on_conflict {
+        OnConflict::Replace => {
+            let updates = cols
+                .iter()
+                .map(|c| {
+                    format!(
+                        "{} = VALUES({})",
+                        quote_ident_mysql(c),
+                        quote_ident_mysql(c)
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("ON DUPLICATE KEY UPDATE {}", updates)
+        }
+        OnConflict::Skip => format!(
+            "ON DUPLICATE KEY UPDATE {} = {}",
+            quote_ident_mysql(cols[0]),
+            quote_ident_mysql(cols[0])
+        ),
+        OnConflict::Fail => String::new(),
+    };
 
-    for row in rows {
-        let col_list = cols
-            .iter()
-            .map(|c| quote_ident_mysql(c))
-            .collect::<Vec<_>>()
-            .join(", ");
-        let placeholders = cols.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
-        let conflict = match on_conflict {
-            OnConflict::Replace => {
-                let updates = cols
-                    .iter()
-                    .map(|c| {
-                        format!(
-                            "{} = VALUES({})",
-                            quote_ident_mysql(c),
-                            quote_ident_mysql(c)
-                        )
-                    })
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                format!("ON DUPLICATE KEY UPDATE {}", updates)
-            }
-            OnConflict::Skip => format!(
-                "ON DUPLICATE KEY UPDATE {} = {}",
-                quote_ident_mysql(cols[0]),
-                quote_ident_mysql(cols[0])
-            ),
-            OnConflict::Fail => String::new(),
-        };
+    for chunk in rows.chunks(rows_per_statement(65535, cols.len())) {
         let sql = format!(
-            "INSERT INTO {} ({}) VALUES ({}) {}",
+            "INSERT INTO {} ({}) VALUES {} {}",
             quote_ident_mysql(table),
             col_list,
-            placeholders,
+            values_placeholders(chunk.len(), cols.len()),
             conflict
         );
-
         let mut q = sqlx::query(sqlx::AssertSqlSafe(&*sql));
-        for col in &cols {
-            q = bind_json_value_mysql(
-                q,
-                row.get(*col).unwrap_or(&serde_json::Value::Null),
-                col,
-                uuid_cols.contains(*col),
-                binary.contains(*col),
-            )?;
+        for row in chunk {
+            for col in &cols {
+                q = bind_json_value_mysql(
+                    q,
+                    row.get(*col).unwrap_or(&serde_json::Value::Null),
+                    col,
+                    uuid_cols.contains(*col),
+                    binary.contains(*col),
+                )?;
+            }
         }
         q.execute(&mut *conn)
             .await
             .with_context(|| format!("Failed to insert into {}", table))?;
-        count += 1;
     }
-    Ok(count)
+    Ok(rows.len())
 }
 
 pub(super) async fn fetch_uuid_columns_mysql(

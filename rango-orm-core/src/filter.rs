@@ -39,6 +39,20 @@ impl Dialect {
         p
     }
 
+    /// `YYYY-MM-DD` text of `col` truncated to `trunc` (first day of the month / year).
+    fn date_trunc(self, col: &str, trunc: DateTrunc) -> String {
+        let (unit, pg, fmt) = match trunc {
+            DateTrunc::Day => ("day", "YYYY-MM-DD", "%Y-%m-%d"),
+            DateTrunc::Month => ("month", "YYYY-MM-DD", "%Y-%m-01"),
+            DateTrunc::Year => ("year", "YYYY-MM-DD", "%Y-01-01"),
+        };
+        match self {
+            Dialect::Postgres => format!("to_char(date_trunc('{unit}', {col}), '{pg}')"),
+            Dialect::Sqlite => format!("strftime('{fmt}', {col})"),
+            Dialect::Mysql => format!("DATE_FORMAT({col}, '{fmt}')"),
+        }
+    }
+
     /// `SUM` / `AVG` returning a float (`MIN` / `MAX` keep the column type).
     fn aggregate(self, func: &str, col: &str) -> String {
         match (self, func) {
@@ -63,6 +77,77 @@ enum Op {
     In,
     IsNull,
     IsNotNull,
+}
+
+/// Comparison used by `having(alias, cmp, value)`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Cmp {
+    Eq,
+    Ne,
+    Gt,
+    Gte,
+    Lt,
+    Lte,
+}
+
+impl Cmp {
+    fn sql(self) -> &'static str {
+        match self {
+            Cmp::Eq => "=",
+            Cmp::Ne => "!=",
+            Cmp::Gt => ">",
+            Cmp::Gte => ">=",
+            Cmp::Lt => "<",
+            Cmp::Lte => "<=",
+        }
+    }
+}
+
+/// Aggregate function of an `annotate_*` call.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AggFn {
+    Count,
+    Sum,
+    Avg,
+    Min,
+    Max,
+}
+
+impl AggFn {
+    fn name(self) -> &'static str {
+        match self {
+            AggFn::Count => "COUNT",
+            AggFn::Sum => "SUM",
+            AggFn::Avg => "AVG",
+            AggFn::Min => "MIN",
+            AggFn::Max => "MAX",
+        }
+    }
+}
+
+/// Granularity of `group_by_date`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DateTrunc {
+    Day,
+    Month,
+    Year,
+}
+
+/// A `group_by_date` key: `col` truncated to `trunc`, returned as `alias`.
+#[derive(Debug, Clone)]
+struct DateGroup {
+    column: String,
+    trunc: DateTrunc,
+    alias: String,
+}
+
+/// One `expr AS alias` of the aggregate query.
+#[derive(Debug, Clone)]
+struct Annotation {
+    alias: String,
+    func: AggFn,
+    /// `None` for `COUNT(*)`.
+    column: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -151,6 +236,16 @@ pub struct Filter<M> {
     prefetch_related: Vec<PrefetchSpec>,
     /// Raw WHERE clauses from backend extensions; on Postgres `$__` becomes `$N`.
     raw_conditions: Vec<(String, Vec<SqlValue>)>,
+    /// `SET col = value` pairs for `update()`, in call order.
+    sets: Vec<(String, SqlValue)>,
+    /// `GROUP BY` columns of `aggregate()`, in call order.
+    group_by: Vec<String>,
+    /// `group_by_date` keys of `aggregate()`, after the plain group columns.
+    date_groups: Vec<DateGroup>,
+    /// `annotate_*` aggregates of `aggregate()`, in call order.
+    annotations: Vec<Annotation>,
+    /// `HAVING` conditions on annotation aliases, joined with AND.
+    having: Vec<(String, Cmp, SqlValue)>,
     /// First unknown column met while building; returned as `Error::Invalid` on execution.
     invalid: Option<String>,
     _phantom: PhantomData<fn() -> M>,
@@ -169,6 +264,11 @@ impl<M: Model + ModelValues> Filter<M> {
             select_related: Vec::new(),
             prefetch_related: Vec::new(),
             raw_conditions: Vec::new(),
+            sets: Vec::new(),
+            group_by: Vec::new(),
+            date_groups: Vec::new(),
+            annotations: Vec::new(),
+            having: Vec::new(),
             invalid: None,
             _phantom: PhantomData,
         }
@@ -187,6 +287,13 @@ impl<M: Model + ModelValues> Filter<M> {
     pub fn check_col<T: Model>(&mut self, name: &str) {
         if self.invalid.is_none() {
             self.invalid = crate::unknown_column::<T>(name);
+        }
+    }
+
+    /// Remember the first value whose type does not fit column `name` of `M`.
+    fn check_value(&mut self, name: &str, value: &SqlValue) {
+        if self.invalid.is_none() {
+            self.invalid = crate::value_mismatch::<M>(name, value);
         }
     }
 
@@ -220,6 +327,9 @@ impl<M: Model + ModelValues> Filter<M> {
         values: Option<Vec<SqlValue>>,
     ) -> Self {
         self.check_col::<M>(col);
+        for v in value.iter().chain(values.iter().flatten()) {
+            self.check_value(col, v);
+        }
         let connector = std::mem::replace(&mut self.next_connector, Connector::And);
         self.conditions.push(ConditionGroup {
             node: ConditionNode::Single(Condition {
@@ -306,6 +416,95 @@ impl<M: Model + ModelValues> Filter<M> {
 
     pub fn is_not_null(self, col: impl ColumnRef<M>) -> Self {
         self.push_condition(col.column_name(), Op::IsNotNull, None, None)
+    }
+
+    /// `SET col = value` for `update_sql`; typed like `eq`, string names checked at run time.
+    pub fn set<V>(mut self, col: impl FilterColumn<M, V>, val: V) -> Self {
+        self.check_col::<M>(col.column_name());
+        let val = col.bind(val);
+        self.check_value(col.column_name(), &val);
+        self.sets.push((col.column_name().to_string(), val));
+        self
+    }
+
+    // ── Aggregation (GROUP BY / HAVING) ───────────────────────────────────────
+    /// `GROUP BY col` for `group_sql`; repeatable.
+    pub fn group_by(mut self, col: impl ColumnRef<M>) -> Self {
+        self.check_col::<M>(col.column_name());
+        self.group_by.push(col.column_name().to_string());
+        self
+    }
+
+    /// Group by `col` truncated to a day, month or year; the group key comes back under
+    /// `alias` as text `YYYY-MM-DD` (first day of the month / year) on every backend.
+    pub fn group_by_date(mut self, col: impl ColumnRef<M>, trunc: DateTrunc, alias: &str) -> Self {
+        self.check_col::<M>(col.column_name());
+        self.date_groups.push(DateGroup {
+            column: col.column_name().to_string(),
+            trunc,
+            alias: alias.to_string(),
+        });
+        self
+    }
+
+    fn date_expr(&self, g: &DateGroup) -> String {
+        self.dialect.date_trunc(&self.q(&g.column), g.trunc)
+    }
+
+    fn annotate(mut self, alias: &str, func: AggFn, column: Option<&str>) -> Self {
+        if let Some(c) = column {
+            self.check_col::<M>(c);
+        }
+        self.annotations.push(Annotation {
+            alias: alias.to_string(),
+            func,
+            column: column.map(str::to_string),
+        });
+        self
+    }
+
+    /// `COUNT(*) AS alias`.
+    pub fn annotate_count(self, alias: &str) -> Self {
+        self.annotate(alias, AggFn::Count, None)
+    }
+
+    /// `SUM(col) AS alias` (a float).
+    pub fn annotate_sum(self, alias: &str, col: impl ColumnRef<M>) -> Self {
+        self.annotate(alias, AggFn::Sum, Some(col.column_name()))
+    }
+
+    /// `AVG(col) AS alias` (a float).
+    pub fn annotate_avg(self, alias: &str, col: impl ColumnRef<M>) -> Self {
+        self.annotate(alias, AggFn::Avg, Some(col.column_name()))
+    }
+
+    /// `MIN(col) AS alias` (keeps the column type).
+    pub fn annotate_min(self, alias: &str, col: impl ColumnRef<M>) -> Self {
+        self.annotate(alias, AggFn::Min, Some(col.column_name()))
+    }
+
+    /// `MAX(col) AS alias` (keeps the column type).
+    pub fn annotate_max(self, alias: &str, col: impl ColumnRef<M>) -> Self {
+        self.annotate(alias, AggFn::Max, Some(col.column_name()))
+    }
+
+    /// `HAVING <aggregate of alias> <cmp> value`; several calls are joined with AND.
+    /// The alias must come from an `annotate_*` call (checked when the SQL is built).
+    pub fn having(mut self, alias: &str, cmp: Cmp, value: impl Into<SqlValue>) -> Self {
+        self.having.push((alias.to_string(), cmp, value.into()));
+        self
+    }
+
+    fn is_alias(&self, name: &str) -> bool {
+        self.annotations.iter().any(|a| a.alias == name)
+            || self.date_groups.iter().any(|g| g.alias == name)
+    }
+
+    fn annotation_expr(&self, a: &Annotation) -> String {
+        match &a.column {
+            None => "COUNT(*)".to_string(),
+            Some(c) => self.dialect.aggregate(a.func.name(), &self.q(c)),
+        }
     }
 
     pub fn or(mut self) -> Self {
@@ -404,7 +603,9 @@ impl<M: Model + ModelValues> Filter<M> {
     // ── Ordering / pagination ─────────────────────────────────────────────────
     pub fn order_by(mut self, col: impl OrderRef<M>) -> Self {
         let (name, descending) = col.order_parts();
-        self.check_col::<M>(name);
+        if !self.is_alias(name) {
+            self.check_col::<M>(name);
+        }
         let dir = if descending { "DESC" } else { "ASC" };
         self.order_by.push(format!("{} {dir}", self.q(name)));
         self
@@ -505,12 +706,78 @@ impl<M: Model + ModelValues> Filter<M> {
     /// `WHERE ...` (empty when there is no filter) and its binds, in placeholder order.
     pub fn build_where(&self) -> (String, Vec<SqlValue>) {
         let mut binds = Vec::new();
-        let body = self.where_body(&self.conditions, &self.raw_conditions, &mut binds, &mut 1);
+        let clause = self.where_clause_from(&mut binds, &mut 1);
+        (clause, binds)
+    }
+
+    /// `WHERE ...` continuing an existing placeholder numbering (`idx`) and bind list.
+    fn where_clause_from(&self, binds: &mut Vec<SqlValue>, idx: &mut usize) -> String {
+        let body = self.where_body(&self.conditions, &self.raw_conditions, binds, idx);
         if body.is_empty() {
-            (body, binds)
+            body
         } else {
-            (format!("WHERE {body}"), binds)
+            format!("WHERE {body}")
         }
+    }
+
+    /// `update()` / `delete()` take a filter only: no ordering, paging or relations.
+    fn ensure_write_shape(&self) -> Result<()> {
+        self.ensure_valid()?;
+        if !self.order_by.is_empty()
+            || self.limit.is_some()
+            || self.offset.is_some()
+            || !self.select_related.is_empty()
+            || !self.prefetch_related.is_empty()
+        {
+            return Err(Error::Invalid(
+                "update() / delete() do not accept order_by, limit, offset, select_related or prefetch_related".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// `UPDATE t SET .. WHERE ..` from the `set()` pairs; set binds first, then the filter's.
+    pub fn update_sql(&self) -> Result<(String, Vec<SqlValue>)> {
+        self.ensure_write_shape()?;
+        if self.sets.is_empty() {
+            return Err(Error::Invalid(
+                "update() needs at least one set(column, value)".into(),
+            ));
+        }
+        let mut binds = Vec::with_capacity(self.sets.len());
+        let mut idx = 1usize;
+        let assignments: Vec<String> = self
+            .sets
+            .iter()
+            .map(|(col, val)| {
+                binds.push(val.clone());
+                format!("{} = {}", self.q(col), self.dialect.placeholder(&mut idx))
+            })
+            .collect();
+        let mut sql = format!(
+            "UPDATE {} SET {}",
+            self.q(M::table_name()),
+            assignments.join(", ")
+        );
+        let where_clause = self.where_clause_from(&mut binds, &mut idx);
+        if !where_clause.is_empty() {
+            sql.push(' ');
+            sql.push_str(&where_clause);
+        }
+        Ok((sql, binds))
+    }
+
+    /// `DELETE FROM t WHERE ..`; no WHERE when the builder has no filter (Django semantics).
+    pub fn delete_sql(&self) -> Result<(String, Vec<SqlValue>)> {
+        self.ensure_write_shape()?;
+        let mut binds = Vec::new();
+        let mut sql = format!("DELETE FROM {}", self.q(M::table_name()));
+        let where_clause = self.where_clause_from(&mut binds, &mut 1);
+        if !where_clause.is_empty() {
+            sql.push(' ');
+            sql.push_str(&where_clause);
+        }
+        Ok((sql, binds))
     }
 
     fn conditions_sql(
@@ -638,14 +905,25 @@ impl<M: Model + ModelValues> Filter<M> {
             sql.push(' ');
             sql.push_str(&where_clause);
         }
+        let order_by = self.order_by_sql();
+        sql.push_str(&order_by);
+        sql.push_str(&self.limit_offset_sql());
+        (sql, order_by, binds)
+    }
+
+    /// `" ORDER BY ..."` or empty.
+    fn order_by_sql(&self) -> String {
         let clauses = self.order_clauses();
-        let order_by = if clauses.is_empty() {
+        if clauses.is_empty() {
             String::new()
         } else {
             format!(" ORDER BY {}", clauses.join(", "))
-        };
-        sql.push_str(&order_by);
-        // Default row cap unless .limit() or .unlimited() was called.
+        }
+    }
+
+    /// `" LIMIT n OFFSET m"`: the default row cap unless `.limit()` or `.unlimited()` was called.
+    fn limit_offset_sql(&self) -> String {
+        let mut sql = String::new();
         if !self.explicit_limit {
             sql.push_str(&format!(" LIMIT {DEFAULT_QUERY_LIMIT}"));
         } else if let Some(l) = self.limit {
@@ -654,7 +932,95 @@ impl<M: Model + ModelValues> Filter<M> {
         if let Some(o) = self.offset {
             sql.push_str(&format!(" OFFSET {o}"));
         }
-        (sql, order_by, binds)
+        sql
+    }
+
+    /// `SELECT <group cols>, <aggregates> FROM t WHERE .. GROUP BY .. HAVING .. ORDER BY .. LIMIT ..`
+    /// for `aggregate()`. WHERE binds first, then HAVING binds.
+    pub fn group_sql(&self) -> Result<(String, Vec<SqlValue>)> {
+        self.ensure_valid()?;
+        if self.group_by.is_empty() && self.date_groups.is_empty() && self.annotations.is_empty() {
+            return Err(Error::Invalid(
+                "aggregate() needs group_by() or annotate_*()".into(),
+            ));
+        }
+        if !self.select_related.is_empty() || !self.prefetch_related.is_empty() {
+            return Err(Error::Invalid(
+                "aggregate() does not accept select_related or prefetch_related".into(),
+            ));
+        }
+        let mut select: Vec<String> = self.group_by.iter().map(|c| self.q(c)).collect();
+        for g in &self.date_groups {
+            select.push(format!("{} AS {}", self.date_expr(g), self.q(&g.alias)));
+        }
+        for a in &self.annotations {
+            select.push(format!(
+                "{} AS {}",
+                self.annotation_expr(a),
+                self.q(&a.alias)
+            ));
+        }
+        let mut binds = Vec::new();
+        let mut idx = 1usize;
+        let mut sql = format!(
+            "SELECT {} FROM {}",
+            select.join(", "),
+            self.q(M::table_name())
+        );
+        let where_clause = self.where_clause_from(&mut binds, &mut idx);
+        if !where_clause.is_empty() {
+            sql.push(' ');
+            sql.push_str(&where_clause);
+        }
+        if !self.group_by.is_empty() || !self.date_groups.is_empty() {
+            let mut cols: Vec<String> = self.group_by.iter().map(|c| self.q(c)).collect();
+            cols.extend(self.date_groups.iter().map(|g| self.date_expr(g)));
+            sql.push_str(&format!(" GROUP BY {}", cols.join(", ")));
+        }
+        if !self.having.is_empty() {
+            let mut parts = Vec::with_capacity(self.having.len());
+            for (alias, cmp, value) in &self.having {
+                let Some(a) = self.annotations.iter().find(|a| &a.alias == alias) else {
+                    return Err(Error::Invalid(format!(
+                        "having(): unknown annotation `{alias}`"
+                    )));
+                };
+                binds.push(value.clone());
+                parts.push(format!(
+                    "{} {} {}",
+                    self.annotation_expr(a),
+                    cmp.sql(),
+                    self.dialect.placeholder(&mut idx)
+                ));
+            }
+            sql.push_str(&format!(" HAVING {}", parts.join(" AND ")));
+        }
+        // Explicit `order_by` only: the model's default ordering would break GROUP BY.
+        if !self.order_by.is_empty() {
+            sql.push_str(&format!(" ORDER BY {}", self.order_by.join(", ")));
+        }
+        sql.push_str(&self.limit_offset_sql());
+        Ok((sql, binds))
+    }
+
+    /// Result keys of `group_sql`, in column order: `(key, source column whose type the
+    /// value keeps)`. Group columns keep their own type, `MIN` / `MAX` keep the column's,
+    /// `COUNT` / `SUM` / `AVG` have none (integer / float).
+    pub fn aggregate_keys(&self) -> Vec<(String, Option<String>)> {
+        let mut keys: Vec<(String, Option<String>)> = self
+            .group_by
+            .iter()
+            .map(|c| (c.clone(), Some(c.clone())))
+            .collect();
+        keys.extend(self.date_groups.iter().map(|g| (g.alias.clone(), None)));
+        for a in &self.annotations {
+            let source = match a.func {
+                AggFn::Min | AggFn::Max => a.column.clone(),
+                AggFn::Count | AggFn::Sum | AggFn::Avg => None,
+            };
+            keys.push((a.alias.clone(), source));
+        }
+        keys
     }
 
     /// `SELECT` of the given plain column names, no relations.
@@ -828,6 +1194,63 @@ macro_rules! impl_filter_methods {
             /// WHERE col IS NOT NULL
             pub fn is_not_null(self, col: impl $crate::ColumnRef<M>) -> Self {
                 self.map(|f| f.is_not_null(col))
+            }
+
+            /// `SET col = value` for `.update()`. Typed like `eq`: `.set(User::ACTIVE, false)`.
+            pub fn set<V>(self, col: impl $crate::FilterColumn<M, V>, val: V) -> Self {
+                self.map(|f| f.set(col, val))
+            }
+
+            /// `GROUP BY col` for `.aggregate()`; repeatable. `.group_by(Order::COUNTRY)` or `"country"`.
+            pub fn group_by(self, col: impl $crate::ColumnRef<M>) -> Self {
+                self.map(|f| f.group_by(col))
+            }
+
+            /// `GROUP BY` a date column truncated to day, month or year; the key is
+            /// `SqlValue::Text` `YYYY-MM-DD` under `alias` (usable in `order_by`).
+            pub fn group_by_date(
+                self,
+                col: impl $crate::ColumnRef<M>,
+                trunc: $crate::DateTrunc,
+                alias: &str,
+            ) -> Self {
+                self.map(|f| f.group_by_date(col, trunc, alias))
+            }
+
+            /// `COUNT(*) AS alias` for `.aggregate()`; decodes as `SqlValue::BigInt`.
+            pub fn annotate_count(self, alias: &str) -> Self {
+                self.map(|f| f.annotate_count(alias))
+            }
+
+            /// `SUM(col) AS alias` for `.aggregate()`; decodes as `SqlValue::Double`.
+            pub fn annotate_sum(self, alias: &str, col: impl $crate::ColumnRef<M>) -> Self {
+                self.map(|f| f.annotate_sum(alias, col))
+            }
+
+            /// `AVG(col) AS alias` for `.aggregate()`; decodes as `SqlValue::Double`.
+            pub fn annotate_avg(self, alias: &str, col: impl $crate::ColumnRef<M>) -> Self {
+                self.map(|f| f.annotate_avg(alias, col))
+            }
+
+            /// `MIN(col) AS alias` for `.aggregate()`; keeps the column type.
+            pub fn annotate_min(self, alias: &str, col: impl $crate::ColumnRef<M>) -> Self {
+                self.map(|f| f.annotate_min(alias, col))
+            }
+
+            /// `MAX(col) AS alias` for `.aggregate()`; keeps the column type.
+            pub fn annotate_max(self, alias: &str, col: impl $crate::ColumnRef<M>) -> Self {
+                self.map(|f| f.annotate_max(alias, col))
+            }
+
+            /// `HAVING <aggregate of alias> <cmp> value` for `.aggregate()`; calls are joined with AND.
+            /// `.having("total", Cmp::Gt, 100.0)` after `.annotate_sum("total", Order::AMOUNT)`.
+            pub fn having(
+                self,
+                alias: &str,
+                cmp: $crate::Cmp,
+                value: impl Into<$crate::SqlValue>,
+            ) -> Self {
+                self.map(|f| f.having(alias, cmp, value))
             }
 
             /// Next condition uses OR
@@ -1027,6 +1450,104 @@ mod tests {
         }
     }
 
+    /// Model with declared columns: `update_sql` / `delete_sql` run `ensure_valid`.
+    struct W;
+
+    impl crate::ModelHooks for W {}
+
+    impl Model for W {
+        type Pk = uuid::Uuid;
+        fn table_name() -> &'static str {
+            "test_model"
+        }
+        fn schema() -> TableSchema {
+            let col = |(name, col_type): (&str, crate::ColumnType)| crate::ColumnDef {
+                name: name.to_string(),
+                col_type,
+                nullable: false,
+                primary_key: false,
+                unique: false,
+                default: None,
+                references: None,
+                index: false,
+            };
+            TableSchema {
+                columns: [
+                    ("a", crate::ColumnType::Int),
+                    ("age", crate::ColumnType::Int),
+                    ("active", crate::ColumnType::Bool),
+                    ("note", crate::ColumnType::Text),
+                    ("born", crate::ColumnType::Date),
+                    (
+                        "price",
+                        crate::ColumnType::Decimal {
+                            precision: 10,
+                            scale: 2,
+                        },
+                    ),
+                ]
+                .into_iter()
+                .map(col)
+                .collect(),
+                ..TableSchema::default()
+            }
+        }
+    }
+
+    impl ModelValues for W {
+        fn field_values(&self) -> Vec<(&'static str, SqlValue)> {
+            Vec::new()
+        }
+        fn pk_value(&self) -> SqlValue {
+            SqlValue::BigInt(1)
+        }
+        fn pk_column() -> &'static str {
+            "id"
+        }
+    }
+
+    impl FromRow for W {
+        fn from_row(_row: &dyn RangoRow) -> std::result::Result<Self, RowError> {
+            Ok(Self)
+        }
+    }
+
+    /// Model with a default `ordering`.
+    struct O;
+
+    impl crate::ModelHooks for O {}
+
+    impl Model for O {
+        type Pk = uuid::Uuid;
+        fn table_name() -> &'static str {
+            "test_model"
+        }
+        fn schema() -> TableSchema {
+            TableSchema {
+                ordering: vec![crate::asc("a")],
+                ..W::schema()
+            }
+        }
+    }
+
+    impl ModelValues for O {
+        fn field_values(&self) -> Vec<(&'static str, SqlValue)> {
+            Vec::new()
+        }
+        fn pk_value(&self) -> SqlValue {
+            SqlValue::BigInt(1)
+        }
+        fn pk_column() -> &'static str {
+            "id"
+        }
+    }
+
+    impl FromRow for O {
+        fn from_row(_row: &dyn RangoRow) -> std::result::Result<Self, RowError> {
+            Ok(Self)
+        }
+    }
+
     fn nested(d: Dialect) -> Filter<T> {
         Filter::<T>::new(d)
             .eq("a", 1i32)
@@ -1034,6 +1555,236 @@ mod tests {
             .where_exists::<T>("parent_id", |q| q.eq("b", 2i32))
             .in_subquery::<T>("c", "id", |q| q)
             .eq("d", 3i32)
+    }
+
+    #[test]
+    fn update_sql_binds_sets_then_filters() {
+        let (sql, binds) = Filter::<W>::new(Dialect::Postgres)
+            .lt("age", 18i32)
+            .set("active", false)
+            .set("note", "minor")
+            .update_sql()
+            .unwrap();
+        assert_eq!(
+            sql,
+            "UPDATE \"test_model\" SET \"active\" = $1, \"note\" = $2 WHERE \"age\" < $3"
+        );
+        assert_eq!(binds.len(), 3);
+        assert!(matches!(binds[0], SqlValue::Bool(false)));
+
+        let (sql, _) = Filter::<W>::new(Dialect::Sqlite)
+            .set("active", false)
+            .eq("a", 1i32)
+            .update_sql()
+            .unwrap();
+        assert_eq!(
+            sql,
+            "UPDATE \"test_model\" SET \"active\" = ? WHERE \"a\" = ?"
+        );
+    }
+
+    #[test]
+    fn delete_sql_with_and_without_filter() {
+        let (sql, binds) = Filter::<W>::new(Dialect::Postgres)
+            .eq("a", 1i32)
+            .delete_sql()
+            .unwrap();
+        assert_eq!(sql, "DELETE FROM \"test_model\" WHERE \"a\" = $1");
+        assert_eq!(binds.len(), 1);
+
+        let (sql, binds) = Filter::<W>::new(Dialect::Mysql).delete_sql().unwrap();
+        assert_eq!(sql, "DELETE FROM `test_model`");
+        assert!(binds.is_empty());
+    }
+
+    #[test]
+    fn write_shape_is_a_filter_only() {
+        assert!(matches!(
+            Filter::<W>::new(Dialect::Postgres).update_sql(),
+            Err(Error::Invalid(_))
+        ));
+        assert!(matches!(
+            Filter::<W>::new(Dialect::Postgres).limit(1).delete_sql(),
+            Err(Error::Invalid(_))
+        ));
+        assert!(matches!(
+            Filter::<W>::new(Dialect::Postgres)
+                .order_by("a")
+                .set("a", 1i32)
+                .update_sql(),
+            Err(Error::Invalid(_))
+        ));
+        assert!(
+            Filter::<W>::new(Dialect::Postgres)
+                .unlimited()
+                .delete_sql()
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn group_sql_renders_group_by_having_and_order() {
+        let f = Filter::<W>::new(Dialect::Postgres)
+            .eq("active", true)
+            .group_by("note")
+            .annotate_count("n")
+            .annotate_sum("total", "age")
+            .having("total", Cmp::Gt, 10i32)
+            .order_by("-n");
+        let (sql, binds) = f.group_sql().unwrap();
+        assert_eq!(
+            sql,
+            "SELECT \"note\", COUNT(*) AS \"n\", SUM(\"age\")::float8 AS \"total\" \
+             FROM \"test_model\" WHERE \"active\" = $1 GROUP BY \"note\" \
+             HAVING SUM(\"age\")::float8 > $2 ORDER BY \"n\" DESC LIMIT 1000"
+        );
+        assert_eq!(binds.len(), 2);
+        assert_eq!(
+            f.aggregate_keys(),
+            vec![
+                ("note".to_string(), Some("note".to_string())),
+                ("n".to_string(), None),
+                ("total".to_string(), None),
+            ]
+        );
+    }
+
+    #[test]
+    fn group_by_date_renders_per_dialect() {
+        for (d, month, day, year) in [
+            (
+                Dialect::Postgres,
+                "to_char(date_trunc('month', \"born\"), 'YYYY-MM-DD')",
+                "to_char(date_trunc('day', \"born\"), 'YYYY-MM-DD')",
+                "to_char(date_trunc('year', \"born\"), 'YYYY-MM-DD')",
+            ),
+            (
+                Dialect::Sqlite,
+                "strftime('%Y-%m-01', \"born\")",
+                "strftime('%Y-%m-%d', \"born\")",
+                "strftime('%Y-01-01', \"born\")",
+            ),
+            (
+                Dialect::Mysql,
+                "DATE_FORMAT(`born`, '%Y-%m-01')",
+                "DATE_FORMAT(`born`, '%Y-%m-%d')",
+                "DATE_FORMAT(`born`, '%Y-01-01')",
+            ),
+        ] {
+            for (t, expr) in [
+                (DateTrunc::Month, month),
+                (DateTrunc::Day, day),
+                (DateTrunc::Year, year),
+            ] {
+                let f = Filter::<W>::new(d)
+                    .group_by_date("born", t, "period")
+                    .annotate_count("n")
+                    .order_by("period");
+                let (sql, _) = f.group_sql().unwrap();
+                let q = |s: &str| d.quote_ident(s);
+                assert_eq!(
+                    sql,
+                    format!(
+                        "SELECT {expr} AS {p}, COUNT(*) AS {n} FROM {t} GROUP BY {expr} \
+                         ORDER BY {p} ASC LIMIT 1000",
+                        p = q("period"),
+                        n = q("n"),
+                        t = q("test_model"),
+                    )
+                );
+                assert_eq!(f.aggregate_keys()[0], ("period".to_string(), None));
+            }
+        }
+        let f = Filter::<W>::new(Dialect::Sqlite).group_by_date("nope", DateTrunc::Day, "d");
+        assert!(matches!(f.group_sql(), Err(Error::Invalid(_))));
+    }
+
+    #[test]
+    fn value_type_is_checked_for_string_columns() {
+        let bad = Filter::<W>::new(Dialect::Postgres).eq("age", "x".to_string());
+        let Err(Error::Invalid(m)) = bad.ensure_valid() else {
+            panic!("expected Invalid")
+        };
+        assert_eq!(
+            m,
+            "value of type Text does not match column `age` (Int) of table `test_model`"
+        );
+        assert!(
+            Filter::<W>::new(Dialect::Postgres)
+                .in_values("age", vec![1i32.into(), "x".to_string().into()])
+                .ensure_valid()
+                .is_err()
+        );
+        assert!(
+            Filter::<W>::new(Dialect::Postgres)
+                .set("age", "x".to_string())
+                .ensure_valid()
+                .is_err()
+        );
+        let ok = Filter::<W>::new(Dialect::Postgres)
+            .eq("price", 5i32)
+            .eq("age", SqlValue::NullInt)
+            .like("note", "a%".to_string())
+            .eq("born", SqlValue::NullDate);
+        assert!(ok.ensure_valid().is_ok());
+    }
+
+    #[test]
+    fn group_sql_ignores_default_ordering() {
+        let f = Filter::<O>::new(Dialect::Postgres)
+            .group_by("note")
+            .annotate_count("n");
+        let (sql, _) = f.group_sql().unwrap();
+        assert!(!sql.contains("ORDER BY"), "{sql}");
+        let (sql, _) = f.order_by("-n").group_sql().unwrap();
+        assert!(sql.contains("ORDER BY \"n\" DESC"), "{sql}");
+    }
+
+    #[test]
+    fn group_sql_without_group_by_is_one_row() {
+        let f = Filter::<W>::new(Dialect::Mysql)
+            .annotate_count("n")
+            .annotate_max("oldest", "age")
+            .unlimited();
+        let (sql, binds) = f.group_sql().unwrap();
+        assert_eq!(
+            sql,
+            "SELECT COUNT(*) AS `n`, MAX(`age`) AS `oldest` FROM `test_model`"
+        );
+        assert!(binds.is_empty());
+        assert_eq!(
+            f.aggregate_keys()[1],
+            ("oldest".to_string(), Some("age".to_string()))
+        );
+    }
+
+    #[test]
+    fn group_sql_rejects_bad_shapes() {
+        assert!(matches!(
+            Filter::<W>::new(Dialect::Postgres).group_sql(),
+            Err(Error::Invalid(_))
+        ));
+        assert!(matches!(
+            Filter::<W>::new(Dialect::Postgres)
+                .annotate_count("n")
+                .having("nope", Cmp::Gt, 1i32)
+                .group_sql(),
+            Err(Error::Invalid(_))
+        ));
+        // An unknown real column is still caught, an alias in order_by is not.
+        assert!(matches!(
+            Filter::<W>::new(Dialect::Sqlite)
+                .group_by("nope")
+                .group_sql(),
+            Err(Error::Invalid(_))
+        ));
+        assert!(
+            Filter::<W>::new(Dialect::Sqlite)
+                .annotate_count("n")
+                .order_by("n")
+                .group_sql()
+                .is_ok()
+        );
     }
 
     #[test]

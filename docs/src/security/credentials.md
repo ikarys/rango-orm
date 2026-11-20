@@ -26,7 +26,7 @@ Rango reads `DATABASE_URL` automatically for `rango migrate` and other CLI comma
 
 ## TLS
 
-Connections to a remote host are encrypted by default: Rango adds `sslmode=require` (PostgreSQL) or `ssl-mode=REQUIRED` (MySQL / MariaDB) when the URL sets no mode. Loopback hosts are left as is. An explicit mode in the URL always wins.
+Connections to a remote host are encrypted by default: Rango adds `sslmode=require` (PostgreSQL) or `ssl-mode=REQUIRED` (MySQL / MariaDB) when the URL sets no mode. Loopback hosts (`localhost`, `127.0.0.1`, `::1`) get no added mode, so the driver default applies: `prefer` / `PREFERRED`, which uses TLS when the server offers it and falls back to cleartext otherwise. An explicit mode in the URL always wins.
 
 `require` encrypts but does not check the server certificate. In production, set the strict mode in the URL:
 
@@ -60,7 +60,25 @@ MIGRATE_DATABASE_URL=postgres://app_migrate:...@host/db rango migrate
 DATABASE_URL=postgres://app:...@host/db ./my-app
 ```
 
-`rango dump` and `rango backup` must read every table, including `_rango_migrations`. The DML-only app role is not enough: run them with the migration role (or another role that can read everything).
+With these default privileges the app role can read every table the migration role creates, including `_rango_migrations`, so `rango dump` and `rango backup` work with it. It can also write to `_rango_migrations`. To keep the migration history out of the app's reach, revoke it once after the first `rango migrate`:
+
+```sql
+REVOKE INSERT, UPDATE, DELETE ON _rango_migrations FROM app;
+```
+
+The app role cannot run `rango migrate`, even with nothing pending: `migrate` starts with `CREATE TABLE IF NOT EXISTS _rango_migrations`, which needs the migration role.
+
+MySQL / MariaDB have no default privileges per role; grant on the database instead:
+
+```sql
+-- MySQL / MariaDB: run as root
+CREATE USER 'app_migrate'@'%' IDENTIFIED BY '...';
+CREATE USER 'app'@'%' IDENTIFIED BY '...';
+GRANT ALL PRIVILEGES ON mydb.* TO 'app_migrate'@'%';
+GRANT SELECT, INSERT, UPDATE, DELETE ON mydb.* TO 'app'@'%';
+```
+
+Database-level grants also cover `_rango_migrations`. MySQL cannot revoke a table privilege that was granted at database level, so to protect it grant the app role table by table instead.
 
 ## In production
 

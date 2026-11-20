@@ -29,6 +29,32 @@ pub(crate) async fn columns_of_type_postgres(
     Ok(cols.into_iter().collect())
 }
 
+/// Turn the text of `json` / `jsonb` columns (CSV fields) back into JSON values when it is an
+/// object or an array.
+pub(super) async fn csv_json_columns(
+    database_url: &str,
+    table: &str,
+    rows: &mut [serde_json::Map<String, serde_json::Value>],
+) -> Result<()> {
+    use sqlx::Connection;
+    let mut conn = sqlx::PgConnection::connect(database_url)
+        .await
+        .context("Failed to connect to Postgres")?;
+    let mut cols = columns_of_type_postgres(&mut conn, table, "jsonb").await?;
+    cols.extend(columns_of_type_postgres(&mut conn, table, "json").await?);
+    for row in rows {
+        for c in &cols {
+            if let Some(serde_json::Value::String(s)) = row.get(c)
+                && s.starts_with(['{', '['])
+                && let Ok(v) = serde_json::from_str(s)
+            {
+                row.insert(c.clone(), v);
+            }
+        }
+    }
+    Ok(())
+}
+
 pub(super) async fn import_postgres(
     database_url: &str,
     rows: &[serde_json::Map<String, serde_json::Value>],
@@ -217,34 +243,39 @@ pub(super) async fn insert_rows_postgres(
         OnConflict::Skip => "ON CONFLICT DO NOTHING".to_string(),
         OnConflict::Fail => String::new(),
     };
-    // The row travels as one JSON parameter; Postgres casts each value to the column
-    // type (uuid, timestamps, booleans, ...). Names are quoted, values are bound.
+    // A chunk of rows travels as one JSON array parameter; Postgres casts each value to the
+    // column type (uuid, timestamps, booleans, ...). Names are quoted, values are bound.
     let sql = format!(
-        "INSERT INTO {t} ({cols}) SELECT {cols} FROM jsonb_populate_record(NULL::{t}, $1::jsonb) WHERE true {conflict}",
+        "INSERT INTO {t} ({cols}) SELECT {cols} FROM jsonb_populate_recordset(NULL::{t}, $1::jsonb) WHERE true {conflict}",
         t = quote_ident(table),
         cols = col_list,
     );
 
     let binary = binary_columns_postgres(&mut *conn, table).await?;
-    let mut count = 0;
-    for row in rows {
-        let mut values = serde_json::Map::new();
-        for c in &cols {
-            let mut v = row.get(*c).cloned().unwrap_or(serde_json::Value::Null);
-            if let (true, serde_json::Value::String(s)) = (binary.contains(*c), &v) {
-                // jsonb_populate_record reads bytea in its `\x` hex text form.
-                v = serde_json::Value::String(format!("\\x{}", hex_encode(&decode_binary(c, s)?)));
+    for chunk in rows.chunks(rows_per_statement(65535, cols.len())) {
+        let mut records = Vec::with_capacity(chunk.len());
+        for row in chunk {
+            let mut values = serde_json::Map::new();
+            for c in &cols {
+                let mut v = row.get(*c).cloned().unwrap_or(serde_json::Value::Null);
+                if let (true, serde_json::Value::String(s)) = (binary.contains(*c), &v) {
+                    // jsonb_populate_recordset reads bytea in its `\x` hex text form.
+                    v = serde_json::Value::String(format!(
+                        "\\x{}",
+                        hex_encode(&decode_binary(c, s)?)
+                    ));
+                }
+                values.insert(c.to_string(), v);
             }
-            values.insert(c.to_string(), v);
+            records.push(serde_json::Value::Object(values));
         }
         sqlx::query(sqlx::AssertSqlSafe(&*sql))
-            .bind(serde_json::Value::Object(values).to_string())
+            .bind(serde_json::Value::Array(records).to_string())
             .execute(&mut *conn)
             .await
             .with_context(|| format!("Failed to insert into {}", table))?;
-        count += 1;
     }
-    Ok(count)
+    Ok(rows.len())
 }
 
 /// Single-column nullable foreign keys of the current schema, as `(table, column, parent)`.

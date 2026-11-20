@@ -371,10 +371,10 @@ async fn restore_works_on_a_database_migrate_already_prepared() {
     assert_ok(&out);
     assert_eq!(p.count("b.db", "t_author").await, Some(2));
     assert_eq!(p.count("b.db", "_rango_migrations").await, Some(1));
-    // The warning names the migrations that were recorded without being run.
+    // One neutral note says migrations were recorded without being run.
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(
-        err.contains("0001_") && err.contains("NOT reproduced"),
+        err.contains("note: 1 migration(s) recorded as applied"),
         "{err}"
     );
 }
@@ -432,4 +432,55 @@ async fn makemigrations_honors_models_src_from_rango_toml() {
     // A positional directory still wins.
     let out = p.cli("a.db", &["makemigrations", "nowhere", "--yes"]);
     assert!(!stdout(&out).contains("Found 2 model(s)"));
+}
+
+/// A dump made on another backend, restored here (the dump's `backend` field is patched).
+fn foreign_dump(p: &Project) -> String {
+    assert_ok(&p.cli("a.db", &["dump", "--schema-only", "-o", "d.json"]));
+    let mut d: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(p.dir.join("d.json")).unwrap()).unwrap();
+    d["backend"] = "postgres".into();
+    d["migrations"] = serde_json::json!(["0001_from_the_other_backend.sql"]);
+    p.write("foreign.json", &d.to_string())
+}
+
+async fn recorded(p: &Project, db: &str) -> Vec<String> {
+    let mut c = p.conn(db).await;
+    sqlx::query_scalar("SELECT name FROM _rango_migrations ORDER BY name")
+        .fetch_all(&mut c)
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn cross_backend_restore_records_the_target_migrations() {
+    let p = Project::new("cross_match").await;
+    let f = foreign_dump(&p);
+    let target: Vec<String> = std::fs::read_dir(p.dir.join("migrations"))
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|n| n.ends_with(".sql"))
+        .collect();
+    assert_eq!(target.len(), 1);
+
+    let out = p.cli("b.db", &["restore", &f, "--migrations", "migrations"]);
+    assert_ok(&out);
+    assert!(String::from_utf8_lossy(&out.stderr).contains("recorded as applied instead"));
+    assert_eq!(recorded(&p, "b.db").await, target);
+    let out = p.cli("b.db", &["migrate"]);
+    assert_ok(&out);
+    assert!(String::from_utf8_lossy(&out.stdout).contains("Nothing to apply"));
+}
+
+#[tokio::test]
+async fn cross_backend_restore_without_matching_migrations_records_none() {
+    let p = Project::new("cross_nomatch").await;
+    let f = foreign_dump(&p);
+    std::fs::create_dir_all(p.dir.join("other")).unwrap();
+
+    let out = p.cli("b.db", &["restore", &f, "--migrations", "other"]);
+    assert_ok(&out);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("does not match its schema"), "{err}");
+    assert!(recorded(&p, "b.db").await.is_empty());
 }

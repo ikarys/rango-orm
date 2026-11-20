@@ -37,6 +37,8 @@ rango import data --format json --table users
 | Default (skip) | `INSERT OR IGNORE` / `ON CONFLICT DO NOTHING` | Load fixtures without overwriting |
 | `--replace` | `INSERT OR REPLACE` / `ON CONFLICT DO UPDATE` | Sync/upsert data |
 
+Rows are inserted in multi-row statements (up to 1000 rows each). On Postgres, `--replace` fails with `ON CONFLICT DO UPDATE command cannot affect row a second time` when the same primary key appears twice in one file: remove the duplicates first.
+
 ## JSON format
 
 ```json
@@ -53,6 +55,15 @@ With `__table` (multi-table import without `--table`):
   { "__table": "post", "id": "...", "title": "Hello" }
 ]
 ```
+
+## CSV format
+
+The first line is the header. Fields follow RFC 4180: quoted fields may contain commas, doubled quotes and line breaks; both LF and CRLF end a record. CSV carries no `__table`, so pass `--table`.
+
+- An unquoted field is typed: empty is `NULL`, then integer, float, `true`/`false`, otherwise text.
+- A quoted field is always text (`"42"` stays the string `42`, `""` is an empty string). A quoted JSON object or array is bound to a JSON column as JSON (on Postgres it is parsed first, so `jsonb` gets an object, not a string).
+
+`rango import` reads what `rango export --format csv` writes.
 
 ## Fixtures / loaddata
 

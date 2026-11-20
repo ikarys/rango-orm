@@ -32,7 +32,7 @@ pub async fn run(
         }
     };
 
-    let rows = match fmt.as_str() {
+    let mut rows = match fmt.as_str() {
         "json" => parse::parse_json(&content)?,
         "csv" => parse::parse_csv(&content, table)?,
         other => bail!("Unknown format '{}'. Use 'json' or 'csv'.", other),
@@ -48,6 +48,15 @@ pub async fn run(
             "Rows have no `__table` field (a single-table export, or a CSV, does not record \
              its table): pass the target table with --table <name>"
         );
+    }
+
+    // CSV carries JSON as quoted text; jsonb_populate_record would store it as a JSON string.
+    if let (true, Some(t), false) = (
+        fmt == "csv",
+        table,
+        matches!(backend, BackendKind::Sqlite | BackendKind::Mysql),
+    ) {
+        postgres::csv_json_columns(database_url, t, &mut rows).await?;
     }
 
     let count = insert_rows(
@@ -165,4 +174,31 @@ fn insert_columns(row: &serde_json::Map<String, serde_json::Value>) -> Vec<&str>
         .filter(|k| *k != "__table")
         .map(String::as_str)
         .collect()
+}
+
+/// Rows per multi-row `INSERT`: at most 1000, and few enough that `rows * cols` bind
+/// parameters stay under the backend's limit (65535 Postgres / MySQL, 32766 SQLite).
+fn rows_per_statement(param_limit: usize, cols: usize) -> usize {
+    (param_limit / cols.max(1)).clamp(1, 1000)
+}
+
+/// `(?, ?), (?, ?), ...`: `rows` groups of `cols` placeholders.
+fn values_placeholders(rows: usize, cols: usize) -> String {
+    let group = format!("({})", vec!["?"; cols].join(", "));
+    vec![group; rows].join(", ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn chunk_size_respects_param_limit() {
+        assert_eq!(rows_per_statement(65535, 3), 1000);
+        assert_eq!(rows_per_statement(65535, 100), 655);
+        assert_eq!(rows_per_statement(32766, 100), 327);
+        assert_eq!(rows_per_statement(32766, 40000), 1);
+        assert_eq!(rows_per_statement(65535, 0), 1000);
+        assert_eq!(values_placeholders(2, 3), "(?, ?, ?), (?, ?, ?)");
+    }
 }

@@ -19,6 +19,8 @@ If any operation returns `Err`, the entire transaction is rolled back. To abort 
 
 ## Retrying on conflict
 
+`atomic_retry` exists on Postgres and MySQL / MariaDB only. SQLite has no `atomic_retry` (a write takes the database lock, so there is no serialization failure to retry): use `atomic()` there.
+
 Use `atomic_retry()` for `SERIALIZABLE` / `REPEATABLE READ` workloads and deadlocks. It retries only `Error::Conflict` (Postgres: serialization failure `40001`, deadlock `40P01`; MySQL/MariaDB: deadlock 1213 and lock wait timeout 1205); other errors are returned immediately.
 
 ```rust
@@ -32,7 +34,7 @@ atomic_retry(&pool, 3, async |tx| {
 
 The future of `atomic_retry` is `Send` too, so `tokio::spawn(async move { atomic_retry(&pool, 3, async |tx| { ... }).await })` works. For that, the closure must be `Clone` (it is cloned for each attempt): an async closure is `Clone` when everything it captures is, so capture shared state by reference (`&AtomicU32`, `&Arc<..>`), not as a `&mut` or by moving a non-`Clone` value.
 
-The closure can run several times, so keep it free of side effects outside the transaction (no emails, no HTTP calls). Postgres and MySQL/MariaDB (`atomic()` works on every backend, SQLite has no equivalent). On MySQL a lock wait timeout is a `Conflict` (so it is retried), while on Postgres `lock_timeout` stays `Error::Timeout`.
+The closure can run several times, so keep it free of side effects outside the transaction (no emails, no HTTP calls). On MySQL a lock wait timeout is a `Conflict` (so it is retried), while on Postgres `lock_timeout` stays `Error::Timeout`.
 
 ## Manual transactions
 
@@ -76,4 +78,4 @@ If a hook returns `Err`, the whole transaction rolls back — including any oper
 
 ## get_or_create is atomic
 
-`get_or_create` uses `INSERT ... ON CONFLICT DO NOTHING RETURNING *` (SQLite, MySQL: the equivalent for the engine) — it's atomic without wrapping in `atomic()`. Safe against race conditions. It takes a pool or a transaction.
+`get_or_create` is atomic without wrapping in `atomic()`: Postgres and SQLite use `INSERT ... ON CONFLICT DO NOTHING RETURNING *`; MySQL / MariaDB, which have no `RETURNING`, run a plain `INSERT`, then a `SELECT` on unique violation. Safe against race conditions. It takes a pool or a transaction.

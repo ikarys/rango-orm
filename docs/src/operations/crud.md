@@ -61,7 +61,7 @@ if created {
 }
 ```
 
-Uses `INSERT ... ON CONFLICT DO NOTHING RETURNING *` in a single round-trip.
+On Postgres and SQLite it uses `INSERT ... ON CONFLICT DO NOTHING RETURNING *` in a single round-trip. MySQL / MariaDB have no `RETURNING`: a plain `INSERT`, then a `SELECT` on unique violation (see [MySQL](../backends/mysql.md)).
 
 ## update_or_create
 

@@ -48,7 +48,7 @@ enum Command {
 
     /// Export data to JSON or CSV
     Export {
-        /// Table to export (default: all tables)
+        /// Table to export (default: all tables; required for csv)
         #[arg(short, long)]
         table: Option<String>,
 
@@ -118,6 +118,11 @@ enum Command {
     Restore {
         /// Dump file
         input: String,
+
+        /// Migrations folder of the target backend, used when the dump comes from another
+        /// backend (default: migrations/)
+        #[arg(short, long, default_value = "migrations")]
+        migrations: String,
 
         /// Database URL (overrides DATABASE_URL env var)
         #[arg(short, long)]
@@ -233,11 +238,17 @@ fn main() -> Result<()> {
 
         Command::Restore {
             input,
+            migrations,
             database_url,
         } => {
             let cfg = config::RangoConfig::load()?;
             let url = cfg.resolve_database_url(database_url.as_deref())?;
-            tokio::runtime::Runtime::new()?.block_on(dump::restore(&url, &input))?;
+            let dir = if migrations == "migrations" {
+                cfg.migrations.dir.clone()
+            } else {
+                migrations
+            };
+            tokio::runtime::Runtime::new()?.block_on(dump::restore(&url, &input, &dir))?;
         }
 
         Command::Backup { dir, database_url } => {

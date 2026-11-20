@@ -84,6 +84,39 @@ pub(crate) fn generate_sql_from_diff(diffs: &[SchemaDiff], backend: BackendKind)
     sql
 }
 
+/// Partial unique indexes that MySQL/MariaDB cannot express: the generators skip them with
+/// an SQL comment, `makemigrations` prints these warnings so the skip is not silent.
+pub(crate) fn skipped_partial_uniques(diffs: &[SchemaDiff], backend: BackendKind) -> Vec<String> {
+    if backend != BackendKind::Mysql {
+        return Vec::new();
+    }
+    let warn = |name: &str, table: &str| {
+        format!(
+            "warning: constraint \"{name}\" on \"{table}\" is a partial unique index, which \
+             MySQL/MariaDB do not support: it was skipped, enforce it in application code"
+        )
+    };
+    let mut out = Vec::new();
+    for d in diffs {
+        match d {
+            SchemaDiff::CreateTable(s) => {
+                for (i, c) in s.constraints.iter().enumerate() {
+                    if matches!(c, Constraint::Unique(u) if u.condition.is_some()) {
+                        out.push(warn(&constraint_name(&s.table_name, c, i), &s.table_name));
+                    }
+                }
+            }
+            SchemaDiff::AddConstraint { table, constraint }
+                if constraint.definition.contains(" WHERE ") =>
+            {
+                out.push(warn(&constraint.name, table));
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
 mod diff_sql;
 mod table;
 #[cfg(test)]

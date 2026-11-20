@@ -9,7 +9,7 @@ use sqlx::Executor;
 
 mod conn;
 pub use conn::Conn;
-mod exec;
+pub(crate) mod exec;
 pub use exec::SelectAs;
 
 pub use rango_orm_core::DEFAULT_QUERY_LIMIT;
@@ -90,6 +90,19 @@ where
     let q = sqlx::query(sqlx::AssertSqlSafe(sql));
     let q = bind_sql_values(q, binds);
     q.fetch_all(executor).await.map_err(db_err)
+}
+
+/// Run a statement and return the number of affected rows.
+async fn bind_and_execute<'e, E>(executor: E, sql: &str, binds: Vec<SqlValue>) -> Result<u64>
+where
+    E: Executor<'e, Database = sqlx::Sqlite>,
+{
+    let q = sqlx::query(sqlx::AssertSqlSafe(sql));
+    let q = bind_sql_values(q, binds);
+    q.execute(executor)
+        .await
+        .map(|r| r.rows_affected())
+        .map_err(db_err)
 }
 
 async fn bind_and_fetch_one<'e, E>(

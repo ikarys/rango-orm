@@ -66,11 +66,12 @@ let pool = rango::connect_postgres(&config).await?;
 | Field | Default | Notes |
 |---|---|---|
 | `max_connections` / `min_connections` | 20 / 2 | |
-| `connect_timeout` | 10 s | Pool acquire timeout → `Error::Timeout` |
-| `idle_timeout` | 600 s | |
-| `max_lifetime` | 1800 s | Recycles old connections |
+| `connect_timeout` | 10 (seconds) | Pool acquire timeout → `Error::Timeout` |
+| `idle_timeout` | 600 (seconds) | |
+| `max_lifetime` | 1800 (seconds) | Recycles old connections |
 | `test_before_acquire` | `false` | Saves a round-trip per acquire; enable behind proxies that drop idle connections |
-| `statement_timeout_ms` / `lock_timeout_ms` | server default | Sent at connection startup (PgBouncer: add them to `ignore_startup_parameters`) |
-| `slow_query_threshold_ms` | 500 | |
+| `statement_timeout_ms` / `lock_timeout_ms` | server default | Milliseconds, Postgres only. Sent at connection startup (PgBouncer: add them to `ignore_startup_parameters`) |
+| `slow_query_threshold_ms` | 500 (milliseconds) | Postgres; fixed 500 ms on SQLite and MySQL |
+| `after_connect` | empty | Postgres only: SQL statements run on every new connection (`SET TIME ZONE 'UTC'`, `SET search_path TO app`). Each one shows up as a statement in the tracing output |
 
 Queries are logged through `tracing` on the `sqlx::query` target: every query at `DEBUG`, slow ones at `WARN`. Only SQL text is logged, never bound values. SQLite uses the same logging with a fixed 500 ms threshold.

@@ -883,3 +883,33 @@ fn hostile_names_are_always_quoted_in_ddl() {
         assert!(!bare.contains("DROP TABLE y"), "{backend:?}: {sql}");
     }
 }
+
+#[test]
+fn mysql_skipped_partial_uniques_are_collected() {
+    use super::skipped_partial_uniques;
+    use rango_orm_core::{Constraint, UniqueConstraint};
+    let mut table = simple_table("t");
+    table.constraints = vec![
+        Constraint::Unique(UniqueConstraint::on(&["name"]).name("plain")),
+        Constraint::Unique(
+            UniqueConstraint::on(&["name"])
+                .name("active_only")
+                .condition("active"),
+        ),
+    ];
+    let diffs = [
+        SchemaDiff::CreateTable(table),
+        SchemaDiff::AddConstraint {
+            table: "u".to_string(),
+            constraint: SnapshotConstraint {
+                name: "u_active_unique".to_string(),
+                definition: "UNIQUE (\"email\") WHERE active".to_string(),
+            },
+        },
+    ];
+    let w = skipped_partial_uniques(&diffs, BackendKind::Mysql);
+    assert_eq!(w.len(), 2, "{w:?}");
+    assert!(w[0].contains("\"active_only\" on \"t\""), "{w:?}");
+    assert!(w[1].contains("\"u_active_unique\" on \"u\""), "{w:?}");
+    assert!(skipped_partial_uniques(&diffs, BackendKind::Postgres).is_empty());
+}

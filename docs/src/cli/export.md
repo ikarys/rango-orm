@@ -52,11 +52,17 @@ The `__table` field lets `rango import` route rows to the right table automatica
 
 ## CSV format
 
+CSV needs `--table <name>` (one table per file); without it the command fails, use `--format json` to export several tables.
+
 ```csv
 id,email,active
 abc-123,alice@example.com,true
 def-456,bob@example.com,false
 ```
+
+- Columns come in the table's column order.
+- Fields follow RFC 4180: a field containing `,`, `"` or a line break is wrapped in double quotes, with inner quotes doubled. JSON columns are written as quoted text.
+- `NULL` is an empty field. An empty string, and a text that looks like a number or `true`/`false`, is written quoted (`""`, `"42"`) so it comes back as text.
 
 ## Cross-backend export
 

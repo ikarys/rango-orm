@@ -127,6 +127,35 @@ where
         }
     }
 
+    /// `UPDATE .. SET .. WHERE ..` on every matching row, from the `.set(col, value)` pairs.
+    /// Returns the number of rows affected. Model hooks are not fired (same as Django).
+    ///
+    /// ```rust,ignore
+    /// let n = User::filter(&pool).lt(User::AGE, 18).set(User::ACTIVE, false).update().await?;
+    /// ```
+    #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "mysql", db.operation = "UPDATE", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
+    pub async fn update(mut self) -> Result<u64> {
+        let (sql, binds) = self.f.update_sql()?;
+        let rows = self.conn.execute(&sql, binds).await?;
+        tracing::Span::current().record("db.rows", rows);
+        Ok(rows)
+    }
+
+    /// `DELETE FROM .. WHERE ..` on every matching row (all rows when there is no filter).
+    /// Returns the number of rows affected. Model hooks are not fired (same as Django);
+    /// `ON DELETE` actions run in the database.
+    ///
+    /// ```rust,ignore
+    /// let n = Session::filter(&pool).lt(Session::EXPIRES_AT, now).delete().await?;
+    /// ```
+    #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "mysql", db.operation = "DELETE", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
+    pub async fn delete(mut self) -> Result<u64> {
+        let (sql, binds) = self.f.delete_sql()?;
+        let rows = self.conn.execute(&sql, binds).await?;
+        tracing::Span::current().record("db.rows", rows);
+        Ok(rows)
+    }
+
     /// Count matching rows.
     #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "mysql", db.operation = "SELECT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
     pub async fn count(mut self) -> Result<i64> {
@@ -161,55 +190,52 @@ where
                 return Err(Error::Invalid(msg));
             }
         }
-        use sqlx::Row;
         let (sql, binds) = self.f.values_sql(cols);
 
         let rows = self.conn.fetch_all(&sql, binds).await?;
         self.warn_if_capped(rows.len());
 
-        // DECIMAL columns are decoded by schema type: the driver type is ambiguous (SQLite
-        // NUMERIC may come back as an integer, MySQL's is not an i64/f64/String).
         let schema = M::schema();
-        let scale_of = |col: &str| {
-            schema
-                .columns
-                .iter()
-                .find(|c| c.name == col)
-                .and_then(|c| match c.col_type {
-                    rango_orm_core::ColumnType::Decimal { scale, .. } => Some(scale),
-                    _ => None,
-                })
-        };
-        rows.into_iter()
-            .map(|row| {
-                let mut map = std::collections::HashMap::new();
-                for &col in cols {
-                    let val: SqlValue = if let Some(scale) = scale_of(col) {
-                        if row
-                            .try_get_raw(col)
-                            .map(|v| sqlx::ValueRef::is_null(&v))
-                            .unwrap_or(true)
-                        {
-                            SqlValue::NullDecimal
-                        } else {
-                            let mut d = crate::row::MySqlRowRef(&row).get_decimal(col)?;
-                            d.rescale(u32::from(scale));
-                            SqlValue::Decimal(d)
-                        }
-                    } else if let Ok(Some(v)) = row.try_get::<Option<i64>, _>(col) {
-                        SqlValue::BigInt(v)
-                    } else if let Ok(Some(v)) = row.try_get::<Option<f64>, _>(col) {
-                        SqlValue::Double(v)
-                    } else if let Ok(Some(v)) = row.try_get::<Option<String>, _>(col) {
-                        SqlValue::Text(v)
-                    } else {
-                        SqlValue::NullText
-                    };
-                    map.insert(col.to_string(), val);
-                }
-                Ok(map)
+        let keys: Vec<(&str, Option<u8>)> = cols
+            .iter()
+            .map(|&c| (c, decimal_scale(&schema, c)))
+            .collect();
+        rows.iter().map(|row| row_to_map(row, &keys)).collect()
+    }
+
+    /// One `SELECT` with `GROUP BY` / `HAVING` built from `group_by()`, `annotate_*()` and
+    /// `having()`: one map per group (a single row when there is no `group_by`), keyed by
+    /// the group columns and the annotation aliases. `COUNT` is `SqlValue::BigInt`,
+    /// `SUM` / `AVG` are `SqlValue::Double`, `MIN` / `MAX` keep the column type.
+    ///
+    /// ```rust,ignore
+    /// let rows = Order::filter(&pool)
+    ///     .group_by(Order::COUNTRY)
+    ///     .annotate_count("n")
+    ///     .annotate_sum("total", Order::AMOUNT)
+    ///     .having("total", Cmp::Gt, 100.0)
+    ///     .order_by("-total")
+    ///     .aggregate()
+    ///     .await?;
+    /// ```
+    #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "mysql", db.operation = "SELECT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
+    pub async fn aggregate(mut self) -> Result<Vec<std::collections::HashMap<String, SqlValue>>> {
+        let (sql, binds) = self.f.group_sql()?;
+        let rows = self.conn.fetch_all(&sql, binds).await?;
+        self.warn_if_capped(rows.len());
+        tracing::Span::current().record("db.rows", rows.len());
+        let schema = M::schema();
+        let keys = self.f.aggregate_keys();
+        let keys: Vec<(&str, Option<u8>)> = keys
+            .iter()
+            .map(|(k, src)| {
+                (
+                    k.as_str(),
+                    src.as_deref().and_then(|c| decimal_scale(&schema, c)),
+                )
             })
-            .collect()
+            .collect();
+        rows.iter().map(|row| row_to_map(row, &keys)).collect()
     }
 
     /// SELECT SUM(col) FROM ... WHERE ... — returns None if the table is empty or all values are NULL.
@@ -307,6 +333,19 @@ where
     M: Model + ModelValues + FromRow,
     P: Partial<Model = M>,
 {
+    fn cols_sql() -> String {
+        let cols: Vec<String> = P::columns()
+            .iter()
+            .map(|c| rango_orm_core::quote_ident_mysql(c))
+            .collect();
+        cols.join(", ")
+    }
+
+    /// Returns the SQL that would be executed by `.all()`, for debugging.
+    pub fn explain(&self) -> String {
+        self.qb.f.select_sql_cols(&Self::cols_sql()).0
+    }
+
     /// Fetch all matching rows as `P`.
     #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "mysql", db.operation = "SELECT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
     pub async fn all(mut self) -> Result<Vec<P>> {
@@ -316,11 +355,7 @@ where
                 "select_related / prefetch_related are not supported with select_as".into(),
             ));
         }
-        let cols: Vec<String> = P::columns()
-            .iter()
-            .map(|c| rango_orm_core::quote_ident_mysql(c))
-            .collect();
-        let (sql, binds) = self.qb.f.select_sql_cols(&cols.join(", "));
+        let (sql, binds) = self.qb.f.select_sql_cols(&Self::cols_sql());
         let rows = self.qb.conn.fetch_all(&sql, binds).await?;
         self.qb.warn_if_capped(rows.len());
         tracing::Span::current().record("db.rows", rows.len());
@@ -371,4 +406,51 @@ where
             .collect::<Result<Vec<_>>>()?;
         Ok(lines.join("\n"))
     }
+}
+
+/// Scale of a `DECIMAL` column of the schema; `None` for any other column.
+fn decimal_scale(schema: &rango_orm_core::TableSchema, col: &str) -> Option<u8> {
+    schema
+        .columns
+        .iter()
+        .find(|c| c.name == col)
+        .and_then(|c| match c.col_type {
+            rango_orm_core::ColumnType::Decimal { scale, .. } => Some(scale),
+            _ => None,
+        })
+}
+
+/// One row of `values()` / `aggregate()` as `key → SqlValue`. DECIMAL columns are decoded by
+/// schema scale (the driver type is ambiguous); the rest by trying integer, float, text.
+pub(crate) fn row_to_map(
+    row: &sqlx::mysql::MySqlRow,
+    keys: &[(&str, Option<u8>)],
+) -> Result<std::collections::HashMap<String, SqlValue>> {
+    use sqlx::Row;
+    let mut map = std::collections::HashMap::new();
+    for &(col, scale) in keys {
+        let val: SqlValue = if let Some(scale) = scale {
+            if row
+                .try_get_raw(col)
+                .map(|v| sqlx::ValueRef::is_null(&v))
+                .unwrap_or(true)
+            {
+                SqlValue::NullDecimal
+            } else {
+                let mut d = crate::row::MySqlRowRef(row).get_decimal(col)?;
+                d.rescale(u32::from(scale));
+                SqlValue::Decimal(d)
+            }
+        } else if let Ok(Some(v)) = row.try_get::<Option<i64>, _>(col) {
+            SqlValue::BigInt(v)
+        } else if let Ok(Some(v)) = row.try_get::<Option<f64>, _>(col) {
+            SqlValue::Double(v)
+        } else if let Ok(Some(v)) = row.try_get::<Option<String>, _>(col) {
+            SqlValue::Text(v)
+        } else {
+            SqlValue::NullText
+        };
+        map.insert(col.to_string(), val);
+    }
+    Ok(map)
 }

@@ -1,6 +1,10 @@
 use crate::commands::migrate::tracking_table_ddl;
 use crate::commands::{export, import};
-use crate::migration::{diff::SchemaDiff, snapshot::Snapshot, sql::generate_sql_from_diff};
+use crate::migration::{
+    diff::{SchemaDiff, diff},
+    snapshot::Snapshot,
+    sql::generate_sql_from_diff,
+};
 use anyhow::{Context, Result, bail};
 use flate2::{Compression, read::GzDecoder, write::GzEncoder};
 use rango_orm_core::BackendKind;
@@ -68,7 +72,7 @@ async fn build_dump(
     let mut tables = Vec::new();
     let mut migrations = None;
     if with_data {
-        for (name, rows) in export::fetch_tables(backend, database_url, requested).await? {
+        for (name, _, rows) in export::fetch_tables(backend, database_url, requested).await? {
             if name != MIGRATIONS_TABLE || requested.contains(&name) {
                 tables.push(DumpTable { name, rows });
             } else {
@@ -80,7 +84,7 @@ async fn build_dump(
         if migrations.is_none() && !requested.is_empty() {
             let ledger = [MIGRATIONS_TABLE.to_string()];
             if let Ok(found) = export::fetch_tables(backend, database_url, &ledger).await {
-                migrations = found.first().map(|(_, rows)| migration_names(rows));
+                migrations = found.first().map(|(_, _, rows)| migration_names(rows));
             }
         }
     }
@@ -89,12 +93,7 @@ async fn build_dump(
         format: FORMAT.to_string(),
         version: VERSION,
         rango_version: env!("CARGO_PKG_VERSION").to_string(),
-        backend: match backend {
-            BackendKind::Sqlite => "sqlite",
-            BackendKind::Mysql => "mysql",
-            _ => "postgres",
-        }
-        .to_string(),
+        backend: backend_name(backend).to_string(),
         created_at: utc_now().0,
         schema,
         migrations,
@@ -129,7 +128,7 @@ pub async fn dump(
             };
             println!("✅ Dumped {} table(s) to {}", tables, path);
         }
-        None => println!("{}", String::from_utf8_lossy(&json)),
+        None => super::print_stdout(&format!("{}\n", String::from_utf8_lossy(&json)))?,
     }
     Ok(())
 }
@@ -148,7 +147,7 @@ pub async fn backup(database_url: &str, dir: &str, migrations_dir: &str) -> Resu
     Ok(())
 }
 
-pub async fn restore(database_url: &str, input: &str) -> Result<()> {
+pub async fn restore(database_url: &str, input: &str, migrations_dir: &str) -> Result<()> {
     let cfg = crate::config::RangoConfig::load().unwrap_or_default();
     let backend = cfg.backend_for(database_url);
 
@@ -185,22 +184,44 @@ pub async fn restore(database_url: &str, input: &str) -> Result<()> {
     // restore into a migrated database must not touch the tracking table.
     if let Some(sql) = &mut setup_sql {
         match &dump.migrations {
-            Some(names) => {
+            Some(dump_names) => {
+                let names = match migrations_to_record(&dump, backend, migrations_dir)? {
+                    Recorded::FromDump => dump_names.clone(),
+                    Recorded::FromTarget(files) => {
+                        eprintln!(
+                            "note: the dump comes from {}, so the {} migration file(s) of {} \
+                             (same schema) were recorded as applied instead of its own names.",
+                            dump.backend,
+                            files.len(),
+                            migrations_dir
+                        );
+                        files
+                    }
+                    Recorded::None => {
+                        eprintln!(
+                            "warning: the dump comes from {}, and the migrations folder {} does not \
+                             match its schema: nothing was recorded, and `rango migrate` would replay \
+                             migrations on the restored schema. Generate the target backend's \
+                             migrations from the same models first (`rango makemigrations`), then \
+                             restore again.",
+                            dump.backend, migrations_dir
+                        );
+                        Vec::new()
+                    }
+                };
                 if !names.is_empty() {
-                    // The schema comes from the snapshot, not from replaying the files:
-                    // hand-written SQL (procedures, views, triggers, data fixes) is lost.
+                    // The schema comes from the snapshot, not from replaying the files.
                     eprintln!(
-                        "warning: the schema was rebuilt from the dump's snapshot and these migrations \
-                         were recorded as applied without running them: {}. Any custom SQL in them \
-                         (stored procedures, views, triggers, data changes) was NOT reproduced: \
-                         re-run those statements by hand.",
-                        names.join(", ")
+                        "note: {} migration(s) recorded as applied (schema rebuilt from the dump's \
+                         snapshot); hand-written SQL in them (functions, triggers) is not replayed, \
+                         see docs migrations/migrate.md \"Custom SQL in a migration\".",
+                        names.len()
                     );
                 }
                 sql.push('\n');
                 sql.push_str(tracking_table_ddl(backend));
                 sql.push(';');
-                for name in names {
+                for name in &names {
                     // Bound at insert time like every other value.
                     rows.push(serde_json::Map::from_iter([
                         ("__table".to_string(), MIGRATIONS_TABLE.into()),
@@ -236,6 +257,47 @@ pub async fn restore(database_url: &str, input: &str) -> Result<()> {
     .await?;
     println!("✅ Restored {} row(s) from {}", count, input);
     Ok(())
+}
+
+fn backend_name(backend: BackendKind) -> &'static str {
+    match backend {
+        BackendKind::Sqlite => "sqlite",
+        BackendKind::Mysql => "mysql",
+        _ => "postgres",
+    }
+}
+
+/// Which migration names a restore records as applied.
+enum Recorded {
+    /// Same backend: the names stored in the dump.
+    FromDump,
+    /// Another backend whose migrations folder describes the same schema: its file names.
+    FromTarget(Vec<String>),
+    /// Another backend and no matching folder: none (the dump's names are not the target's).
+    None,
+}
+
+fn migrations_to_record(dump: &Dump, target: BackendKind, dir: &str) -> Result<Recorded> {
+    if dump.backend == backend_name(target) {
+        return Ok(Recorded::FromDump);
+    }
+    let files: Vec<String> = crate::commands::migrate::collect_migration_files(dir)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|p| Some(p.file_name()?.to_string_lossy().into_owned()))
+        .collect();
+    let (Some(dump_snapshot), false) = (&dump.schema, files.is_empty()) else {
+        return Ok(Recorded::None);
+    };
+    // Same schema = nothing to add and nothing to drop, either way.
+    let target_snapshot = Snapshot::load(dir)?;
+    let same = diff(&target_snapshot, &dump_snapshot.to_schemas()?).is_empty()
+        && diff(dump_snapshot, &target_snapshot.to_schemas()?).is_empty();
+    Ok(if same {
+        Recorded::FromTarget(files)
+    } else {
+        Recorded::None
+    })
 }
 
 fn parse_dump(bytes: &[u8]) -> Result<Dump> {

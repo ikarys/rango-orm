@@ -21,7 +21,7 @@ pub struct Post {
 }
 ```
 
-The column is stored as `UUID` (Postgres) or `TEXT` (SQLite). Every FK column is indexed.
+The column takes the type of the target's primary key: for a `FieldUuid` key, `UUID` on Postgres, `TEXT` on SQLite and `BINARY(16)` on MySQL / MariaDB; for an integer key, `INT` or `BIGINT` everywhere. Every FK column is indexed.
 
 Pointing at an integer key works the same way; the FK holds an `i32` / `i64`:
 
@@ -138,25 +138,20 @@ let exists = M2M::<Article, Tag>::exists(&pool, &article, &tag).await?;
 
 ### Adding many links at once
 
-`M2M::add` links one pair per call, and there is no bulk `add`: the pivot is not a model, so `bulk_create` does not apply. The pivot is a plain table, so write one multi-row `INSERT` with `raw_execute`. The table is `<table_a>_<table_b>` and the columns are `<table_a>_id` and `<table_b>_id` (table names, here `article_tag`, `article_id`, `tag_id`; `from_` / `to_` prefixes for a self-reference). The pair is the primary key, so `ON CONFLICT DO NOTHING` keeps it idempotent like `add`.
+`M2M::add_many` links one row to a whole list in multi-row `INSERT`s (1000 pairs per statement), inside one transaction. It is idempotent like `add`: links that already exist, and duplicates in the list, are left as is. An empty list runs no SQL.
 
 ```rust
-// PostgreSQL: `$n` placeholders. On SQLite and MySQL write `?` instead.
-let mut sql = String::from(r#"INSERT INTO "article_tag" ("article_id", "tag_id") VALUES "#);
-let mut params = Vec::new();
-for (i, tag) in tags.iter().enumerate() {
-    if i > 0 {
-        sql.push_str(", ");
-    }
-    sql.push_str(&format!("(${}, ${})", 2 * i + 1, 2 * i + 2));
-    params.push(SqlValue::Uuid(article.id.0));
-    params.push(SqlValue::Uuid(tag.id.0));
-}
-sql.push_str(" ON CONFLICT DO NOTHING");
-raw_execute(&pool, &sql, params).await?;
+M2M::<Article, Tag>::add_many(&pool, &article, &tags).await?;
 ```
 
-On MySQL quote the names with backticks and end the statement with `ON DUPLICATE KEY UPDATE article_id = article_id`. Only placeholders are built into the SQL string: the ids are bound. Keep each statement under the bind limit (see [Bulk operations](../operations/bulk.md#chunking)) and wrap several statements in `atomic()`. `M2M::set` is the better tool when you want to replace all links of one row.
+`M2M::set` uses the same statements after clearing the row's links: use it when you want to replace all links of one row, `add_many` when you only add.
+
+`add_many` goes from one row to many. To seed many rows each with a few links (5,000 books with 2 or 3 tags each), use `M2M::add_pairs`: it takes `(from, to)` pairs, with the same multi-row `INSERT`s, one transaction and idempotence as `add_many`. An empty slice runs no SQL.
+
+```rust
+// `pairs: Vec<(&Article, &Tag)>`
+M2M::<Article, Tag>::add_pairs(&pool, &pairs).await?;
+```
 
 ### Self-referencing ManyToMany
 

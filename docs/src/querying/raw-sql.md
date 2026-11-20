@@ -69,6 +69,35 @@ The procedure name is part of the SQL string: write it in the code, never take i
 
 Create procedures in a migration file, not with `raw_execute`: MySQL 8.4 refuses `CREATE PROCEDURE` as a prepared statement, and `rango migrate` sends migration files as plain text.
 
+### Result sets that are not a model
+
+`raw_values` returns each row as a `HashMap<String, SqlValue>` keyed by column name, with no model to declare:
+
+```rust
+let rows = raw_values(&pool, "SELECT region, SUM(seats) AS seats FROM bookings WHERE year = $1 GROUP BY region", vec![SqlValue::Int(2026)]).await?;
+for row in rows {
+    println!("{:?} {:?}", row["region"], row["seats"]);
+}
+```
+
+Values decode like [`.values()`](filter.md): integers come back as `SqlValue::BigInt`, floats as `Double`, text as `Text`, NULL as a typed null. Alias computed columns with `AS`.
+
+For typed access, `raw` decodes rows into a type that derives `Model`. For a report with its own columns (a procedure, a `GROUP BY` over an expression), declare an unmanaged model with exactly those columns: `managed = false` keeps it out of migrations.
+
+```rust
+#[derive(Model)]
+#[model(managed = false, table = "monthly_report")]
+pub struct MonthlyReport {
+    #[field(primary_key)]
+    pub event_id: FieldBigInt,
+    pub seats: FieldDecimal<20, 0>, // MySQL SUM() returns DECIMAL
+}
+
+let rows = raw::<_, MonthlyReport>(&pool, "CALL monthly_report(?, ?)", params).await?;
+```
+
+Column names and types must match what the query returns (alias them with `AS`).
+
 ## ⚠️ Security
 
 `raw()` does **not** escape your SQL string. Only the bound parameters are safe.

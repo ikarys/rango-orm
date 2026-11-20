@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.3.0 (2026-11-20)
+
+- Feat: `M2M::add_many(&pool, &from, &to_list)` links one row to a list in multi-row `INSERT`s (1000 pairs per statement, one transaction), idempotent like `add`; `M2M::set` uses the same statements (all backends).
+- Feat: `M2M::add_pairs(&pool, &[(&from, &to), ..])` links arbitrary pairs with the same statements as `add_many` (all backends).
+- Feat: `Error::OutOfRange { column }` for a value that does not fit its column (Postgres `22003`, MySQL / MariaDB 1264 and 1690).
+- Fix: `rango makemigrations` prints a warning on stderr for each partial unique index skipped on MySQL / MariaDB.
+- Fix: `rango restore` prints one neutral `note:` line instead of the long warning about recorded migrations.
+- Feat: `group_by()`, `annotate_count/sum/avg/min/max()`, `having(alias, Cmp, value)` and the `aggregate()` terminal: one `SELECT ... GROUP BY ... HAVING` statement returning one map per group (one row without `group_by`), on all backends. Aliases are accepted by `order_by`.
+- Feat: `filter().set(col, value).update()` and `filter().delete()` on the query builder: one `UPDATE` / `DELETE` statement run by the database, returning the rows affected (all backends). A filter only (`order_by`, `limit`, `offset`, relations are `Error::Invalid`); model hooks are not fired, like bulk ops.
+- Feat: `group_by_date(col, DateTrunc::Day|Month|Year, alias)` groups by a truncated date; the key is `YYYY-MM-DD` text on every backend.
+- Feat: `raw_values(&pool, sql, params)` returns `Vec<HashMap<String, SqlValue>>` for result sets that are not a model (all backends).
+- Change: a value whose type does not fit the column (string column names in `eq`, `in_values`, `set`, ...) is `Error::Invalid` before any SQL runs, instead of a Postgres error or a silent SQLite / MySQL coercion.
+- Fix: CSV `export` writes every field per RFC 4180 and refuses CSV without `--table`; `import` reads quoted fields, doubled quotes, embedded newlines and CRLF, and on Postgres a quoted JSON object / array goes into `json` / `jsonb` columns.
+- Perf: `rango restore` and `rango import` insert in multi-row statements: 100k rows on SQLite in 0.52 s instead of 4.46 s.
+- Feat: `rango restore --migrations <dir>`: a cross-backend restore records the target project's migration names when its snapshot matches the dump's schema, so `rango migrate` afterwards is a no-op (it recorded the source project's names and replayed everything).
+- Fix: a failing `rango migrate` reports the line in the migration file, not PostgreSQL's source line.
+- Fix: `rango makemigrations --dry-run` never prompts for renames.
+- Feat: `SelectAs::explain()` shows the partial select's SQL.
+- Fix: `aggregate()` ignores the model's default ordering.
+
 ## 0.2.0 (2026-11-08)
 
 - Fix: `select_as::<P>().all()` emits the `db.query` tracing span like every other query-builder terminal (all backends).
