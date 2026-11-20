@@ -246,7 +246,7 @@ where
         sqlx::raw_sql(sqlx::AssertSqlSafe(&*sql))
             .execute(&mut *tx)
             .await
-            .with_context(|| format!("Failed to apply {}", name))?;
+            .map_err(|e| apply_error(&name, &sql, e))?;
         if let Some(fk_check) = fk_check
             && !sqlx::raw_sql(sqlx::AssertSqlSafe(fk_check))
                 .fetch_all(&mut *tx)
@@ -268,6 +268,31 @@ where
     }
     println!("✅ Applied {} migration(s).", count);
     Ok(())
+}
+
+/// 1-based line of the 1-based character `offset` in `sql` (clamped to the text).
+fn line_of_offset(sql: &str, offset: usize) -> usize {
+    1 + sql
+        .chars()
+        .take(offset.saturating_sub(1))
+        .filter(|&c| c == '\n')
+        .count()
+}
+
+/// `Failed to apply <name>: <message>`, with the line in the migration file when Postgres
+/// reports a position. sqlx's own Display appends a line of PostgreSQL's C source, which
+/// is misleading here.
+fn apply_error(name: &str, sql: &str, err: sqlx::Error) -> anyhow::Error {
+    let sqlx::Error::Database(db) = &err else {
+        return anyhow::Error::from(err).context(format!("Failed to apply {name}"));
+    };
+    let mut msg = db.message().to_string();
+    if let Some(pg) = db.try_downcast_ref::<sqlx::postgres::PgDatabaseError>()
+        && let Some(sqlx::postgres::PgErrorPosition::Original(pos)) = pg.position()
+    {
+        msg.push_str(&format!(" ({name} line {})", line_of_offset(sql, pos)));
+    }
+    anyhow::anyhow!("Failed to apply {name}: {msg}")
 }
 
 fn pending_migrations(
@@ -306,6 +331,17 @@ fn collect_migration_files(dir: &str) -> Result<Vec<PathBuf>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn line_of_offset_counts_newlines_before_the_offset() {
+        let sql = "CREATE TABLE a (id int);\nCREATE TABLE b (id int);\nbad";
+        assert_eq!(line_of_offset(sql, 1), 1);
+        assert_eq!(line_of_offset(sql, 25), 1); // the '\n' itself
+        assert_eq!(line_of_offset(sql, 26), 2);
+        assert_eq!(line_of_offset(sql, 51), 3);
+        assert_eq!(line_of_offset(sql, 9999), 3);
+        assert_eq!(line_of_offset("é\nx", 3), 2);
+    }
 
     #[test]
     fn pending_migrations_returns_only_unapplied_sql_files() {
