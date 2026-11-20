@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Feat: `filter().set(col, value).update()` and `filter().delete()` on the query builder: one `UPDATE` / `DELETE` statement run by the database, returning the rows affected (all backends). A filter only (`order_by`, `limit`, `offset`, relations are `Error::Invalid`); model hooks are not fired, like bulk ops.
+
 ## 0.2.0 (2026-11-08)
 
 - Fix: `select_as::<P>().all()` emits the `db.query` tracing span like every other query-builder terminal (all backends).

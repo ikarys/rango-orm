@@ -26,6 +26,7 @@
 
 - [Filter & Lookup](./querying/filter.md)
 - [Aggregations](./querying/aggregations.md)
+- [Update & Delete](./querying/update-delete.md)
 - [select_related & prefetch_related](./querying/relations.md)
 - [values()](./querying/values.md)
 - [Partial Selects (only / defer)](./querying/select-as.md)

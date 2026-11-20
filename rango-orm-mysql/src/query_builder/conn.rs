@@ -1,6 +1,6 @@
 //! Where a `QueryBuilder` runs: a pool or a borrowed connection / transaction.
 
-use super::{bind_and_fetch_all, bind_and_fetch_one};
+use super::{bind_and_execute, bind_and_fetch_all, bind_and_fetch_one};
 use crate::error::db_err;
 use rango_orm_core::{Error, Result, SqlValue};
 use sqlx::mysql::MySqlRow;
@@ -88,5 +88,10 @@ impl Conn<'_> {
     pub(super) async fn fetch_one(&mut self, sql: &str, binds: Vec<SqlValue>) -> Result<MySqlRow> {
         let mut c = self.acquire().await?;
         bind_and_fetch_one(&mut *c, sql, binds).await
+    }
+
+    pub(super) async fn execute(&mut self, sql: &str, binds: Vec<SqlValue>) -> Result<u64> {
+        let mut c = self.acquire().await?;
+        bind_and_execute(&mut *c, sql, binds).await
     }
 }
