@@ -49,19 +49,20 @@ Three campaigns, each a different persona building a different real app. Togethe
 | B | Backend engineer, knows SQL well | Multi-tenant SaaS billing API: tenants, customers, invoices, invoice lines, money as decimals | PostgreSQL |
 | C | Indie developer who ships on MySQL | Event booking with seat capacity and waiting list | MySQL 8 and MariaDB, SQLite for its tests |
 
-Each campaign follows the same steps:
+Each campaign follows the same steps. Step 7 is about volume: it checks that the queries stay simple and correct on a real amount of data, not raw speed, which the benchmarks measure.
 
 1. Install, run `rango init`, and configure the connection.
 2. Write the models: primary keys, foreign keys, many-to-many relations, optional fields, and constraints.
 3. Run `makemigrations` and `migrate`.
 4. Evolve the schema: add a field, rename a field, add a constraint, then migrate again.
-5. Seed data with bulk operations, at least 1,000 rows.
+5. Seed data with bulk operations: at least 100,000 rows in the app's main table and realistic volumes in the related tables. Time the seed.
 6. Write the app's real queries: filters, relations, aggregates, and pagination.
-7. Run one transaction scenario where atomicity matters, for example borrow a book, book the last seat, or issue an invoice.
-8. Run a concurrency or retry case where the backend supports it.
-9. Check observability: count the SQL queries of each step from the tracing output.
-10. Make deliberate mistakes and judge each error message: forgot `migrate`, value of the wrong type, unique violation, foreign key to a missing row, unknown column name passed as a string.
-11. Dump, restore into an empty database, and back up.
+7. Run those queries on the seeded volume: count the SQL statements of each (no N+1), time it, page deep with keyset pagination, and check `.explain()` uses an index where one is expected. Time one migration that adds a column to the big table.
+8. Run one transaction scenario where atomicity matters, for example borrow a book, book the last seat, or issue an invoice.
+9. Run a concurrency or retry case where the backend supports it.
+10. Check observability: count the SQL queries of each step from the tracing output.
+11. Make deliberate mistakes and judge each error message: forgot `migrate`, value of the wrong type, unique violation, foreign key to a missing row, unknown column name passed as a string.
+12. Dump, restore into an empty database, and back up.
 
 ## Feature coverage
 
@@ -71,18 +72,21 @@ Each campaign follows the same steps:
 | Defining models, field types | x | x | x |
 | Implicit primary key (`#[rango::model]`, bigint) |  |  | x |
 | Relations: ForeignKey, ManyToMany | x | x | x |
+| ManyToMany `add_many` | x |  | x |
 | Model hooks | x |  |  |
 | Constraints, ordering, partial unique index | x | x | x |
 | makemigrations (add, rename, constraint change, SQLite rebuild) | x | x | x |
 | migrate, least-privilege migration role (`MIGRATE_DATABASE_URL`) | x | x | x |
 | Filters, `or` / `not`, subqueries (`where_exists`, `in_subquery`) | x | x | x |
 | Aggregations, decimals | x | x | x |
+| GROUP BY / HAVING (`group_by`, `annotate_*`, `having`) |  | x | x |
 | select_related, prefetch_related | x | x |  |
 | values() |  |  | x |
 | Partial selects (`select_as`) |  | x |  |
 | Keyset pagination | x | x |  |
 | Raw SQL, stored procedure via `raw` |  |  | x |
 | CRUD, get_or_create, update_or_create | x | x | x |
+| QuerySet update / delete | x |  | x |
 | Bulk create / update / upsert | x | x | x |
 | Transactions, atomic_retry | x | x | x |
 | Errors | x | x | x |
