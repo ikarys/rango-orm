@@ -107,3 +107,25 @@ Score: 8/10. No BLOCKER. Everything in the campaign list worked on MySQL 8.4, Ma
 I lose points for restore and import running at about 2,000 rows/s (finding 2), the stored procedure result needing a fake model (finding 1), the silent difference between SQLite tests and MySQL for the partial unique rule (finding 6), and a few stale doc sentences.
 
 Would I use Rango for this app: yes. I would keep the "one confirmed booking per attendee" rule in application code (or a generated column and plain unique index), and I would not rely on `rango restore` for a large backup until it is faster.
+
+## (f) Decisions
+
+Checked against the tree at commit 86a9183 (2026-11-20).
+
+| # | Decision | Commit or reason |
+|---|---|---|
+| 1 | documented | be190cb: raw-sql.md shows the unmanaged-model pattern for result sets that are not a model. A raw function returning maps stays open. |
+| 2 | fixed | afca4bf: multi-row inserts in restore and import (see A #11). |
+| 3 | documented | be190cb: bulk.md says ids are not returned and how to get them (keys generated in Rust, or re-read by natural key). |
+| 4 | fixed | be190cb: filter.md states that MySQL, MariaDB and SQLite coerce silently. The value check stays open (A #4). |
+| 5 | fixed | be190cb: relations.md, the FK type follows the target key, MySQL included. |
+| 6 | open | `makemigrations` should warn on stderr when a partial unique index is skipped on MySQL / MariaDB. |
+| 7 | documented | be190cb: aggregations.md, `having` compares to a constant; raw SQL or two queries otherwise. |
+| 8 | fixed | be190cb: tracing.md, "Counting statements". |
+| 9 | fixed | be190cb: transactions.md sentence rewritten. No `atomic_retry` on SQLite: there is no retryable conflict error to catch. |
+| 10 | documented | be190cb: same as A #10. |
+| 11 | fixed | 68d43e4: CSV columns in table order, broken pipe exits quietly. Booleans follow each backend's storage (SQLite has no boolean type): not changed. |
+| 12 | fixed | be190cb: credentials.md has MySQL grants and the note on `migrate` with the app role. |
+| 13 | fixed | be190cb: field-types.md links the MySQL type table; migrate.md has the MySQL tracking table. |
+| 14 | fixed | be190cb: credentials.md, loopback uses the driver default (`prefer` / `PREFERRED`). |
+| 15 | fixed | be190cb: crud.md and transactions.md give the MySQL `get_or_create` strategy. |

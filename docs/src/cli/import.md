@@ -37,6 +37,8 @@ rango import data --format json --table users
 | Default (skip) | `INSERT OR IGNORE` / `ON CONFLICT DO NOTHING` | Load fixtures without overwriting |
 | `--replace` | `INSERT OR REPLACE` / `ON CONFLICT DO UPDATE` | Sync/upsert data |
 
+Rows are inserted in multi-row statements (up to 1000 rows each). On Postgres, `--replace` fails with `ON CONFLICT DO UPDATE command cannot affect row a second time` when the same primary key appears twice in one file: remove the duplicates first.
+
 ## JSON format
 
 ```json
