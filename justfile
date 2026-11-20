@@ -35,7 +35,7 @@ test-mysql: db-mysql
 # Run fmt + clippy checks (same as pre-push hook)
 check:
     cargo fmt --all -- --check
-    cargo clippy --workspace --all-targets --all-features -- -D warnings
+    cargo clippy --workspace --all-targets --all-features -- -W clippy::cognitive_complexity -D warnings
 
 # Every feature combination of the facade must build (prelude has no ambiguous names)
 check-features:
@@ -105,3 +105,20 @@ audit:
 # Check licenses, banned crates, sources and advisories (deny.toml)
 deny:
     cargo deny check
+
+# Scan the git history for secrets (CI runs the same scan)
+secrets:
+    gitleaks git --no-banner --redact .
+
+# Use the versioned hooks (pre-commit secrets scan)
+hooks:
+    git config core.hooksPath .githooks
+
+# Refresh audit/evidence/ and audit/status.json (needs the test databases: `just dev`)
+evidence:
+    mkdir -p audit/evidence
+    DATABASE_URL=postgres://postgres:postgres@localhost:5433/rango_test cargo llvm-cov --workspace --features rango-tests/integration,rango-tests/integration-sqlite,rango-orm-cli/integration --summary-only -- --test-threads=1 > audit/evidence/coverage.txt
+    cargo audit --json > audit/evidence/audit.json || true
+    cargo outdated --workspace --root-deps-only > audit/evidence/outdated.txt
+    npx -y jscpd@4 rango-orm-core/src rango-orm-derive/src rango-orm-postgres/src rango-orm-sqlite/src rango-orm-mysql/src rango-orm/src rango-orm-cli/src --silent --reporters json --output audit/evidence
+    vibecheck . --write-status

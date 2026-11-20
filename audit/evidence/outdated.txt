@@ -1,0 +1,56 @@
+rango-orm
+================
+Name      Project  Compat  Latest   Kind         Platform
+----      -------  ------  ------   ----         --------
+trybuild  1.0.122  ---     1.0.125  Development  ---
+uuid      1.29.0   ---     1.29.3   Development  ---
+
+rango-orm-core
+================
+Name  Project  Compat  Latest  Kind    Platform
+----  -------  ------  ------  ----    --------
+uuid  1.29.0   ---     1.29.3  Normal  ---
+
+rango-orm-derive
+================
+Name  Project  Compat  Latest  Kind    Platform
+----  -------  ------  ------  ----    --------
+syn   3.0.9    ---     3.0.10  Normal  ---
+
+rango-orm-mysql
+================
+Name  Project  Compat  Latest  Kind    Platform
+----  -------  ------  ------  ----    --------
+uuid  1.29.0   ---     1.29.3  Normal  ---
+
+rango-orm-postgres
+================
+Name  Project  Compat  Latest  Kind    Platform
+----  -------  ------  ------  ----    --------
+uuid  1.29.0   ---     1.29.3  Normal  ---
+
+rango-orm-sqlite
+================
+Name  Project  Compat  Latest  Kind    Platform
+----  -------  ------  ------  ----    --------
+uuid  1.29.0   ---     1.29.3  Normal  ---
+
+rango-orm-cli
+================
+Name  Project  Compat  Latest  Kind         Platform
+----  -------  ------  ------  ----         --------
+clap  4.6.7    ---     4.6.9   Normal       ---
+syn   3.0.9    ---     3.0.10  Normal       ---
+uuid  1.29.0   ---     1.29.3  Development  ---
+
+rango-bench
+================
+Name  Project  Compat  Latest  Kind         Platform
+----  -------  ------  ------  ----         --------
+uuid  1.29.0   ---     1.29.3  Development  ---
+
+rango-tests
+================
+Name  Project  Compat  Latest  Kind         Platform
+----  -------  ------  ------  ----         --------
+uuid  1.29.0   ---     1.29.3  Development  ---

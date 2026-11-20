@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# No secret reaches a commit: gitleaks scans what is staged. Without gitleaks
+# the hook says so and lets the commit through; CI scans the history anyway.
+set -euo pipefail
+
+if ! command -v gitleaks >/dev/null; then
+  echo "rango: gitleaks not installed, staged files not scanned for secrets" >&2
+  exit 0
+fi
+gitleaks git --pre-commit --staged --no-banner --redact --log-level warn .
