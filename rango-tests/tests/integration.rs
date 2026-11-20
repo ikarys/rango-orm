@@ -274,6 +274,23 @@ async fn test_prefetch_related_many_to_many() {
             .len(),
         2
     );
+    // add_pairs: creates missing links, ignores existing ones and duplicates, empty slice is a no-op.
+    M2M::<TestBlog, TestTag>::remove(&pool, &b2, &t2)
+        .await
+        .unwrap();
+    M2M::<TestBlog, TestTag>::add_pairs(&pool, &[(&b2, &t2), (&b2, &t1), (&b2, &t2)])
+        .await
+        .unwrap();
+    M2M::<TestBlog, TestTag>::add_pairs(&pool, &[])
+        .await
+        .unwrap();
+    assert_eq!(
+        M2M::<TestBlog, TestTag>::all(&pool, &b2)
+            .await
+            .unwrap()
+            .len(),
+        2
+    );
     M2M::<TestBlog, TestTag>::remove(&pool, &b1, &t1)
         .await
         .unwrap();
@@ -2474,6 +2491,15 @@ async fn test_pg_values_decodes_decimal_with_scale() {
         "{:?}",
         rows[0]["opt"]
     );
+    // 12 digits do not fit NUMERIC/DECIMAL(10,2): typed OutOfRange, no SQL in the message.
+    let big = DecVals {
+        id: FieldUuid(Uuid::new_v4()),
+        price: FieldDecimal::from_decimal(Decimal::new(100_000_000_000, 2)),
+        opt: None,
+    };
+    let err = insert(&pool, big).await.unwrap_err();
+    assert!(matches!(err, Error::OutOfRange { .. }), "{err:?}");
+    assert!(!err.to_string().contains("INSERT"), "{err}");
     sqlx::query("DROP TABLE dec_vals")
         .execute(&pool)
         .await

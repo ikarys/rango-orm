@@ -29,6 +29,13 @@ pub(crate) fn db_err(e: sqlx::Error) -> Error {
             }
             match code.as_deref() {
                 Some("40001" | "40P01") => Error::Conflict,
+                // numeric_value_out_of_range
+                Some("22003") => Error::OutOfRange {
+                    column: db
+                        .try_downcast_ref::<sqlx::postgres::PgDatabaseError>()
+                        .and_then(|e| e.column())
+                        .map(str::to_owned),
+                },
                 // query_canceled (statement_timeout), lock_not_available (lock_timeout)
                 Some("57014" | "55P03") => Error::Timeout,
                 _ => Error::Database {

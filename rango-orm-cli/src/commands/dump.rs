@@ -210,14 +210,12 @@ pub async fn restore(database_url: &str, input: &str, migrations_dir: &str) -> R
                     }
                 };
                 if !names.is_empty() {
-                    // The schema comes from the snapshot, not from replaying the files:
-                    // hand-written SQL (procedures, views, triggers, data fixes) is lost.
+                    // The schema comes from the snapshot, not from replaying the files.
                     eprintln!(
-                        "warning: the schema was rebuilt from the dump's snapshot and these migrations \
-                         were recorded as applied without running them: {}. Any custom SQL in them \
-                         (stored procedures, views, triggers, data changes) was NOT reproduced: \
-                         re-run those statements by hand.",
-                        names.join(", ")
+                        "note: {} migration(s) recorded as applied (schema rebuilt from the dump's \
+                         snapshot); hand-written SQL in them (functions, triggers) is not replayed, \
+                         see docs migrations/migrate.md \"Custom SQL in a migration\".",
+                        names.len()
                     );
                 }
                 sql.push('\n');

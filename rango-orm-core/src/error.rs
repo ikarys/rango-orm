@@ -29,6 +29,10 @@ pub enum Error {
     CheckViolation {
         constraint: Option<String>,
     },
+    /// A value does not fit the column type, e.g. a decimal with too many digits.
+    OutOfRange {
+        column: Option<String>,
+    },
     /// Serialization failure or deadlock: retrying the whole transaction may succeed.
     Conflict,
     /// Pool acquire timeout, statement timeout or lock timeout.
@@ -83,6 +87,9 @@ impl fmt::Display for Error {
             }
             Error::CheckViolation { constraint: c } => {
                 write!(f, "check violation{}", constraint(c))
+            }
+            Error::OutOfRange { column: c } => {
+                write!(f, "value out of range{}", constraint(c))
             }
             Error::Conflict => write!(
                 f,
@@ -151,6 +158,13 @@ mod tests {
             }
             .to_string(),
             "table `user` does not exist — run `rango makemigrations` and `rango migrate`"
+        );
+        assert_eq!(
+            Error::OutOfRange {
+                column: Some("price".into())
+            }
+            .to_string(),
+            "value out of range (price)"
         );
         assert!(Error::Conflict.is_retryable());
         assert!(!Error::NotFound.is_retryable());

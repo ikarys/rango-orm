@@ -186,6 +186,23 @@ async fn test_sqlite_prefetch_related_many_to_many() {
             .len(),
         2
     );
+    // add_pairs: creates missing links, ignores existing ones and duplicates, empty slice is a no-op.
+    M2M::<TestBlog, TestTag>::remove(&pool, &b2, &t2)
+        .await
+        .unwrap();
+    M2M::<TestBlog, TestTag>::add_pairs(&pool, &[(&b2, &t2), (&b2, &t1), (&b2, &t2)])
+        .await
+        .unwrap();
+    M2M::<TestBlog, TestTag>::add_pairs(&pool, &[])
+        .await
+        .unwrap();
+    assert_eq!(
+        M2M::<TestBlog, TestTag>::all(&pool, &b2)
+            .await
+            .unwrap()
+            .len(),
+        2
+    );
     M2M::<TestBlog, TestTag>::remove(&pool, &b1, &t1)
         .await
         .unwrap();
