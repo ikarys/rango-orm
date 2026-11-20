@@ -172,6 +172,20 @@ async fn test_sqlite_prefetch_related_many_to_many() {
     M2M::<TestBlog, TestTag>::add(&pool, &b2, &t1)
         .await
         .unwrap();
+    // add_many: multi-row INSERT, idempotent (existing link, duplicate in the list), empty list is a no-op.
+    M2M::<TestBlog, TestTag>::add_many(&pool, &b2, &[t1.clone(), t2.clone(), t2.clone()])
+        .await
+        .unwrap();
+    M2M::<TestBlog, TestTag>::add_many(&pool, &b2, &[])
+        .await
+        .unwrap();
+    assert_eq!(
+        M2M::<TestBlog, TestTag>::all(&pool, &b2)
+            .await
+            .unwrap()
+            .len(),
+        2
+    );
     M2M::<TestBlog, TestTag>::remove(&pool, &b1, &t1)
         .await
         .unwrap();

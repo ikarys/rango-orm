@@ -188,7 +188,23 @@ pub fn row_key(row: &dyn RangoRow, col: &str, like: &SqlValue) -> Option<String>
 
 #[cfg(test)]
 mod pivot_tests {
-    use super::m2m_pivot;
+    use super::{M2mSql, m2m_pivot};
+    use crate::Dialect;
+
+    #[test]
+    fn insert_many_numbers_placeholders_per_dialect() {
+        let pg = M2mSql::new(Dialect::Postgres, "a", "b");
+        assert_eq!(
+            pg.insert_many(2),
+            "INSERT INTO \"a_b\" (\"a_id\", \"b_id\") VALUES ($1, $2), ($3, $4) ON CONFLICT DO NOTHING"
+        );
+        assert_eq!(pg.insert(), pg.insert_many(1));
+        let my = M2mSql::new(Dialect::Mysql, "a", "b");
+        assert_eq!(
+            my.insert_many(2),
+            "INSERT INTO `a_b` (`a_id`, `b_id`) VALUES (?, ?), (?, ?) ON DUPLICATE KEY UPDATE `a_id` = `a_id`"
+        );
+    }
 
     #[test]
     fn pivot_columns_are_distinct_for_self_reference() {
@@ -246,21 +262,30 @@ impl M2mSql {
 
     /// Idempotent insert of a `(from, to)` pair.
     pub fn insert(&self) -> String {
+        self.insert_many(1)
+    }
+
+    /// Idempotent insert of `n` `(from, to)` pairs in one statement
+    /// (binds: from1, to1, from2, to2, ...). `n` must be at least 1.
+    pub fn insert_many(&self, n: usize) -> String {
         let (pivot, from, to) = (
             self.q(&self.pivot),
             self.q(&self.from_col),
             self.q(&self.to_col),
         );
-        let (p1, p2) = (self.ph(1), self.ph(2));
+        let rows: Vec<String> = (0..n.max(1))
+            .map(|i| format!("({}, {})", self.ph(2 * i + 1), self.ph(2 * i + 2)))
+            .collect();
+        let values = rows.join(", ");
         match self.dialect {
             // ON DUPLICATE KEY UPDATE, not INSERT IGNORE, to avoid silencing FK and other errors.
             crate::Dialect::Mysql => format!(
-                "INSERT INTO {pivot} ({from}, {to}) VALUES ({p1}, {p2}) \
+                "INSERT INTO {pivot} ({from}, {to}) VALUES {values} \
                  ON DUPLICATE KEY UPDATE {from} = {from}"
             ),
-            _ => format!(
-                "INSERT INTO {pivot} ({from}, {to}) VALUES ({p1}, {p2}) ON CONFLICT DO NOTHING"
-            ),
+            _ => {
+                format!("INSERT INTO {pivot} ({from}, {to}) VALUES {values} ON CONFLICT DO NOTHING")
+            }
         }
     }
 

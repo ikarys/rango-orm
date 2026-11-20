@@ -6,6 +6,9 @@ use rango_orm_core::{FromRow, Model, ModelValues};
 use crate::ops::bind_sql_values;
 use crate::row::decode_all;
 
+/// Pairs per `INSERT` of `add_many` / `set` (two binds each, far under every bind limit).
+const PAIRS_PER_STATEMENT: usize = 1000;
+
 /// Many-to-many operations.
 /// `From` = the model that declares the M2M field
 /// `To`   = the related model
@@ -110,22 +113,52 @@ where
         A: sqlx::Acquire<'a, Database = sqlx::Postgres>,
     {
         let mut tx = executor.begin().await.map_err(db_err)?;
-        let s = Self::sql();
-        let sql = s.clear();
+        let sql = Self::sql().clear();
         let q = bind_sql_values(
             sqlx::query(sqlx::AssertSqlSafe(&*sql)),
             vec![from.pk_value()],
         );
         q.execute(&mut *tx).await.map_err(db_err)?;
-        let sql = s.insert();
-        for to in to_list {
-            let q = bind_sql_values(
-                sqlx::query(sqlx::AssertSqlSafe(&*sql)),
-                vec![from.pk_value(), to.pk_value()],
-            );
-            q.execute(&mut *tx).await.map_err(db_err)?;
-        }
+        Self::insert_pairs(&mut tx, from, to_list).await?;
         tx.commit().await.map_err(db_err)?;
+        Ok(())
+    }
+
+    /// Link `from` to every model of `to_list`: multi-row `INSERT`s of
+    /// [`PAIRS_PER_STATEMENT`] pairs, in one transaction. Idempotent like `add`
+    /// (existing links and duplicates in the list are left as is); an empty list runs no SQL.
+    #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "postgresql", db.operation = "INSERT", db.sql.table = %Self::pivot_table(), db.rows = tracing::field::Empty, otel.kind = "client"))]
+    pub async fn add_many<'a, A>(executor: A, from: &From, to_list: &[To]) -> Result<()>
+    where
+        A: sqlx::Acquire<'a, Database = sqlx::Postgres>,
+    {
+        if to_list.is_empty() {
+            return Ok(());
+        }
+        let mut tx = executor.begin().await.map_err(db_err)?;
+        Self::insert_pairs(&mut tx, from, to_list).await?;
+        tx.commit().await.map_err(db_err)?;
+        Ok(())
+    }
+
+    async fn insert_pairs(
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        from: &From,
+        to_list: &[To],
+    ) -> Result<()> {
+        let s = Self::sql();
+        for chunk in to_list.chunks(PAIRS_PER_STATEMENT) {
+            let sql = s.insert_many(chunk.len());
+            let mut binds = Vec::with_capacity(chunk.len() * 2);
+            for to in chunk {
+                binds.push(from.pk_value());
+                binds.push(to.pk_value());
+            }
+            bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*sql)), binds)
+                .execute(&mut **tx)
+                .await
+                .map_err(db_err)?;
+        }
         Ok(())
     }
 
