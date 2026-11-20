@@ -334,6 +334,19 @@ where
     M: Model + ModelValues + FromRow,
     P: Partial<Model = M>,
 {
+    fn cols_sql() -> String {
+        let cols: Vec<String> = P::columns()
+            .iter()
+            .map(|c| rango_orm_core::quote_ident(c))
+            .collect();
+        cols.join(", ")
+    }
+
+    /// Returns the SQL that would be executed by `.all()`, for debugging.
+    pub fn explain(&self) -> String {
+        self.qb.f.select_sql_cols(&Self::cols_sql()).0
+    }
+
     /// Fetch all matching rows as `P`.
     #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "postgresql", db.operation = "SELECT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
     pub async fn all(mut self) -> Result<Vec<P>> {
@@ -343,11 +356,7 @@ where
                 "select_related / prefetch_related are not supported with select_as".into(),
             ));
         }
-        let cols: Vec<String> = P::columns()
-            .iter()
-            .map(|c| rango_orm_core::quote_ident(c))
-            .collect();
-        let (sql, binds) = self.qb.f.select_sql_cols(&cols.join(", "));
+        let (sql, binds) = self.qb.f.select_sql_cols(&Self::cols_sql());
         let rows = self.qb.conn.fetch_all(&sql, binds).await?;
         self.qb.warn_if_capped(rows.len());
         tracing::Span::current().record("db.rows", rows.len());
