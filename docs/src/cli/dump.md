@@ -54,7 +54,7 @@ Rows are inserted in multi-row statements (up to 1000 rows each, fewer on wide t
 
 Restore works whether the target is empty or was just prepared by `rango migrate`: migration names already recorded are skipped, while any other conflicting row still fails the restore. The backend is taken from the `-d` URL scheme (`postgres://`, `mysql://`, `sqlite://`), not from `rango.toml`.
 
-The schema is rebuilt from the dump's snapshot, not by replaying migration files, so migrations that hold hand-written SQL (stored procedures, views, triggers, data changes) are recorded as applied without being run. Restore prints a warning listing the recorded migrations; re-run the custom ones by hand from your `migrations/` directory.
+The schema is rebuilt from the dump's snapshot, not by replaying migration files, so migrations that hold hand-written SQL (stored procedures, views, triggers, data changes) are recorded as applied without being run. Restore prints one note with the number of recorded migrations; re-run the custom ones by hand from your `migrations/` directory.
 
 Foreign keys are checked at the end of the transaction, so rows can come in any order, including self-references and FK cycles. On Postgres, a cycle where every FK is `NOT NULL` needs the cycle's constraints to be `DEFERRABLE`; `rango makemigrations` creates them that way, but databases migrated before 0.1.1 keep non-deferrable constraints.
 

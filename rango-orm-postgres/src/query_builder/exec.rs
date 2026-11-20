@@ -396,7 +396,7 @@ where
 }
 
 /// One row of `values()` / `aggregate()` as `key → SqlValue`, decoded from the driver type.
-fn row_to_map(
+pub(crate) fn row_to_map(
     row: &sqlx::postgres::PgRow,
     cols: &[&str],
 ) -> Result<std::collections::HashMap<String, SqlValue>> {

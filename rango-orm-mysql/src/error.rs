@@ -33,6 +33,11 @@ pub(crate) fn db_err(e: sqlx::Error) -> Error {
                 // retrying the whole transaction can succeed.
                 Some("40001") => Error::Conflict,
                 Some("HY000") if mysql_number(db.as_ref()) == Some(1205) => Error::Conflict,
+                // ER_WARN_DATA_OUT_OF_RANGE (1264, SQLSTATE 22003): "Out of range value for column 'x' at row 1"
+                // ER_DATA_OUT_OF_RANGE (1690): the message quotes an expression, so no column.
+                Some("22003") => Error::OutOfRange {
+                    column: out_of_range_column(db.message()),
+                },
                 // max_execution_time exceeded (MySQL / MariaDB)
                 Some("HY000") if matches!(mysql_number(db.as_ref()), Some(3024 | 1969)) => {
                     Error::Timeout
@@ -90,6 +95,11 @@ fn constraint_name(kind: &ErrorKind, msg: &str) -> Option<String> {
     Some(name.to_owned())
 }
 
+/// Column of `Out of range value for column 'x' at row 1`.
+fn out_of_range_column(msg: &str) -> Option<String> {
+    between(msg, "for column '", "'").map(str::to_owned)
+}
+
 fn between<'a>(s: &'a str, start: &str, end: &str) -> Option<&'a str> {
     let rest = &s[s.find(start)? + start.len()..];
     Some(&rest[..rest.find(end)?])
@@ -135,6 +145,18 @@ mod tests {
         ] {
             assert_eq!(constraint_name(&k, msg), Some("post_author_fk".into()));
         }
+    }
+
+    #[test]
+    fn out_of_range_column_name() {
+        assert_eq!(
+            out_of_range_column("Out of range value for column 'price' at row 1"),
+            Some("price".into())
+        );
+        assert_eq!(
+            out_of_range_column("BIGINT value is out of range in '(1 * 2)'"),
+            None
+        );
     }
 
     #[test]

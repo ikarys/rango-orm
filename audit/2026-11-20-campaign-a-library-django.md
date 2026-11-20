@@ -106,13 +106,13 @@ Checked against the tree at commit 86a9183 (2026-11-20).
 |---|---|---|
 | 1 | fixed | 31f7acb: `rango restore --migrations <dir>`; across backends it records the target folder's files when its snapshot matches the dump, otherwise nothing, with a warning. Documented in cli/dump.md. |
 | 2 | fixed | a7b4249: `migrate` reports the line in the migration file from the Postgres error position, and drops sqlx's "at line N" (a line of PostgreSQL's C source). |
-| 3 | documented | be190cb: relations.md shows how to seed many pivot rows with `raw_execute`. A many-to-many pair insert API stays open. |
-| 4 | open | Values passed with a string column name are not checked against the column type. be190cb documents the per-backend behaviour in filter.md and points to typed columns. |
+| 3 | fixed | 1222129: `M2M::add_pairs(&pool, &[(&book, &tag), ...])` inserts many pairs in multi-row statements; relations.md uses it. |
+| 4 | fixed | 8370226: a value whose type does not match the column of a string name is rejected with `Error::Invalid` before any SQL runs. |
 | 5 | documented | be190cb: filter.md says `.explain()` is SQL only and index checks need `.explain_analyze()`. A non-executing plan method is not planned. |
 | 6 | fixed | be190cb: credentials.md matches the behaviour (the app role can dump), adds the `REVOKE` on `_rango_migrations`, and says the app role cannot run `migrate`. |
 | 7 | fixed | be190cb: README row split, keyset pagination done. |
 | 8 | fixed | be190cb: transactions.md opens the section with "Postgres and MySQL / MariaDB only". |
 | 9 | won't fix | Bulk operations skip hooks by design (as Django's `bulk_create`), documented on three pages. A WARN on every bulk call of a model with hooks would fire on legitimate use. |
-| 10 | documented | be190cb: migrate.md explains custom SQL migrations and that restore does not replay them. Telling generated files from hand-written ones, to warn only for the latter, stays open. |
+| 10 | fixed | be190cb documents it; 1222129 replaces the warning by one neutral `note:` line pointing to migrate.md. |
 | 11 | fixed | afca4bf: restore and import use multi-row statements (up to 1000 rows). SQLite, 100k rows: 4.46 s before, 0.52 s after. |
 | 12 | fixed | e8e5aff: `makemigrations --dry-run` never prompts; it assumes every possible rename and prints a note. |

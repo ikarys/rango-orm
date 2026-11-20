@@ -422,7 +422,7 @@ fn decimal_scale(schema: &rango_orm_core::TableSchema, col: &str) -> Option<u8> 
 
 /// One row of `values()` / `aggregate()` as `key → SqlValue`. DECIMAL columns are decoded by
 /// schema scale (the driver type is ambiguous); the rest by trying integer, float, text.
-fn row_to_map(
+pub(crate) fn row_to_map(
     row: &sqlx::mysql::MySqlRow,
     keys: &[(&str, Option<u8>)],
 ) -> Result<std::collections::HashMap<String, SqlValue>> {

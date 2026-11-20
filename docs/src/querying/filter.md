@@ -47,13 +47,13 @@ A typed column accepts its field type or the plain Rust equivalent: `i32` for `F
 Filter values are not validated like field constructors: searching for
 `"not-an-email"` is allowed.
 
-String names (`"email"`, `"-created_at"`) are still accepted everywhere. The name is checked
-against the model at runtime (`Error::Invalid` for an unknown column), but the value is not:
-its type is left to the database, and the backends disagree. With
-`.eq("seats", "lots")` on an integer column, Postgres returns an `Error::Database`
-(`operator does not exist`), while SQLite, MySQL and MariaDB coerce the value and silently
-return no rows (or the wrong rows). Use typed columns (`Booking::SEATS`) when you can: the
-same mistake is then a compile error.
+String names (`"email"`, `"-created_at"`) are still accepted everywhere. The name and the value
+type are checked against the model at runtime, before any SQL runs: an unknown column or
+`.eq("seats", "lots")` on an integer column returns `Error::Invalid`, the same on every
+backend (the database would otherwise reject it on Postgres and coerce it silently on SQLite,
+MySQL and MariaDB). The check is lenient: a typed null is always accepted, and integers,
+floats and decimals are interchangeable. Typed columns (`Booking::SEATS`) catch the same
+mistake at compile time.
 
 ## Operators
 

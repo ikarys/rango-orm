@@ -16,6 +16,7 @@ match insert(&pool, user).await {
 | `NotFound` | A query expected a row and found none |
 | `TableMissing { table }` | The table does not exist: run `rango makemigrations` and `rango migrate` |
 | `UniqueViolation` / `ForeignKeyViolation` / `NotNullViolation` / `CheckViolation` | Constraint violated; `constraint` holds its name when the backend reports it (on SQLite, the failing columns, e.g. `user.email`; on MySQL and MariaDB, parsed from the server message, without the `table.` prefix MySQL 8 adds to unique keys; never the value or the SQL; `NotNullViolation` carries none) |
+| `OutOfRange { column }` | A value does not fit the column type, e.g. a decimal with too many digits (Postgres `22003`, MySQL / MariaDB 1264 and 1690; `column` when the server names it). SQLite has no such error |
 | `Conflict` | Serialization failure or deadlock (`40001` / `40P01`); `is_retryable()` is true |
 | `Timeout` | Pool acquire, `statement_timeout`, `lock_timeout`, or SQLite busy timeout |
 | `Connection` | IO, TLS, or closed pool |

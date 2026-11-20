@@ -39,6 +39,20 @@ impl Dialect {
         p
     }
 
+    /// `YYYY-MM-DD` text of `col` truncated to `trunc` (first day of the month / year).
+    fn date_trunc(self, col: &str, trunc: DateTrunc) -> String {
+        let (unit, pg, fmt) = match trunc {
+            DateTrunc::Day => ("day", "YYYY-MM-DD", "%Y-%m-%d"),
+            DateTrunc::Month => ("month", "YYYY-MM-DD", "%Y-%m-01"),
+            DateTrunc::Year => ("year", "YYYY-MM-DD", "%Y-01-01"),
+        };
+        match self {
+            Dialect::Postgres => format!("to_char(date_trunc('{unit}', {col}), '{pg}')"),
+            Dialect::Sqlite => format!("strftime('{fmt}', {col})"),
+            Dialect::Mysql => format!("DATE_FORMAT({col}, '{fmt}')"),
+        }
+    }
+
     /// `SUM` / `AVG` returning a float (`MIN` / `MAX` keep the column type).
     fn aggregate(self, func: &str, col: &str) -> String {
         match (self, func) {
@@ -109,6 +123,22 @@ impl AggFn {
             AggFn::Max => "MAX",
         }
     }
+}
+
+/// Granularity of `group_by_date`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DateTrunc {
+    Day,
+    Month,
+    Year,
+}
+
+/// A `group_by_date` key: `col` truncated to `trunc`, returned as `alias`.
+#[derive(Debug, Clone)]
+struct DateGroup {
+    column: String,
+    trunc: DateTrunc,
+    alias: String,
 }
 
 /// One `expr AS alias` of the aggregate query.
@@ -210,6 +240,8 @@ pub struct Filter<M> {
     sets: Vec<(String, SqlValue)>,
     /// `GROUP BY` columns of `aggregate()`, in call order.
     group_by: Vec<String>,
+    /// `group_by_date` keys of `aggregate()`, after the plain group columns.
+    date_groups: Vec<DateGroup>,
     /// `annotate_*` aggregates of `aggregate()`, in call order.
     annotations: Vec<Annotation>,
     /// `HAVING` conditions on annotation aliases, joined with AND.
@@ -234,6 +266,7 @@ impl<M: Model + ModelValues> Filter<M> {
             raw_conditions: Vec::new(),
             sets: Vec::new(),
             group_by: Vec::new(),
+            date_groups: Vec::new(),
             annotations: Vec::new(),
             having: Vec::new(),
             invalid: None,
@@ -254,6 +287,13 @@ impl<M: Model + ModelValues> Filter<M> {
     pub fn check_col<T: Model>(&mut self, name: &str) {
         if self.invalid.is_none() {
             self.invalid = crate::unknown_column::<T>(name);
+        }
+    }
+
+    /// Remember the first value whose type does not fit column `name` of `M`.
+    fn check_value(&mut self, name: &str, value: &SqlValue) {
+        if self.invalid.is_none() {
+            self.invalid = crate::value_mismatch::<M>(name, value);
         }
     }
 
@@ -287,6 +327,9 @@ impl<M: Model + ModelValues> Filter<M> {
         values: Option<Vec<SqlValue>>,
     ) -> Self {
         self.check_col::<M>(col);
+        for v in value.iter().chain(values.iter().flatten()) {
+            self.check_value(col, v);
+        }
         let connector = std::mem::replace(&mut self.next_connector, Connector::And);
         self.conditions.push(ConditionGroup {
             node: ConditionNode::Single(Condition {
@@ -379,6 +422,7 @@ impl<M: Model + ModelValues> Filter<M> {
     pub fn set<V>(mut self, col: impl FilterColumn<M, V>, val: V) -> Self {
         self.check_col::<M>(col.column_name());
         let val = col.bind(val);
+        self.check_value(col.column_name(), &val);
         self.sets.push((col.column_name().to_string(), val));
         self
     }
@@ -389,6 +433,22 @@ impl<M: Model + ModelValues> Filter<M> {
         self.check_col::<M>(col.column_name());
         self.group_by.push(col.column_name().to_string());
         self
+    }
+
+    /// Group by `col` truncated to a day, month or year; the group key comes back under
+    /// `alias` as text `YYYY-MM-DD` (first day of the month / year) on every backend.
+    pub fn group_by_date(mut self, col: impl ColumnRef<M>, trunc: DateTrunc, alias: &str) -> Self {
+        self.check_col::<M>(col.column_name());
+        self.date_groups.push(DateGroup {
+            column: col.column_name().to_string(),
+            trunc,
+            alias: alias.to_string(),
+        });
+        self
+    }
+
+    fn date_expr(&self, g: &DateGroup) -> String {
+        self.dialect.date_trunc(&self.q(&g.column), g.trunc)
     }
 
     fn annotate(mut self, alias: &str, func: AggFn, column: Option<&str>) -> Self {
@@ -437,6 +497,7 @@ impl<M: Model + ModelValues> Filter<M> {
 
     fn is_alias(&self, name: &str) -> bool {
         self.annotations.iter().any(|a| a.alias == name)
+            || self.date_groups.iter().any(|g| g.alias == name)
     }
 
     fn annotation_expr(&self, a: &Annotation) -> String {
@@ -878,7 +939,7 @@ impl<M: Model + ModelValues> Filter<M> {
     /// for `aggregate()`. WHERE binds first, then HAVING binds.
     pub fn group_sql(&self) -> Result<(String, Vec<SqlValue>)> {
         self.ensure_valid()?;
-        if self.group_by.is_empty() && self.annotations.is_empty() {
+        if self.group_by.is_empty() && self.date_groups.is_empty() && self.annotations.is_empty() {
             return Err(Error::Invalid(
                 "aggregate() needs group_by() or annotate_*()".into(),
             ));
@@ -889,6 +950,9 @@ impl<M: Model + ModelValues> Filter<M> {
             ));
         }
         let mut select: Vec<String> = self.group_by.iter().map(|c| self.q(c)).collect();
+        for g in &self.date_groups {
+            select.push(format!("{} AS {}", self.date_expr(g), self.q(&g.alias)));
+        }
         for a in &self.annotations {
             select.push(format!(
                 "{} AS {}",
@@ -908,8 +972,9 @@ impl<M: Model + ModelValues> Filter<M> {
             sql.push(' ');
             sql.push_str(&where_clause);
         }
-        if !self.group_by.is_empty() {
-            let cols: Vec<String> = self.group_by.iter().map(|c| self.q(c)).collect();
+        if !self.group_by.is_empty() || !self.date_groups.is_empty() {
+            let mut cols: Vec<String> = self.group_by.iter().map(|c| self.q(c)).collect();
+            cols.extend(self.date_groups.iter().map(|g| self.date_expr(g)));
             sql.push_str(&format!(" GROUP BY {}", cols.join(", ")));
         }
         if !self.having.is_empty() {
@@ -947,6 +1012,7 @@ impl<M: Model + ModelValues> Filter<M> {
             .iter()
             .map(|c| (c.clone(), Some(c.clone())))
             .collect();
+        keys.extend(self.date_groups.iter().map(|g| (g.alias.clone(), None)));
         for a in &self.annotations {
             let source = match a.func {
                 AggFn::Min | AggFn::Max => a.column.clone(),
@@ -1138,6 +1204,17 @@ macro_rules! impl_filter_methods {
             /// `GROUP BY col` for `.aggregate()`; repeatable. `.group_by(Order::COUNTRY)` or `"country"`.
             pub fn group_by(self, col: impl $crate::ColumnRef<M>) -> Self {
                 self.map(|f| f.group_by(col))
+            }
+
+            /// `GROUP BY` a date column truncated to day, month or year; the key is
+            /// `SqlValue::Text` `YYYY-MM-DD` under `alias` (usable in `order_by`).
+            pub fn group_by_date(
+                self,
+                col: impl $crate::ColumnRef<M>,
+                trunc: $crate::DateTrunc,
+                alias: &str,
+            ) -> Self {
+                self.map(|f| f.group_by_date(col, trunc, alias))
             }
 
             /// `COUNT(*) AS alias` for `.aggregate()`; decodes as `SqlValue::BigInt`.
@@ -1384,9 +1461,9 @@ mod tests {
             "test_model"
         }
         fn schema() -> TableSchema {
-            let col = |name: &str| crate::ColumnDef {
+            let col = |(name, col_type): (&str, crate::ColumnType)| crate::ColumnDef {
                 name: name.to_string(),
-                col_type: crate::ColumnType::Text,
+                col_type,
                 nullable: false,
                 primary_key: false,
                 unique: false,
@@ -1395,10 +1472,23 @@ mod tests {
                 index: false,
             };
             TableSchema {
-                columns: ["a", "age", "active", "note"]
-                    .into_iter()
-                    .map(col)
-                    .collect(),
+                columns: [
+                    ("a", crate::ColumnType::Int),
+                    ("age", crate::ColumnType::Int),
+                    ("active", crate::ColumnType::Bool),
+                    ("note", crate::ColumnType::Text),
+                    ("born", crate::ColumnType::Date),
+                    (
+                        "price",
+                        crate::ColumnType::Decimal {
+                            precision: 10,
+                            scale: 2,
+                        },
+                    ),
+                ]
+                .into_iter()
+                .map(col)
+                .collect(),
                 ..TableSchema::default()
             }
         }
@@ -1557,6 +1647,86 @@ mod tests {
                 ("total".to_string(), None),
             ]
         );
+    }
+
+    #[test]
+    fn group_by_date_renders_per_dialect() {
+        for (d, month, day, year) in [
+            (
+                Dialect::Postgres,
+                "to_char(date_trunc('month', \"born\"), 'YYYY-MM-DD')",
+                "to_char(date_trunc('day', \"born\"), 'YYYY-MM-DD')",
+                "to_char(date_trunc('year', \"born\"), 'YYYY-MM-DD')",
+            ),
+            (
+                Dialect::Sqlite,
+                "strftime('%Y-%m-01', \"born\")",
+                "strftime('%Y-%m-%d', \"born\")",
+                "strftime('%Y-01-01', \"born\")",
+            ),
+            (
+                Dialect::Mysql,
+                "DATE_FORMAT(`born`, '%Y-%m-01')",
+                "DATE_FORMAT(`born`, '%Y-%m-%d')",
+                "DATE_FORMAT(`born`, '%Y-01-01')",
+            ),
+        ] {
+            for (t, expr) in [
+                (DateTrunc::Month, month),
+                (DateTrunc::Day, day),
+                (DateTrunc::Year, year),
+            ] {
+                let f = Filter::<W>::new(d)
+                    .group_by_date("born", t, "period")
+                    .annotate_count("n")
+                    .order_by("period");
+                let (sql, _) = f.group_sql().unwrap();
+                let q = |s: &str| d.quote_ident(s);
+                assert_eq!(
+                    sql,
+                    format!(
+                        "SELECT {expr} AS {p}, COUNT(*) AS {n} FROM {t} GROUP BY {expr} \
+                         ORDER BY {p} ASC LIMIT 1000",
+                        p = q("period"),
+                        n = q("n"),
+                        t = q("test_model"),
+                    )
+                );
+                assert_eq!(f.aggregate_keys()[0], ("period".to_string(), None));
+            }
+        }
+        let f = Filter::<W>::new(Dialect::Sqlite).group_by_date("nope", DateTrunc::Day, "d");
+        assert!(matches!(f.group_sql(), Err(Error::Invalid(_))));
+    }
+
+    #[test]
+    fn value_type_is_checked_for_string_columns() {
+        let bad = Filter::<W>::new(Dialect::Postgres).eq("age", "x".to_string());
+        let Err(Error::Invalid(m)) = bad.ensure_valid() else {
+            panic!("expected Invalid")
+        };
+        assert_eq!(
+            m,
+            "value of type Text does not match column `age` (Int) of table `test_model`"
+        );
+        assert!(
+            Filter::<W>::new(Dialect::Postgres)
+                .in_values("age", vec![1i32.into(), "x".to_string().into()])
+                .ensure_valid()
+                .is_err()
+        );
+        assert!(
+            Filter::<W>::new(Dialect::Postgres)
+                .set("age", "x".to_string())
+                .ensure_valid()
+                .is_err()
+        );
+        let ok = Filter::<W>::new(Dialect::Postgres)
+            .eq("price", 5i32)
+            .eq("age", SqlValue::NullInt)
+            .like("note", "a%".to_string())
+            .eq("born", SqlValue::NullDate);
+        assert!(ok.ensure_valid().is_ok());
     }
 
     #[test]

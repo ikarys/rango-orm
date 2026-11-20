@@ -7,7 +7,7 @@ use sqlx::postgres::PgRow;
 
 mod conn;
 pub use conn::Conn;
-mod exec;
+pub(crate) mod exec;
 pub use exec::SelectAs;
 
 // ─── QueryBuilder ─────────────────────────────────────────────────────────────

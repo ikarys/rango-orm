@@ -274,6 +274,23 @@ async fn test_prefetch_related_many_to_many() {
             .len(),
         2
     );
+    // add_pairs: creates missing links, ignores existing ones and duplicates, empty slice is a no-op.
+    M2M::<TestBlog, TestTag>::remove(&pool, &b2, &t2)
+        .await
+        .unwrap();
+    M2M::<TestBlog, TestTag>::add_pairs(&pool, &[(&b2, &t2), (&b2, &t1), (&b2, &t2)])
+        .await
+        .unwrap();
+    M2M::<TestBlog, TestTag>::add_pairs(&pool, &[])
+        .await
+        .unwrap();
+    assert_eq!(
+        M2M::<TestBlog, TestTag>::all(&pool, &b2)
+            .await
+            .unwrap()
+            .len(),
+        2
+    );
     M2M::<TestBlog, TestTag>::remove(&pool, &b1, &t1)
         .await
         .unwrap();
@@ -2474,8 +2491,102 @@ async fn test_pg_values_decodes_decimal_with_scale() {
         "{:?}",
         rows[0]["opt"]
     );
+    // 12 digits do not fit NUMERIC/DECIMAL(10,2): typed OutOfRange, no SQL in the message.
+    let big = DecVals {
+        id: FieldUuid(Uuid::new_v4()),
+        price: FieldDecimal::from_decimal(Decimal::new(100_000_000_000, 2)),
+        opt: None,
+    };
+    let err = insert(&pool, big).await.unwrap_err();
+    assert!(matches!(err, Error::OutOfRange { .. }), "{err:?}");
+    assert!(!err.to_string().contains("INSERT"), "{err}");
     sqlx::query("DROP TABLE dec_vals")
         .execute(&pool)
         .await
         .unwrap();
+}
+
+// ── group_by_date / raw_values ────────────────────────────────────────────────
+
+#[derive(Model, Debug, Clone)]
+#[model(table = "day_row")]
+struct DayRow {
+    id: FieldAutoInt,
+    day: FieldDate,
+    amount: FieldInt,
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration"), ignore)]
+async fn test_pg_group_by_date_and_raw_values() {
+    let pool = pool().await;
+    for ddl in [
+        r#"DROP TABLE IF EXISTS "day_row""#,
+        r#"CREATE TABLE "day_row" ("id" SERIAL PRIMARY KEY, "day" DATE NOT NULL, "amount" INTEGER NOT NULL)"#,
+    ] {
+        sqlx::query(ddl).execute(&pool).await.unwrap();
+    }
+    let d = |y, m, dd| FieldDate(chrono::NaiveDate::from_ymd_opt(y, m, dd).unwrap());
+    let rows: Vec<DayRow> = [
+        (2026, 1, 5, 1),
+        (2026, 1, 20, 2),
+        (2026, 3, 2, 4),
+        (2027, 1, 9, 8),
+    ]
+    .into_iter()
+    .map(|(y, m, dd, amount)| DayRow {
+        id: FieldAutoInt(None),
+        day: d(y, m, dd),
+        amount: FieldInt(amount),
+    })
+    .collect();
+    for r in rows {
+        insert(&pool, r).await.unwrap();
+    }
+
+    let by_month = DayRow::filter(&pool)
+        .group_by_date(DayRow::DAY, DateTrunc::Month, "period")
+        .annotate_sum("total", DayRow::AMOUNT)
+        .order_by("period")
+        .aggregate()
+        .await
+        .unwrap();
+    let got: Vec<(SqlValue, SqlValue)> = by_month
+        .iter()
+        .map(|r| (r["period"].clone(), r["total"].clone()))
+        .collect();
+    assert_eq!(
+        got,
+        vec![
+            (SqlValue::Text("2026-01-01".into()), SqlValue::Double(3.0)),
+            (SqlValue::Text("2026-03-01".into()), SqlValue::Double(4.0)),
+            (SqlValue::Text("2027-01-01".into()), SqlValue::Double(8.0)),
+        ]
+    );
+    let by_year = DayRow::filter(&pool)
+        .group_by_date("day", DateTrunc::Year, "y")
+        .annotate_count("n")
+        .order_by("-y")
+        .aggregate()
+        .await
+        .unwrap();
+    assert_eq!(by_year[0]["y"], SqlValue::Text("2027-01-01".into()));
+    assert_eq!(by_year[1]["n"], SqlValue::BigInt(3));
+
+    let raw = raw_values(
+        &pool,
+        r#"SELECT "day" AS d, "amount" AS a FROM "day_row" WHERE "amount" > $1 ORDER BY "amount""#,
+        vec![SqlValue::Int(2)],
+    )
+    .await
+    .unwrap();
+    assert_eq!(raw.len(), 2);
+    assert_eq!(raw[0]["a"], SqlValue::BigInt(4));
+    assert!(raw[0].contains_key("d"));
+    assert!(
+        raw_values(&pool, "SELECT 1 AS x WHERE 1 = 0", vec![])
+            .await
+            .unwrap()
+            .is_empty()
+    );
 }

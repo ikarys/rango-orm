@@ -76,14 +76,14 @@ Checked against the tree at commit 86a9183 (2026-11-20).
 | # | Decision | Commit or reason |
 |---|---|---|
 | 1 | fixed | 68d43e4: RFC 4180 quoting on export for every value, RFC 4180 reader on import, quoted fields are text; a Postgres JSON column round-trips. |
-| 2 | documented | be190cb: aggregations.md states that `group_by` takes columns only and points to raw SQL. Grouping by expressions stays open. |
+| 2 | fixed | 8370226: `group_by_date(col, DateTrunc::Month, alias)` (day, month, year) on every backend, returned as `YYYY-MM-DD` text. Free SQL expressions stay out of the API (injection class of the CVE checklist). |
 | 3 | fixed | 8836cbc: `aggregate()` ignores the model's default ordering. |
 | 4 | fixed | afca4bf: multi-row inserts in restore (see A #11). |
 | 5 | fixed | be190cb: same as A #6. |
 | 6 | fixed | be190cb: migrate.md has a "Custom SQL in a migration" section, with the restore behaviour. |
 | 7 | fixed | e8e5aff: same as A #12. |
 | 8 | fixed | 3198077: `SelectAs::explain()` shows the partial's columns; filter.md says to call it after `select_as`. |
-| 9 | documented | be190cb: filter.md, wrong-type values with string names. `offset` stays `i64`, like `limit` (SQL `BIGINT`). |
+| 9 | fixed | 8370226: wrong-type values with string names now fail with `Error::Invalid`. `offset` stays `i64`, like `limit` (SQL `BIGINT`). |
 | 10 | documented | be190cb: defining-models.md explains that `default` is the SQL default and does not make the field optional. Decimal scale and `on_delete` were already in field-types.md and relations.md. |
 | 11 | fixed | be190cb: configuration.md gives units and documents `after_connect` (Postgres only); tracing.md says `BEGIN` / `COMMIT` are not `sqlx::query` events. |
 | 12 | not reproduced | The cap already logs a `WARN` (`query returned exactly the default row cap ...`), documented in filter.md; a subscriber filtering out `rango` warnings hides it. |
