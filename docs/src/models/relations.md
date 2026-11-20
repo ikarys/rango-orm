@@ -146,24 +146,11 @@ M2M::<Article, Tag>::add_many(&pool, &article, &tags).await?;
 
 `M2M::set` uses the same statements after clearing the row's links: use it when you want to replace all links of one row, `add_many` when you only add.
 
-`add_many` goes from one row to many. To seed many rows each with a few links (5,000 books with 2 or 3 tags each), one `add_many` per book means one statement per book. For a one-off load, insert the pairs into the pivot table directly with `rango::raw_execute`: the pivot `article_tag` has the columns `article_id` and `tag_id`.
+`add_many` goes from one row to many. To seed many rows each with a few links (5,000 books with 2 or 3 tags each), use `M2M::add_pairs`: it takes `(from, to)` pairs, with the same multi-row `INSERT`s, one transaction and idempotence as `add_many`. An empty slice runs no SQL.
 
 ```rust
-use rango::SqlValue;
-
-// Postgres placeholders; on SQLite and MySQL use `?` for each value.
-// `pairs: Vec<(Uuid, Uuid)>` = (article id, tag id). Values are bound, never formatted into the SQL.
-for chunk in pairs.chunks(1000) {
-    let mut sql = String::from("INSERT INTO article_tag (article_id, tag_id) VALUES ");
-    let mut params = Vec::with_capacity(chunk.len() * 2);
-    for (i, (article, tag)) in chunk.iter().enumerate() {
-        if i > 0 { sql.push_str(", "); }
-        sql.push_str(&format!("(${}, ${})", 2 * i + 1, 2 * i + 2));
-        params.push(SqlValue::Uuid(*article));
-        params.push(SqlValue::Uuid(*tag));
-    }
-    rango::raw_execute(&pool, &sql, params).await?;
-}
+// `pairs: Vec<(&Article, &Tag)>`
+M2M::<Article, Tag>::add_pairs(&pool, &pairs).await?;
 ```
 
 ### Self-referencing ManyToMany

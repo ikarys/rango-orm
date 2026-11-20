@@ -371,10 +371,10 @@ async fn restore_works_on_a_database_migrate_already_prepared() {
     assert_ok(&out);
     assert_eq!(p.count("b.db", "t_author").await, Some(2));
     assert_eq!(p.count("b.db", "_rango_migrations").await, Some(1));
-    // The warning names the migrations that were recorded without being run.
+    // One neutral note says migrations were recorded without being run.
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(
-        err.contains("0001_") && err.contains("NOT reproduced"),
+        err.contains("note: 1 migration(s) recorded as applied"),
         "{err}"
     );
 }

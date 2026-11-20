@@ -2,7 +2,7 @@ use crate::migration::diff::{SchemaDiff, diff, sqlite_rebuilds};
 use crate::migration::renames::detect_renames;
 use crate::migration::scanner::{fk_type, generate_pivot_table, scan_models};
 use crate::migration::snapshot::Snapshot;
-use crate::migration::sql::generate_sql_from_diff;
+use crate::migration::sql::{generate_sql_from_diff, skipped_partial_uniques};
 use anyhow::{Result, bail};
 use rango_orm_core::{BackendKind, TableSchema};
 use std::fs;
@@ -165,6 +165,9 @@ pub fn run(
         diffs.clone()
     };
     let sql = with_destructive_warning(generate_sql_from_diff(&sql_diffs, backend), &destructive);
+    for w in skipped_partial_uniques(&sql_diffs, backend) {
+        eprintln!("{w}");
+    }
 
     // --dry-run: print SQL, do not write files
     if dry_run {

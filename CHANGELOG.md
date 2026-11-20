@@ -3,6 +3,10 @@
 ## Unreleased
 
 - Feat: `M2M::add_many(&pool, &from, &to_list)` links one row to a list in multi-row `INSERT`s (1000 pairs per statement, one transaction), idempotent like `add`; `M2M::set` uses the same statements (all backends).
+- Feat: `M2M::add_pairs(&pool, &[(&from, &to), ..])` links arbitrary pairs with the same statements as `add_many` (all backends).
+- Feat: `Error::OutOfRange { column }` for a value that does not fit its column (Postgres `22003`, MySQL / MariaDB 1264 and 1690).
+- Fix: `rango makemigrations` prints a warning on stderr for each partial unique index skipped on MySQL / MariaDB.
+- Fix: `rango restore` prints one neutral `note:` line instead of the long warning about recorded migrations.
 - Feat: `group_by()`, `annotate_count/sum/avg/min/max()`, `having(alias, Cmp, value)` and the `aggregate()` terminal: one `SELECT ... GROUP BY ... HAVING` statement returning one map per group (one row without `group_by`), on all backends. Aliases are accepted by `order_by`.
 - Feat: `filter().set(col, value).update()` and `filter().delete()` on the query builder: one `UPDATE` / `DELETE` statement run by the database, returning the rows affected (all backends). A filter only (`order_by`, `limit`, `offset`, relations are `Error::Invalid`); model hooks are not fired, like bulk ops.
 
