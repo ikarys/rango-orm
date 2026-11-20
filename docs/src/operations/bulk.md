@@ -25,6 +25,8 @@ println!("Inserted {} rows", inserted);
 
 On PostgreSQL, generates one `INSERT INTO ... SELECT * FROM UNNEST($1::type[], $2::type[], ...)` with one array per column, whatever the row count (falls back to multi-row `VALUES` for JSON columns). On SQLite and MySQL, generates one `INSERT INTO ... VALUES (...), (...), ...` per chunk.
 
+`bulk_create` returns the number of inserted rows, not the rows: ids assigned by the database (`FieldAutoInt`, `FieldAutoBigInt`) are not read back. Generate the keys in Rust (`FieldUuid`, as above) when you need them right away, or read the rows back by a natural key (`filter().in_values(..)`). `insert` returns the row with its id.
+
 ## bulk_update
 
 Update specific fields on multiple rows with one statement per chunk.

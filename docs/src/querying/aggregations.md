@@ -116,5 +116,6 @@ Rules:
 - Each map holds the group columns and the aliases. `COUNT` is `SqlValue::BigInt`, `SUM` / `AVG` are `SqlValue::Double`, `MIN` / `MAX` keep the column type (a `FieldDecimal` column stays exact). A `FieldBool` group column comes back as `Bool` on Postgres and as an integer on SQLite and MySQL.
 - `having()` takes an alias declared by an `annotate_*` call; the SQL repeats the aggregate expression (Postgres cannot use an output alias in `HAVING`). Several calls are joined with `AND`, values are bound.
 - `where` conditions (`eq`, `like`, ...) filter rows before grouping, `having` filters groups after.
-- `order_by`, `limit`, `offset` and the default cap of 1000 rows apply to the groups. `select_related` / `prefetch_related` are `Error::Invalid`.
+- `order_by`, `limit`, `offset` and the default cap of 1000 rows apply to the groups. The model's default `ordering` is not applied (it would name columns outside the `GROUP BY`): order groups with an explicit `order_by`. `select_related` / `prefetch_related` are `Error::Invalid`.
 - An unknown column, alias or shape is `Error::Invalid` before any SQL runs.
+- `group_by` takes columns only, not expressions: grouping by month (`date_trunc('month', created_at)`) needs [raw SQL](raw-sql.md). `having` compares an aggregate to a bound constant; it cannot reference a column of another table ("bookings above 90% of the event's capacity"): use raw SQL, or two queries compared in Rust.

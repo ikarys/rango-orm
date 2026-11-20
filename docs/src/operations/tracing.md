@@ -22,6 +22,9 @@ Bound values are never logged.
 
 Statements slower than the threshold are logged on the same target at `WARN` ("slow statement"), with the same fields plus `slow_threshold`.
 
+## Counting statements
+To count the SQL statements of an operation (to spot an N+1), count the `sqlx::query` events, not the `db.query` spans: one span can cover several statements (`prefetch_related` runs two, a chunked bulk op one per chunk). `BEGIN` / `COMMIT` are not logged as `sqlx::query` events. Connection setup statements are events too, on each new connection: MySQL / MariaDB set `sql_mode`, and Postgres runs the `after_connect` statements. Warm the pool up (or ignore the first operation) before counting.
+
 ## Slow query log
 - Postgres: `DatabaseConfig::slow_query_threshold_ms` (default `500`) logs statements slower than the threshold at `WARN`.
 - SQLite and MySQL: fixed `500` ms.

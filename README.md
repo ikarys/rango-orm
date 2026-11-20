@@ -112,7 +112,8 @@ In production, pass the URL via `DATABASE_URL`; never put credentials in `rango.
 | PostgreSQL backend | ✅ |
 | SQLite backend | ✅ (ALTER via table rebuild) |
 | MySQL 8.0+ / MariaDB 10.6+ backend | ✅ (no `RETURNING`, non-transactional DDL) |
-| Keyset pagination, optimistic locking | 📋 planned |
+| Keyset pagination (`.after()` / `.before()`) | ✅ |
+| Optimistic locking | 📋 planned |
 
 ## Rango vs other Rust ORMs
 
