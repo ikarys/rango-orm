@@ -9,7 +9,7 @@ use sqlx::Executor;
 
 mod conn;
 pub use conn::Conn;
-mod exec;
+pub(crate) mod exec;
 pub use exec::SelectAs;
 
 pub use rango_orm_core::DEFAULT_QUERY_LIMIT;

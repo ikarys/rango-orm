@@ -2409,3 +2409,88 @@ async fn test_mysql_values_decodes_decimal_with_scale() {
         .await
         .unwrap();
 }
+
+// ── group_by_date / raw_values ────────────────────────────────────────────────
+
+#[derive(Model, Debug, Clone)]
+#[model(table = "day_row")]
+struct DayRow {
+    id: FieldAutoInt,
+    day: FieldDate,
+    amount: FieldInt,
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-mysql"), ignore)]
+async fn test_mysql_group_by_date_and_raw_values() {
+    let pool = pool().await;
+    for ddl in [
+        "DROP TABLE IF EXISTS `day_row`",
+        "CREATE TABLE `day_row` (`id` INT AUTO_INCREMENT PRIMARY KEY, `day` DATE NOT NULL, `amount` INT NOT NULL) ENGINE=InnoDB",
+    ] {
+        sqlx::query(ddl).execute(&pool).await.unwrap();
+    }
+    let d = |y, m, dd| FieldDate(chrono::NaiveDate::from_ymd_opt(y, m, dd).unwrap());
+    let rows: Vec<DayRow> = [
+        (2026, 1, 5, 1),
+        (2026, 1, 20, 2),
+        (2026, 3, 2, 4),
+        (2027, 1, 9, 8),
+    ]
+    .into_iter()
+    .map(|(y, m, dd, amount)| DayRow {
+        id: FieldAutoInt(None),
+        day: d(y, m, dd),
+        amount: FieldInt(amount),
+    })
+    .collect();
+    for r in rows {
+        insert(&pool, r).await.unwrap();
+    }
+
+    let by_month = DayRow::filter(&pool)
+        .group_by_date(DayRow::DAY, DateTrunc::Month, "period")
+        .annotate_sum("total", DayRow::AMOUNT)
+        .order_by("period")
+        .aggregate()
+        .await
+        .unwrap();
+    let got: Vec<(SqlValue, SqlValue)> = by_month
+        .iter()
+        .map(|r| (r["period"].clone(), r["total"].clone()))
+        .collect();
+    assert_eq!(
+        got,
+        vec![
+            (SqlValue::Text("2026-01-01".into()), SqlValue::Double(3.0)),
+            (SqlValue::Text("2026-03-01".into()), SqlValue::Double(4.0)),
+            (SqlValue::Text("2027-01-01".into()), SqlValue::Double(8.0)),
+        ]
+    );
+    let by_year = DayRow::filter(&pool)
+        .group_by_date("day", DateTrunc::Year, "y")
+        .annotate_count("n")
+        .order_by("-y")
+        .aggregate()
+        .await
+        .unwrap();
+    assert_eq!(by_year[0]["y"], SqlValue::Text("2027-01-01".into()));
+    assert_eq!(by_year[1]["n"], SqlValue::BigInt(3));
+
+    let raw = raw_values(
+        &pool,
+        r#"SELECT `day` AS d, `amount` AS a FROM `day_row` WHERE `amount` > ? ORDER BY `amount`"#,
+        vec![SqlValue::Int(2)],
+    )
+    .await
+    .unwrap();
+    assert_eq!(raw.len(), 2);
+    assert_eq!(raw[0]["a"], SqlValue::BigInt(4));
+    assert!(raw[0].contains_key("d"));
+    assert!(
+        raw_values(&pool, "SELECT 1 AS x WHERE 1 = 0", vec![])
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}

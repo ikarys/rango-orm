@@ -1,3 +1,4 @@
+use crate::SqlValue;
 use crate::schema::TableSchema;
 
 /// Core trait implemented by `#[derive(Model)]`.
@@ -147,6 +148,58 @@ pub fn unknown_column<M: Model>(name: &str) -> Option<String> {
         .unwrap_or_default();
     Some(format!(
         "unknown column `{name}` on table `{}`{hint}",
+        M::table_name()
+    ))
+}
+
+/// Value type check for string column names: `Some(message)` when `value` cannot be compared
+/// with (or stored in) column `name` of `M`. Lenient: typed nulls always pass, numbers cross
+/// between integer / float / decimal columns. Unknown columns return `None` (see `unknown_column`).
+#[doc(hidden)]
+pub fn value_mismatch<M: Model>(name: &str, value: &SqlValue) -> Option<String> {
+    use crate::ColumnType as C;
+    use crate::SqlValue as V;
+    let schema = M::schema();
+    let col = schema.columns.iter().find(|c| c.name == name)?;
+    let t = &col.col_type;
+    let num = matches!(
+        t,
+        C::SmallInt | C::Int | C::BigInt | C::AutoInt | C::AutoBigInt
+    );
+    let fl = matches!(t, C::Float | C::Double | C::Decimal { .. });
+    let ok = match value {
+        V::NullBool
+        | V::NullSmallInt
+        | V::NullInt
+        | V::NullBigInt
+        | V::NullFloat
+        | V::NullDouble
+        | V::NullDecimal
+        | V::NullText
+        | V::NullBytes
+        | V::NullUuid
+        | V::NullDateTime
+        | V::NullDate
+        | V::NullTime
+        | V::NullJson => true,
+        V::Bool(_) => matches!(t, C::Bool),
+        V::SmallInt(_) | V::Int(_) | V::BigInt(_) => num || fl,
+        V::Float(_) | V::Double(_) | V::Decimal(_) => fl,
+        V::Text(_) => matches!(t, C::Text | C::Varchar(_)),
+        V::Bytes(_) => matches!(t, C::Bytea),
+        V::Uuid(_) => matches!(t, C::Uuid),
+        V::DateTime(_) => matches!(t, C::DateTime),
+        V::Date(_) => matches!(t, C::Date),
+        V::Time(_) => matches!(t, C::Time),
+        V::Json(_) => matches!(t, C::Json | C::Jsonb),
+    };
+    if ok {
+        return None;
+    }
+    let debug = format!("{value:?}");
+    let kind = debug.split('(').next().unwrap_or_default();
+    Some(format!(
+        "value of type {kind} does not match column `{name}` ({t:?}) of table `{}`",
         M::table_name()
     ))
 }

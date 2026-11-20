@@ -111,6 +111,17 @@ let row = Order::filter(&pool)
     .await?;
 ```
 
+`group_by_date(col, DateTrunc::Month, "period")` groups a date or datetime column by `Day`, `Month` or `Year`. The key comes back under the alias as `SqlValue::Text` `YYYY-MM-DD` (first day of the month or year) on every backend, and the alias works in `order_by`:
+
+```rust
+let monthly = Order::filter(&pool)
+    .group_by_date(Order::CREATED_AT, DateTrunc::Month, "period")
+    .annotate_sum("total", Order::AMOUNT)
+    .order_by("period")
+    .aggregate()
+    .await?; // period = "2026-01-01", "2026-02-01", ...
+```
+
 Rules:
 
 - Each map holds the group columns and the aliases. `COUNT` is `SqlValue::BigInt`, `SUM` / `AVG` are `SqlValue::Double`, `MIN` / `MAX` keep the column type (a `FieldDecimal` column stays exact). A `FieldBool` group column comes back as `Bool` on Postgres and as an integer on SQLite and MySQL.
@@ -118,4 +129,4 @@ Rules:
 - `where` conditions (`eq`, `like`, ...) filter rows before grouping, `having` filters groups after.
 - `order_by`, `limit`, `offset` and the default cap of 1000 rows apply to the groups. The model's default `ordering` is not applied (it would name columns outside the `GROUP BY`): order groups with an explicit `order_by`. `select_related` / `prefetch_related` are `Error::Invalid`.
 - An unknown column, alias or shape is `Error::Invalid` before any SQL runs.
-- `group_by` takes columns only, not expressions: grouping by month (`date_trunc('month', created_at)`) needs [raw SQL](raw-sql.md). `having` compares an aggregate to a bound constant; it cannot reference a column of another table ("bookings above 90% of the event's capacity"): use raw SQL, or two queries compared in Rust.
+- `group_by` takes columns only, not expressions; the one exception is `group_by_date` (day, month or year, above). Any other expression needs [raw SQL](raw-sql.md). `having` compares an aggregate to a bound constant; it cannot reference a column of another table ("bookings above 90% of the event's capacity"): use raw SQL, or two queries compared in Rust.
