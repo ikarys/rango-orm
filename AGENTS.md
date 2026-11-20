@@ -308,6 +308,12 @@ Known-CVE checklist (reviewed 2026-11-01) — keep new APIs out of these classes
 - SQLite has no decimal type: `FieldDecimal` is stored in a `NUMERIC` column, so a value with more than 15 significant digits is kept exactly as text, and one with up to 15 digits is a number again once read (scale restored from the column). Postgres and MySQL are exact.
 - A Postgres FK cycle is restorable because the FKs that close it are `DEFERRABLE`; databases created by an older `rango migrate` have them non-deferrable, so a NOT NULL cycle there still needs the constraints recreated (`ALTER TABLE ... ALTER CONSTRAINT ... DEFERRABLE`).
 
+## Git workflow
+
+- Integration branch: `develop`. Short-lived branches (`feature/*`, `fix/*`, `docs/*`) start from an up-to-date `develop`.
+- The agent merges a finished branch into `develop` itself (`--no-ff`, tests and lint green), then deletes the source branch, local and remote.
+- Merging into `main` (release) is left to the maintainer.
+
 ## Style
 
 - No unsafe
