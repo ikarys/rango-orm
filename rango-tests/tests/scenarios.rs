@@ -10,7 +10,8 @@
 //!
 //! It drives the product the way a real user would — define models, create the
 //! schema, query, follow relations, use M2M, filter through a relation with a
-//! subquery, transact, and bulk-insert — and asserts the observable behaviour.
+//! subquery, transact, bulk-insert, group and aggregate, and update / delete
+//! through a filter — and asserts the observable behaviour.
 
 #![cfg(feature = "integration-scenarios")]
 
@@ -306,6 +307,67 @@ async fn blog_app_end_to_end() {
         .collect();
     assert_eq!(bulk_create(&pool, &bulk_comments).await.unwrap(), 5);
     assert_eq!(Comment::filter(&pool).count().await.unwrap(), 6); // 1 seeded + 5
+
+    // ── M2M: add many links at once ─────────────────────────────────────────────
+    let t_sql = Tag {
+        id: FieldUuid(Uuid::new_v4()),
+        name: FieldVarchar::new("sql").unwrap(),
+    };
+    insert(&pool, t_sql.clone()).await.unwrap();
+    M2M::<Post, Tag>::add_many(
+        &pool,
+        &p3,
+        &[t_rust.clone(), t_orm.clone(), t_sql.clone(), t_rust.clone()],
+    )
+    .await
+    .unwrap();
+    M2M::<Post, Tag>::add_many(&pool, &p3, &[]).await.unwrap();
+    assert_eq!(M2M::<Post, Tag>::all(&pool, &p3).await.unwrap().len(), 3);
+
+    // ── GROUP BY / HAVING: posts per author ─────────────────────────────────────
+    let per_author = Post::filter(&pool)
+        .group_by(Post::AUTHOR_ID)
+        .annotate_count("n")
+        .order_by("-n")
+        .aggregate()
+        .await
+        .unwrap();
+    assert_eq!(per_author.len(), 2);
+    assert_eq!(per_author[0]["n"], SqlValue::BigInt(3));
+    assert_eq!(per_author[1]["n"], SqlValue::BigInt(1));
+    let prolific = Post::filter(&pool)
+        .group_by(Post::AUTHOR_ID)
+        .annotate_count("n")
+        .having("n", Cmp::Gt, 1i64)
+        .aggregate()
+        .await
+        .unwrap();
+    assert_eq!(prolific.len(), 1);
+    assert_eq!(prolific[0]["n"], SqlValue::BigInt(3));
+
+    // ── QuerySet update / delete: one statement each ────────────────────────────
+    let n = Post::filter(&pool)
+        .eq(Post::PUBLISHED, false)
+        .set(Post::PUBLISHED, true)
+        .update()
+        .await
+        .unwrap();
+    assert_eq!(n, 1);
+    assert_eq!(
+        Post::filter(&pool)
+            .eq(Post::PUBLISHED, false)
+            .count()
+            .await
+            .unwrap(),
+        0
+    );
+    let n = Comment::filter(&pool)
+        .like(Comment::BODY, "bulk comment %")
+        .delete()
+        .await
+        .unwrap();
+    assert_eq!(n, 5);
+    assert_eq!(Comment::filter(&pool).count().await.unwrap(), 1);
 }
 
 /// Locate the built `rango` binary. `CARGO_BIN_EXE_rango` is not exposed for a
