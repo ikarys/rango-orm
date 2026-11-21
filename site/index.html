@@ -455,7 +455,7 @@ table.runs caption,.tnote{
         </tbody>
       </table>
     </div>
-    <p class="tnote">Where Rango is weaker: a small ecosystem, and 1,000-row reads about 6% slower than raw sqlx. Checked against each project&rsquo;s documentation on 2026-11-21. <a href="docs/">Full comparison in the guide</a>.</p>
+    <p class="tnote">Where Rango is weaker: a small ecosystem, and 1,000-row reads about 12% slower than raw sqlx. Checked against each project&rsquo;s documentation on 2026-11-21. <a href="docs/">Full comparison in the guide</a>.</p>
   </section>
 
   <section class="wrap row">
@@ -571,11 +571,11 @@ of this model that accepts a `&amp;str` value
   </section>
 
   <section class="wrap row">
-    <h2>As fast as Diesel and SeaORM.</h2>
-    <p class="lead">The same workloads on one PostgreSQL 16, mean time per operation. Single-row operations are within the 3 to 5% run-to-run noise for all four stacks.</p>
+    <h2>As fast as the other Rust ORMs.</h2>
+    <p class="lead">The same workloads on one PostgreSQL 16, mean time per operation. Run-to-run noise is 3 to 5%. Butane has no multi-row insert, so its bulk insert saves one row at a time.</p>
     <div class="table-scroll">
       <table class="runs bench">
-        <caption>Criterion, 2026-11-05, Ryzen 9 9950X3D, PostgreSQL in Docker on WSL2. <a href="https://github.com/ikarys/rango-orm/tree/main/benchmarks">Full results and method</a>.</caption>
+        <caption>Criterion, 2026-11-21, Ryzen 9 9950X3D, PostgreSQL in Docker on WSL2. <a href="https://github.com/ikarys/rango-orm/tree/main/benchmarks">Full results and method</a>.</caption>
         <thead>
           <tr>
             <th>Operation</th>
@@ -583,36 +583,49 @@ of this model that accepts a `&amp;str` value
             <th>Rango</th>
             <th>SeaORM 2.0</th>
             <th>Diesel async</th>
+            <th>Butane 0.8</th>
           </tr>
         </thead>
         <tbody>
           <tr>
             <td>select_pk</td>
-            <td>819 µs</td>
-            <td>827 µs</td>
-            <td>836 µs</td>
-            <td>833 µs</td>
+            <td>853 µs</td>
+            <td>879 µs</td>
+            <td>888 µs</td>
+            <td>955 µs</td>
+            <td>1.03 ms</td>
           </tr>
           <tr>
             <td>select_filter_100</td>
-            <td>939 µs</td>
-            <td>927 µs</td>
-            <td>968 µs</td>
-            <td>944 µs</td>
+            <td>949 µs</td>
+            <td>1.00 ms</td>
+            <td>991 µs</td>
+            <td>1.04 ms</td>
+            <td>1.10 ms</td>
+          </tr>
+          <tr>
+            <td>select_all_1000</td>
+            <td>1.30 ms</td>
+            <td>1.46 ms</td>
+            <td>1.42 ms</td>
+            <td>1.29 ms</td>
+            <td>1.51 ms</td>
           </tr>
           <tr>
             <td>bulk_insert/1000</td>
-            <td>4.80 ms</td>
-            <td>5.47 ms</td>
-            <td>5.93 ms</td>
-            <td>10.31 ms</td>
+            <td>5.01 ms</td>
+            <td>4.71 ms</td>
+            <td>5.94 ms</td>
+            <td>9.39 ms</td>
+            <td>988 ms</td>
           </tr>
           <tr>
             <td>transaction_10_inserts</td>
-            <td>6.15 ms</td>
-            <td>6.52 ms</td>
-            <td>6.27 ms</td>
-            <td>12.58 ms</td>
+            <td>6.58 ms</td>
+            <td>6.69 ms</td>
+            <td>6.89 ms</td>
+            <td>12.32 ms</td>
+            <td>12.31 ms</td>
           </tr>
         </tbody>
       </table>

@@ -57,7 +57,7 @@ Rango targets Django-style ORM ergonomics on native async SQLx.
 
 ### Where Rango is weaker today
 
-- Bulk reads are ~6% slower than hand-written sqlx on 1000-row selects (on par with SeaORM, Diesel is ~7% faster) — see benchmarks.
+- Bulk reads are ~12% slower than hand-written sqlx on 1000-row selects (SeaORM ~9%, Diesel on par) — see benchmarks.
 - Young project with a small ecosystem.
 
 Comparison inspired by Shuttle's [Best Rust ORMs](https://www.shuttle.dev/blog/2024/01/16/best-orm-rust) (2024), extended with Butane and Rango.
