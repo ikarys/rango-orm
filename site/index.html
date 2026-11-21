@@ -229,7 +229,7 @@ table.runs td{
   vertical-align:top;
 }
 table.vs td,table.vs th[scope=row]{color:var(--muted);}
-table.vs{min-width:760px;}
+table.vs{min-width:980px;font-size:15px;}
 table.vs th[scope=row]{padding:16px 16px 14px 0;vertical-align:top;white-space:nowrap;}
 table.vs code{white-space:nowrap;}
 table.vs td:nth-child(2),table.vs th:nth-child(2){color:var(--ink);font-weight:600;}
@@ -381,8 +381,8 @@ table.runs caption,.tnote{
 <main>
 
   <section class="wrap row" id="compare">
-    <h2>What sqlx, Diesel and SeaORM leave to you.</h2>
-    <p class="lead">sqlx runs the SQL you write. Diesel and SeaORM still leave the migrations to you. In Rango the struct is the schema, and the SQL, the migrations and the typed columns are generated from it.</p>
+    <h2>How Rango compares.</h2>
+    <p class="lead">The closest is Butane, which also generates migrations from your models. Rango adds MySQL and MariaDB, model hooks and published benchmarks. Diesel can pre-fill a migration from a schema diff and SeaORM 2.0 can add missing tables at startup; Rango writes every change, renames and drops included, as a migration you review and commit.</p>
     <div class="table-scroll">
       <table class="runs vs">
         <thead>
@@ -392,22 +392,25 @@ table.runs caption,.tnote{
             <th>sqlx</th>
             <th>Diesel</th>
             <th>SeaORM</th>
+            <th>Butane</th>
           </tr>
         </thead>
         <tbody>
           <tr>
             <th scope="row">Migrations</th>
-            <td>Generated from your structs</td>
+            <td>Generated from your structs as SQL files you review</td>
             <td>SQL by hand</td>
-            <td>SQL by hand</td>
-            <td>Rust files by hand</td>
+            <td><code>--diff-schema</code> pre-fills SQL to review</td>
+            <td>Rust files by hand, or 2.0 schema sync at startup (adds, never drops)</td>
+            <td>Generated from your models</td>
           </tr>
           <tr>
             <th scope="row">Model</th>
             <td>One <code>#[derive(Model)]</code></td>
             <td>None, you write the SQL</td>
-            <td><code>table!</code> macro and a struct</td>
+            <td><code>table!</code> from the database, and a struct</td>
             <td>Entity and ActiveModel</td>
+            <td>One <code>#[model]</code></td>
           </tr>
           <tr>
             <th scope="row">Typed queries</th>
@@ -415,13 +418,23 @@ table.runs caption,.tnote{
             <td><code>query!</code> macros need a live database</td>
             <td>Checked at compile time</td>
             <td>Columns checked at runtime</td>
+            <td><code>query!</code> and <code>filter!</code> macros</td>
           </tr>
           <tr>
             <th scope="row">Related rows</th>
             <td><code>select_related</code>, <code>prefetch_related</code></td>
             <td>By hand</td>
-            <td>Manual joins</td>
+            <td>Joins, <code>belonging_to</code></td>
             <td>Built in</td>
+            <td><code>ForeignKey</code>, <code>Many</code></td>
+          </tr>
+          <tr>
+            <th scope="row">Databases</th>
+            <td>PostgreSQL, SQLite, MySQL, MariaDB</td>
+            <td>PostgreSQL, SQLite, MySQL</td>
+            <td>PostgreSQL, SQLite, MySQL</td>
+            <td>PostgreSQL, SQLite, MySQL</td>
+            <td>PostgreSQL, SQLite</td>
           </tr>
           <tr>
             <th scope="row">Async</th>
@@ -429,11 +442,20 @@ table.runs caption,.tnote{
             <td>Native</td>
             <td>Through diesel-async</td>
             <td>Native</td>
+            <td>Since 0.8</td>
+          </tr>
+          <tr>
+            <th scope="row">Maturity</th>
+            <td>Early, API can change before 1.0</td>
+            <td>Large</td>
+            <td>Large</td>
+            <td>Medium, active</td>
+            <td>Small, &ldquo;experimental&rdquo;; last release June 2025</td>
           </tr>
         </tbody>
       </table>
     </div>
-    <p class="tnote">Where Rango is weaker: a young project with a small ecosystem, an API that can change before 1.0, and 1,000-row reads about 6% slower than raw sqlx. <a href="docs/">Full comparison in the guide</a>.</p>
+    <p class="tnote">Where Rango is weaker: a small ecosystem, and 1,000-row reads about 6% slower than raw sqlx. Checked against each project&rsquo;s documentation on 2026-11-21. <a href="docs/">Full comparison in the guide</a>.</p>
   </section>
 
   <section class="wrap row">
