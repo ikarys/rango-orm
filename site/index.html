@@ -228,13 +228,19 @@ table.runs td{
   border-bottom:1px solid var(--line);
   vertical-align:top;
 }
-table.runs caption{
+table.vs td,table.vs th[scope=row]{color:var(--muted);}
+table.vs{min-width:760px;}
+table.vs th[scope=row]{padding:16px 16px 14px 0;vertical-align:top;white-space:nowrap;}
+table.vs code{white-space:nowrap;}
+table.vs td:nth-child(2),table.vs th:nth-child(2){color:var(--ink);font-weight:600;}
+table.runs caption,.tnote{
   caption-side:bottom;
   text-align:left;
   color:var(--muted);
   font-size:14.5px;
   padding-top:12px;
 }
+.tnote{margin:0;max-width:80ch;}
 .score{
   font-family:var(--display);
   font-weight:700;
@@ -373,6 +379,62 @@ table.runs caption{
 </section>
 
 <main>
+
+  <section class="wrap row" id="compare">
+    <h2>What sqlx, Diesel and SeaORM leave to you.</h2>
+    <p class="lead">sqlx runs the SQL you write. Diesel and SeaORM still leave the migrations to you. In Rango the struct is the schema, and the SQL, the migrations and the typed columns are generated from it.</p>
+    <div class="table-scroll">
+      <table class="runs vs">
+        <thead>
+          <tr>
+            <th></th>
+            <th>Rango</th>
+            <th>sqlx</th>
+            <th>Diesel</th>
+            <th>SeaORM</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th scope="row">Migrations</th>
+            <td>Generated from your structs</td>
+            <td>SQL by hand</td>
+            <td>SQL by hand</td>
+            <td>Rust files by hand</td>
+          </tr>
+          <tr>
+            <th scope="row">Model</th>
+            <td>One <code>#[derive(Model)]</code></td>
+            <td>None, you write the SQL</td>
+            <td><code>table!</code> macro and a struct</td>
+            <td>Entity and ActiveModel</td>
+          </tr>
+          <tr>
+            <th scope="row">Typed queries</th>
+            <td>Column name and value type checked at compile time</td>
+            <td><code>query!</code> macros need a live database</td>
+            <td>Checked at compile time</td>
+            <td>Columns checked at runtime</td>
+          </tr>
+          <tr>
+            <th scope="row">Related rows</th>
+            <td><code>select_related</code>, <code>prefetch_related</code></td>
+            <td>By hand</td>
+            <td>Manual joins</td>
+            <td>Built in</td>
+          </tr>
+          <tr>
+            <th scope="row">Async</th>
+            <td>Native, on sqlx</td>
+            <td>Native</td>
+            <td>Through diesel-async</td>
+            <td>Native</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="tnote">Where Rango is weaker: a young project with a small ecosystem, an API that can change before 1.0, and 1,000-row reads about 6% slower than raw sqlx. <a href="docs/">Full comparison in the guide</a>.</p>
+  </section>
 
   <section class="wrap row">
     <h2>A wrong type never reaches the database.</h2>
