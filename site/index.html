@@ -3,326 +3,571 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Rango: the Django ORM, reborn in Rust</title>
-<meta name="description" content="Build database-backed Rust apps without being a SQL expert. Write structs; Rango writes the tables, migrations and queries. PostgreSQL, SQLite, MySQL / MariaDB.">
+<title>Rango: an async ORM for Rust, modelled on Django</title>
+<meta name="description" content="Write a Rust struct; Rango generates the tables, the migrations and a typed query API. Async, on PostgreSQL, SQLite and MySQL or MariaDB.">
+<meta name="theme-color" content="#f4f6f9">
+<link rel="preload" href="fonts/BricolageGrotesque.woff2" as="font" type="font/woff2" crossorigin>
 <style>
-:root{--bg:#151614;--panel:#1e1f1c;--line:#33342f;--text:#ecebe6;--muted:#a3a197;--accent:#5fb3a0;--accent-ink:#0f1a17;color-scheme:dark light;
---sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
-@media (prefers-color-scheme:light){:root{--bg:#f6f5f1;--panel:#fff;--line:#e2dfd6;--text:#22211d;--muted:#5f5c52;--accent:#2d6b5d;--accent-ink:#fff}}
-*{box-sizing:border-box}
-html{background:var(--bg);color:var(--text)}
-body{margin:0;font:17px/1.6 var(--sans)}
-a{color:var(--accent)}
-:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
-.container{width:100%;max-width:1180px;margin-inline:auto;padding-inline:clamp(20px,5vw,48px)}
-.site-header{border-bottom:1px solid var(--line)}
-.header-inner{height:64px;display:flex;align-items:center;justify-content:space-between;gap:24px}
-.wordmark{font-size:18px;font-weight:700;color:var(--text);text-decoration:none}
-.header-nav{display:flex;gap:24px}
-.header-nav a{color:var(--muted);font-size:15px;text-decoration:none}
-.header-nav a:hover{color:var(--text)}
-h1{margin:0 0 24px;font-size:clamp(2.4rem,6vw,4.2rem);font-weight:600;letter-spacing:-.025em;line-height:1.08;max-width:20ch}
-h2{margin:0 0 24px;font-size:clamp(1.6rem,3vw,2.3rem);font-weight:600;letter-spacing:-.015em;line-height:1.15}
-h3{margin:0 0 8px;font-size:1.1rem;font-weight:600}
-p{margin:0 0 16px;max-width:64ch}
-code{font-family:var(--mono);font-size:.9em}
-section{border-top:1px solid var(--line);padding:80px 0}
-.hero{padding:88px 0 80px;border:0}
-.lede{color:var(--muted);font-size:20px;margin-bottom:32px}
-.muted,.sub{color:var(--muted)}
-.codebox{display:flex;align-items:flex-start;gap:12px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin:0 0 16px}
-.code-scroll{min-width:0;flex:1;overflow-x:auto}
-pre{margin:0;font:14px/1.6 var(--mono);color:var(--text);white-space:pre}
-.prompt{user-select:none;color:var(--muted)}
-.cmt{color:var(--muted)}
-.copy{flex:0 0 auto;background:transparent;border:1px solid var(--line);border-radius:6px;color:var(--muted);font:13px/1.6 var(--sans);padding:4px 10px;cursor:pointer}
-.copy:hover{color:var(--text)}
-.steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:24px}
-.steps .codebox,.feature .codebox{margin-top:12px}
-.step-n{color:var(--accent);margin-right:10px;font:600 14px var(--mono)}
-.feature{display:grid;grid-template-columns:5fr 7fr;gap:56px;align-items:center;padding:64px 0;border-top:1px solid var(--line)}
-.feature:first-of-type{border-top:0;padding-top:0}
-.feature p{color:var(--muted)}
-.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:20px}
-.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:20px}
-.card p{color:var(--muted);font-size:15px;margin:0}
-.table-wrap{overflow-x:auto;margin:24px 0}
-table{border-collapse:collapse;width:100%;font-size:15px}
-th,td{text-align:left;padding:10px 14px;border-bottom:1px solid var(--line);vertical-align:top}
-th{color:var(--muted);font-weight:500}
-td.n,th.n{text-align:right;font-family:var(--mono);white-space:nowrap}
-caption{text-align:left;color:var(--muted);font-size:14px;padding-bottom:8px}
-.story p{color:var(--muted)}
-.story blockquote{margin:0 0 24px;padding-left:20px;border-left:3px solid var(--accent);max-width:68ch}
-.story blockquote p{color:var(--text)}
-.btn{display:inline-block;background:var(--accent);color:var(--accent-ink);font-weight:600;padding:12px 24px;border-radius:8px;text-decoration:none}
-.btn:hover{opacity:.9}
-ul.plain{padding-left:20px;color:var(--muted);max-width:64ch}
-.site-footer{border-top:1px solid var(--line);padding:32px 0;color:var(--muted);font-size:14px}
-.footer-inner{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap}
-@media (max-width:860px){.steps,.feature{grid-template-columns:1fr}.feature{gap:24px}section{padding:56px 0}}
+:root{
+  --paper:#f4f6f9;
+  --ink:#121a26;
+  --muted:#566175;
+  --line:#d9dee7;
+  --surface:#ffffff;
+  --accent:#2b44c9;
+  --slate:#1b2230;
+  --slate-ink:#d7dce6;
+  --slate-dim:#8a94a8;
+  --err:#ff6b6b;
+  --blue:#7aa2ff;
+  color-scheme: light;
+  --display: "Bricolage Grotesque", system-ui, sans-serif;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: ui-monospace, "Cascadia Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+}
+@font-face{
+  font-family:"Bricolage Grotesque";
+  src:url(fonts/BricolageGrotesque.woff2) format("woff2");
+  font-weight:600 800;
+  font-display:swap;
+}
+*{box-sizing:border-box;}
+html{-webkit-text-size-adjust:100%;}
+body{
+  margin:0;
+  background:var(--paper);
+  color:var(--ink);
+  font:400 17px/1.6 var(--sans);
+}
+a{
+  color:var(--accent);
+  text-decoration:underline;
+  text-underline-offset:.18em;
+}
+:focus-visible{
+  outline:2px solid var(--accent);
+  outline-offset:3px;
+}
+::selection{
+  background:#d6dcfb;
+  color:var(--ink);
+}
+h1,h2{
+  margin:0;
+  font-family:var(--display);
+}
+h1{
+  font-weight:800;
+  font-size:clamp(44px,5vw,68px);
+  line-height:1;
+  letter-spacing:-.035em;
+  max-width:14ch;
+  text-wrap:balance;
+}
+h2{
+  font-weight:700;
+  font-size:clamp(28px,3.2vw,40px);
+  line-height:1.1;
+  letter-spacing:-.025em;
+  max-width:22ch;
+}
+pre{
+  font:400 14.5px/1.55 var(--mono);
+  background:var(--surface);
+  border:1px solid var(--line);
+  border-radius:8px;
+  padding:18px 20px;
+  margin:0;
+  overflow-x:auto;
+}
+code{
+  font-family:var(--mono);
+  font-size:.9em;
+  background:#e8ecf3;
+  padding:1px 5px;
+  border-radius:4px;
+}
+.d{color:var(--muted);}
+.rustc{
+  background:var(--slate);
+  color:var(--slate-ink);
+  border:none;
+}
+.rustc .e{color:var(--err);font-weight:700;}
+.rustc .b{color:var(--blue);}
+.rustc .d{color:var(--slate-dim);}
+.wrap{
+  max-width:1180px;
+  margin:0 auto;
+  padding:0 40px;
+}
+.top{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  flex-wrap:wrap;
+  gap:12px 28px;
+  padding-top:28px;
+  padding-bottom:28px;
+}
+.brand{
+  font-family:var(--display);
+  font-size:22px;
+  font-weight:800;
+  color:var(--ink);
+  text-decoration:none;
+}
+.top nav{
+  display:flex;
+  flex-wrap:wrap;
+  gap:12px 28px;
+}
+.top nav a{
+  color:var(--ink);
+  font-weight:600;
+  text-decoration:none;
+}
+.hero{
+  padding:56px 40px 88px;
+  display:grid;
+  grid-template-columns:minmax(0,5fr) minmax(0,6fr);
+  gap:56px;
+  align-items:start;
+}
+.hero h1{max-width:10ch;}
+.proof{display:grid;gap:20px;}
+.proof figcaption{max-width:52ch;}
+.sub{
+  font-size:20px;
+  max-width:58ch;
+  color:var(--ink);
+  margin:28px 0 0;
+}
+.install{
+  margin-top:36px;
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  gap:16px 28px;
+}
+.cmd{
+  display:flex;
+  align-items:stretch;
+  max-width:100%;
+}
+.cmd pre{
+  display:inline-block;
+  width:auto;
+  max-width:100%;
+  padding:14px 18px;
+  font-size:16px;
+  border-radius:8px 0 0 8px;
+}
+.cmd .d{
+  user-select:none;
+}
+.copy{
+  font:600 15px/1 var(--sans);
+  padding:0 16px;
+  border:1px solid var(--line);
+  border-left:0;
+  border-radius:0 8px 8px 0;
+  background:var(--surface);
+  color:var(--accent);
+  cursor:pointer;
+}
+.guide{
+  font-weight:600;
+  font-size:17px;
+}
+.note{
+  margin-top:18px;
+  color:var(--muted);
+  font-size:15.5px;
+}
+.row{
+  border-top:1px solid var(--line);
+  padding-top:64px;
+  padding-bottom:64px;
+}
+.lead{
+  max-width:62ch;
+  margin:18px 0 0;
+}
+.pair{
+  display:grid;
+  grid-template-columns:minmax(0,1fr);
+  gap:24px;
+  margin-top:36px;
+  align-items:start;
+}
+figure{margin:0;}
+figcaption{
+  color:var(--muted);
+  font-size:14.5px;
+  margin-top:10px;
+}
+.table-scroll{
+  overflow-x:auto;
+  margin-top:36px;
+}
+table.runs{
+  width:100%;
+  border-collapse:collapse;
+  font-size:16px;
+}
+table.runs th{
+  text-align:left;
+  font-weight:600;
+  color:var(--muted);
+  font-size:14.5px;
+  border-bottom:1px solid var(--line);
+  padding:0 16px 10px 0;
+}
+table.runs td{
+  padding:14px 16px 14px 0;
+  border-bottom:1px solid var(--line);
+  vertical-align:top;
+}
+table.runs caption{
+  caption-side:bottom;
+  text-align:left;
+  color:var(--muted);
+  font-size:14.5px;
+  padding-top:12px;
+}
+.score{
+  font-family:var(--display);
+  font-weight:700;
+  font-size:22px;
+  white-space:nowrap;
+}
+.facts{
+  display:grid;
+  grid-template-columns:1fr;
+  column-gap:40px;
+  margin-top:36px;
+  margin-bottom:0;
+}
+.facts dt{
+  font-weight:600;
+  padding:14px 0;
+  border-top:1px solid var(--line);
+}
+.facts dd{
+  margin:0;
+  padding:14px 0;
+  border-top:1px solid var(--line);
+}
+.facts dd code{
+  overflow-wrap:anywhere;
+}
+.bench th:not(:first-child){text-align:right;padding-right:0;padding-left:16px;}
+.bench td:not(:first-child){padding-right:0;padding-left:16px;}
+.bench td{
+  text-align:right;
+  font-variant-numeric:tabular-nums;
+  white-space:nowrap;
+}
+.bench td:first-child{
+  text-align:left;
+  font-family:var(--mono);
+  font-size:14.5px;
+}
+.bench td:nth-child(3){
+  font-weight:700;
+}
+.foot{
+  border-top:1px solid var(--line);
+  padding-top:32px;
+  padding-bottom:56px;
+  color:var(--muted);
+  font-size:15px;
+}
+.foot p{
+  margin:0 0 8px;
+  max-width:80ch;
+}
+.foot p:last-child{
+  margin-bottom:0;
+}
+@media (min-width:1200px){
+  .pair{
+    grid-template-columns:minmax(0,1fr) minmax(0,1fr);
+  }
+  .facts{
+    grid-template-columns:max-content minmax(0,1fr);
+  }
+}
+@media (max-width:1199px){
+  .facts dd{
+    padding-top:0;
+    border-top:none;
+  }
+}
+@media (max-width:859px){
+  .wrap{
+    padding:0 20px;
+  }
+  .hero{
+    padding:32px 20px 56px;
+    grid-template-columns:minmax(0,1fr);
+    gap:40px;
+  }
+  .row{
+    padding-top:52px;
+    padding-bottom:52px;
+  }
+}
 </style>
 </head>
 <body>
-<header class="site-header">
-<div class="container header-inner">
-<a class="wordmark" href="./">Rango</a>
-<nav class="header-nav" aria-label="Primary">
-<a href="docs/">Docs</a>
-<a href="https://github.com/ikarys/rango-orm">GitHub</a>
-<a href="https://crates.io/crates/rango-orm">crates.io</a>
-</nav>
-</div>
+<header class="wrap top">
+  <a class="brand" href="./">Rango</a>
+  <nav>
+    <a href="docs/">Guide</a>
+    <a href="https://crates.io/crates/rango-orm">crates.io</a>
+    <a href="https://github.com/ikarys/rango-orm">GitHub</a>
+  </nav>
 </header>
-<main>
 
-<section class="hero" aria-labelledby="top">
-<div class="container">
-<h1 id="top">The Django ORM, reborn in Rust.</h1>
-<p class="lede">You don't need to be a SQL expert to build an app with a database. Describe your data as Rust structs: Rango writes the tables, the migrations and the queries for you. Async and typed, on PostgreSQL, SQLite and MySQL / MariaDB.</p>
-<div class="codebox"><div class="code-scroll"><pre><span class="prompt">$ </span>cargo add rango-orm
-<span class="prompt">$ </span>cargo install rango-orm-cli</pre></div><button class="copy" type="button" aria-label="Copy install commands">Copy</button></div>
-<p class="muted" style="font-size:14px">Pre-1.0: a <code>0.x</code> minor release may still break the API. The package is <code>rango-orm</code>; you import <code>rango</code>.</p>
-</div>
-</section>
-
-<section aria-labelledby="how">
-<div class="container">
-<h2 id="how">How it works</h2>
-<div class="steps">
-<div>
-<h3><span class="step-n">1</span>Write structs</h3>
-<p class="sub">A plain Rust struct is all Rango needs. No schema file, no SQL types to learn, no attributes on every field.</p>
-<div class="codebox"><div class="code-scroll"><pre>#[derive(Model)]
-struct User {
-    id: FieldUuid,
-    #[field(unique)]
-    email: FieldEmail,
-    name: FieldVarchar&lt;1, 100&gt;,
-    age: FieldInt,
-    active: FieldBool,
-    created_at: FieldDateTime,
-}
-
-#[derive(Model)]
+<section class="wrap hero">
+  <div class="pitch">
+  <h1>Write the struct. Rango writes the SQL.</h1>
+  <p class="sub">An async ORM for Rust, modelled on Django's. From your structs it generates the tables, the migrations and a typed query API, on PostgreSQL, SQLite and MySQL or MariaDB.</p>
+  <div class="install">
+    <div class="cmd">
+      <pre><span class="d">$ </span>cargo add rango-orm</pre>
+      <button class="copy" data-copy="cargo add rango-orm" aria-live="polite">Copy</button>
+    </div>
+    <a class="guide" href="docs/">Read the guide</a>
+  </div>
+  <p class="note">Version 0.3.1, pre-1.0: a minor release may still change the API. The package is <code>rango-orm</code>; you import <code>rango</code>.</p>
+  </div>
+  <div class="proof">
+      <figure>
+        <pre>#[derive(Model)]
 struct Post {
     id: FieldUuid,
     author_id: ForeignKey&lt;User&gt;,
     title: FieldVarchar&lt;1, 255&gt;,
     published: FieldBool,
-}</pre></div><button class="copy" type="button" aria-label="Copy code">Copy</button></div>
-</div>
-<div>
-<h3><span class="step-n">2</span>Generate and apply</h3>
-<p class="sub">Two commands. Rango works out what changed and writes the migration for you.</p>
-<div class="codebox"><div class="code-scroll"><pre><span class="prompt">$ </span>rango init --backend postgres
-<span class="prompt">$ </span>rango makemigrations
-<span class="prompt">$ </span>rango migrate</pre></div><button class="copy" type="button" aria-label="Copy commands">Copy</button></div>
-</div>
-<div>
-<h3><span class="step-n">3</span>Read the SQL</h3>
-<p class="sub">You never have to write it, but it is plain SQL you can read. Here is what Rango generated for <code>Post</code>.</p>
-<div class="codebox"><div class="code-scroll"><pre>CREATE TABLE IF NOT EXISTS "post" (
-    "id" UUID PRIMARY KEY,
-    "author_id" UUID NOT NULL
-      CONSTRAINT "post_author_id_fkey"
-      REFERENCES "user" ("id")
-      ON DELETE CASCADE,
-    "title" VARCHAR(255) NOT NULL,
-    "published" BOOLEAN NOT NULL
+}</pre>
+        <figcaption>What you write.</figcaption>
+      </figure>
+      <figure>
+        <pre>CREATE TABLE IF NOT EXISTS "post" (
+  "id" UUID PRIMARY KEY,
+  "author_id" UUID NOT NULL
+    CONSTRAINT "post_author_id_fkey"
+    REFERENCES "user" ("id")
+    ON DELETE CASCADE,
+  "title" VARCHAR(255) NOT NULL,
+  "published" BOOLEAN NOT NULL
 );
-
 CREATE INDEX IF NOT EXISTS
   "post_author_id_idx"
-  ON "post" ("author_id");</pre></div><button class="copy" type="button" aria-label="Copy SQL">Copy</button></div>
-</div>
-</div>
-</div>
+  ON "post" ("author_id");</pre>
+        <figcaption>What <code>rango migrate</code> runs on PostgreSQL. The foreign key gets a real constraint, its own index and <code>ON DELETE CASCADE</code>.</figcaption>
+      </figure>
+      </div>
 </section>
 
-<section aria-labelledby="features">
-<div class="container">
-<h2 id="features">Simple things stay simple</h2>
+<main>
 
-<div class="feature">
-<div>
-<h3>Typed query builder</h3>
-<p>Query in Rust, not in SQL strings. A typo in a column name or a wrong value type is caught by the compiler, before anything reaches the database. Need <code>OR</code>, <code>NOT</code> or a subquery? <code>or()</code>, <code>not()</code> and <code>where_exists</code> read like plain English.</p>
-<p><a href="docs/querying/filter.html">Filter &amp; lookup</a></p>
-</div>
-<div class="codebox"><div class="code-scroll"><pre>let adults = User::filter(&amp;pool)
+  <section class="wrap row">
+    <h2>A wrong type never reaches the database.</h2>
+    <p class="lead">Columns are typed constants on the model. Compare <code>User::AGE</code> with a string and the build stops, with a message that names the column and the value it accepts.</p>
+    <div class="pair">
+      <figure>
+        <pre>let adults = User::filter(&amp;pool)
     .gte(User::AGE, 18)
     .eq(User::ACTIVE, true)
     .order_by(User::CREATED_AT.desc())
     .limit(20)
     .all().await?;
 
-// Users with at least one published article
-let authors = User::filter(&amp;pool)
-    .where_exists(Article::AUTHOR_ID,
-        |q| q.eq(Article::PUBLISHED, true))
-    .all().await?;
+// One wrong value
+User::filter(&amp;pool).eq(User::AGE, "eighteen");</pre>
+        <figcaption><code>User::AGE</code> is a <code>FieldInt</code> column.</figcaption>
+      </figure>
+      <figure>
+        <pre class="rustc"><span class="e">error[E0277]</span>: `Column&lt;User, FieldInt&gt;` is not a column
+of this model that accepts a `&amp;str` value
+<span class="b">  --&gt;</span> src/main.rs:17:38
+<span class="b">   |</span>
+<span class="b">17 |</span>     .eq(User::AGE, "eighteen")
+<span class="b">   |</span>      <span class="e">^^</span> <span class="e">the trait `FilterColumn&lt;User, &amp;str&gt;`</span>
+<span class="b">   |</span>         <span class="e">is not implemented for `Column&lt;User, FieldInt&gt;`</span>
+<span class="b">   |</span>
+<span class="b">   =</span> note: pass a typed column such as `Model::NAME`
+     with a value of its field type</pre>
+        <figcaption>rustc 1.98.1 output, lines wrapped to fit.</figcaption>
+      </figure>
+    </div>
+  </section>
 
-<span class="cmt">// Does not compile: &amp;str vs a FieldInt column
-// User::filter(&amp;pool).eq(User::AGE, "eighteen");</span></pre></div><button class="copy" type="button" aria-label="Copy code">Copy</button></div>
-</div>
-
-<div class="feature">
-<div>
-<h3>Relations without the headache</h3>
-<p>Write <code>ForeignKey&lt;User&gt;</code> and you are done: Rango creates the real constraint, the index and the <code>ON DELETE CASCADE</code>. Load related rows with <code>select_related</code> or <code>prefetch_related</code> and Rango writes the join for you. <code>ManyToMany&lt;T&gt;</code> even creates the pivot table.</p>
-<p><a href="docs/models/relations.html">Relations</a> · <a href="docs/querying/relations.html">select_related &amp; prefetch_related</a></p>
-</div>
-<div class="codebox"><div class="code-scroll"><pre>let posts = Post::filter(&amp;pool)
-    .select_related(Post::AUTHOR_ID)
-    .all().await?;
-
-for post in &amp;posts {
-    let author = post.related::&lt;User&gt;(); // no SQL
-    println!("{} by {}", post.title, author.name);
-}
-
-<span class="cmt">// Many-to-many: one query through the pivot table</span>
-let articles = Article::filter(&amp;pool)
-    .prefetch_related(Article::TAGS)
-    .all().await?;</pre></div><button class="copy" type="button" aria-label="Copy code">Copy</button></div>
-</div>
-
-<div class="feature">
-<div>
-<h3>Migrations you never write</h3>
-<p>Add a field, rename one, change a type: run <code>rango makemigrations</code> and that is it. Rango detects renames, produces the same result every time, and handles the awkward cases for you, like rebuilding a SQLite table safely in one transaction.</p>
-<p><a href="docs/migrations/makemigrations.html">makemigrations</a> · <a href="docs/migrations/migrate.html">migrate</a></p>
-</div>
-<div class="codebox"><div class="code-scroll"><pre><span class="prompt">$ </span>rango makemigrations --dry-run   <span class="cmt"># preview the SQL</span>
-<span class="prompt">$ </span>rango makemigrations --check     <span class="cmt"># exit 1 if pending (CI)</span>
-<span class="prompt">$ </span>rango migrate
-
-<span class="cmt">-- SQLite: type / NULL / FK change becomes a rebuild</span>
+  <section class="wrap row">
+    <h2>Migrations are written for you.</h2>
+    <p class="lead"><code>rango makemigrations</code> compares the models with the last schema snapshot and writes the next migration. It detects renames and gives the same file every time. On SQLite, a change that needs a table rebuild runs in one transaction.</p>
+    <div class="pair">
+      <figure>
+        <pre><span class="d">$ </span>rango init --backend postgres
+<span class="d">$ </span>rango makemigrations --dry-run<span class="d">   # preview the SQL</span>
+<span class="d">$ </span>rango makemigrations
+<span class="d">$ </span>rango migrate
+<span class="d">$ </span>rango makemigrations --check<span class="d">     # exit 1 if pending (CI)</span></pre>
+        <figcaption>The CLI: <code>cargo install rango-orm-cli</code>.</figcaption>
+      </figure>
+      <figure>
+        <pre><span class="d">-- SQLite: type / NULL / FK change becomes a rebuild</span>
 CREATE TABLE "_rango_new_user" (...);
 INSERT INTO "_rango_new_user" (...) SELECT ... FROM "user";
 DROP TABLE "user";
-<span class="cmt">-- ... then rename, all in one transaction</span></pre></div><button class="copy" type="button" aria-label="Copy code">Copy</button></div>
-</div>
-</div>
-</section>
+<span class="d">-- ... then rename, all in one transaction</span></pre>
+        <figcaption>An abridged SQLite rebuild.</figcaption>
+      </figure>
+    </div>
+  </section>
 
-<section aria-labelledby="rest">
-<div class="container">
-<h2 id="rest">Everything else, built in</h2>
-<div class="cards">
-<div class="card"><h3>Transactions</h3><p>Wrap your code in <code>rango::atomic</code>: everything commits together or nothing does. <code>atomic_retry</code> retries deadlocks for you (Postgres, MySQL, MariaDB).</p></div>
-<div class="card"><h3>Bulk operations</h3><p>Insert or update thousands of rows with one call: <code>bulk_create</code>, <code>bulk_update</code>, <code>bulk_upsert</code>. Rango picks the fast path.</p></div>
-<div class="card"><h3>Reports and batch changes</h3><p><code>group_by</code>, <code>having</code> and <code>group_by_date</code> build a report in one query. <code>filter().set(..).update()</code> and <code>filter().delete()</code> change thousands of rows in one statement.</p></div>
-<div class="card"><h3>Raw SQL, safely</h3><p>When you do want SQL, <code>raw</code> and <code>raw_values</code> are there, and your parameters are always bound safely.</p></div>
-<div class="card"><h3>Dump, restore, backup</h3><p>One command, same on every database. No more digging through <code>pg_dump</code> or <code>mysqldump</code> flags.</p></div>
-<div class="card"><h3>Passwords</h3><p>Use <code>FieldPassword</code> and it is hashed with Argon2id automatically. It never shows up in your logs.</p></div>
-<div class="card"><h3>Typed errors</h3><p>Match on <code>NotFound</code> or <code>UniqueViolation</code> instead of parsing database error codes.</p></div>
-<div class="card"><h3>Observability</h3><p>Every query is traced, and slow ones (over 500 ms by default) are logged without any setup.</p></div>
-<div class="card"><h3>TLS by default</h3><p>Connections to remote Postgres and MySQL hosts are encrypted by default. Nothing to configure.</p></div>
-</div>
-</div>
-</section>
+  <section class="wrap row" id="agents">
+    <h2>Tested by agents that only had the docs.</h2>
+    <p class="lead">Each campaign gives an AI agent a fresh context, the user guide and a real app to build, with no access to the source. It seeds 100,000 rows, runs the app's queries on them and logs every point of friction. Every finding in these reports is answered with a fix or a doc change.</p>
+    <div class="table-scroll">
+      <table class="runs">
+        <caption>Campaigns of 2026-11-20 on commit 7e0d1ec. <a href="docs/trust/blind-tests.html">How the tests are run</a>.</caption>
+        <thead>
+          <tr>
+            <th>App</th>
+            <th>Persona</th>
+            <th>Databases</th>
+            <th>Score</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><a href="https://github.com/ikarys/rango-orm/blob/main/audit/2026-11-20-campaign-a-library-django.md">Library, 100k loans</a></td>
+            <td>Django developer, little SQL</td>
+            <td>SQLite, PostgreSQL</td>
+            <td class="score">8/10</td>
+          </tr>
+          <tr>
+            <td><a href="https://github.com/ikarys/rango-orm/blob/main/audit/2026-11-20-campaign-b-saas-billing-pg.md">SaaS billing, 100k invoice lines</a></td>
+            <td>Backend engineer, knows SQL</td>
+            <td>PostgreSQL</td>
+            <td class="score">7/10</td>
+          </tr>
+          <tr>
+            <td><a href="https://github.com/ikarys/rango-orm/blob/main/audit/2026-11-20-campaign-c-event-booking-mysql.md">Event booking, 100k bookings</a></td>
+            <td>Indie developer on MySQL</td>
+            <td>MySQL 8.4, MariaDB 11.4, SQLite</td>
+            <td class="score">8/10</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
 
-<section class="story" aria-labelledby="why">
-<div class="container">
-<h2 id="why">Why not sqlx, SeaORM or Diesel?</h2>
-<blockquote>
-<p>When I started Rust, my first project needed a database, so I looked for an ORM. I quickly found that usage was rather raw, a bit like SQLAlchemy in Python. Coming from Django, I believed developers shouldn't have to be SQL experts to build an application. Django does that abstraction wonderfully.</p>
-<p>I tried several ORMs: plenty of usage simplifications, but joins, table definitions and worst of all migrations were full of commands to write. So I thought: let's take Django's mindset, bring it to Rust, and get back that ease and simplicity of using an ORM.</p>
-<p>That's how Rango was born: Rust + Django = Rango.</p>
-</blockquote>
-<p>Those are good tools, but they all ask you to know, or write, a fair amount of SQL. Here is what each one asks of you:</p>
-<div class="table-wrap">
-<table>
-<caption>Rango compared with other Rust options</caption>
-<thead><tr><th scope="col">Tool</th><th scope="col">What you write</th><th scope="col">Notes</th></tr></thead>
-<tbody>
-<tr><th scope="row">Rango</th><td>Structs. That is it.</td><td>Migrations, joins and constraints are generated. Async, PostgreSQL / SQLite / MySQL &amp; MariaDB. Young project.</td></tr>
-<tr><th scope="row">Diesel</th><td>A <code>table!</code> schema, SQL migrations</td><td>Strong typing, large and mature. Sync-first core (async via diesel-async).</td></tr>
-<tr><th scope="row">sqlx</th><td>All the SQL, migrations included</td><td>Not an ORM, and great at what it does. Rango is built on top of it.</td></tr>
-<tr><th scope="row">SeaORM</th><td>Entity + ActiveModel, migrations in Rust</td><td>Async and active. Entity-first schema sync exists but is newer.</td></tr>
-<tr><th scope="row">Butane</th><td>Structs</td><td>Same starting idea: migrations generated from models. Describes itself as experimental; PostgreSQL and SQLite; async since 0.8; queries through a <code>query!</code> macro.</td></tr>
-</tbody>
-</table>
-</div>
-<p>Rango is not the only one to generate migrations. Its goal is to be the simplest: the whole Django experience, not just the migrations. Relations, subqueries, transactions, bulk operations, hooks, constraints and backups all work without writing SQL, async from the ground up, and the same code runs on three databases.</p>
-<p>And where Django fell short:</p>
-<ul class="plain">
-<li><code>ON DELETE CASCADE</code> is done by the database, not by deleting row by row in application code.</li>
-<li><code>Option&lt;T&gt;</code> is the one concept for nullable, instead of <code>null=True</code> and <code>blank=True</code>.</li>
-<li>Queries are typed, not strings.</li>
-</ul>
-</div>
-</section>
+  <section class="wrap row" id="facts">
+    <h2>Facts for your coding agent.</h2>
+    <p class="lead">If an agent adds Rango to your project, these are the details it gets wrong most easily.</p>
+    <dl class="facts">
+      <dt>Package</dt>
+      <dd><code>rango-orm</code> on crates.io, version 0.3</dd>
+      <dt>Import</dt>
+      <dd><code>use rango::prelude::*;</code> (the crate name is <code>rango</code>)</dd>
+      <dt>Backends</dt>
+      <dd>Cargo features <code>postgres</code> (default), <code>sqlite</code>, <code>mysql</code>. For SQLite: <code>rango-orm = { version = "0.3", default-features = false, features = ["sqlite"] }</code></dd>
+      <dt>Runtime</dt>
+      <dd>Async on sqlx; your app needs Tokio.</dd>
+      <dt>CLI</dt>
+      <dd><code>cargo install rango-orm-cli</code> installs the <code>rango</code> binary.</dd>
+      <dt>Docs</dt>
+      <dd><a href="docs/">The user guide</a> and <a href="https://docs.rs/rango-orm">API reference on docs.rs</a></dd>
+    </dl>
+  </section>
 
-<section aria-labelledby="perf">
-<div class="container">
-<h2 id="perf">Simple does not mean slow</h2>
-<p class="muted">On PostgreSQL, Rango is on par with SeaORM and Diesel and close to hand-written sqlx. Mean per operation, lower is better.</p>
-<div class="table-wrap">
-<table>
-<caption>Postgres 16 in Docker on the same host; single-row differences under ~5% are noise.</caption>
-<thead><tr><th scope="col">Benchmark</th><th class="n" scope="col">sqlx (raw)</th><th class="n" scope="col">Rango</th><th class="n" scope="col">SeaORM</th><th class="n" scope="col">Diesel-async</th></tr></thead>
-<tbody>
-<tr><th scope="row"><code>select_pk</code></th><td class="n">819 µs</td><td class="n">827 µs</td><td class="n">836 µs</td><td class="n">833 µs</td></tr>
-<tr><th scope="row"><code>select_all_1000</code></th><td class="n">1.43 ms</td><td class="n">1.49 ms</td><td class="n">1.49 ms</td><td class="n">1.41 ms</td></tr>
-<tr><th scope="row"><code>insert_one</code></th><td class="n">2.01 ms</td><td class="n">1.94 ms</td><td class="n">1.92 ms</td><td class="n">2.53 ms</td></tr>
-<tr><th scope="row"><code>bulk_insert/1000</code></th><td class="n">4.80 ms</td><td class="n">5.47 ms</td><td class="n">5.93 ms</td><td class="n">10.31 ms</td></tr>
-<tr><th scope="row"><code>update_one</code></th><td class="n">1.91 ms</td><td class="n">1.95 ms</td><td class="n">2.00 ms</td><td class="n">2.87 ms</td></tr>
-<tr><th scope="row"><code>transaction_10_inserts</code></th><td class="n">6.15 ms</td><td class="n">6.52 ms</td><td class="n">6.27 ms</td><td class="n">12.58 ms</td></tr>
-</tbody>
-</table>
-</div>
-<p><a href="https://github.com/ikarys/rango-orm/tree/main/benchmarks">Methodology and full results</a></p>
-</div>
-</section>
+  <section class="wrap row">
+    <h2>As fast as the other Rust ORMs.</h2>
+    <p class="lead">The same workloads on one PostgreSQL 16, mean time per operation. Single-row operations are within the 3 to 5% run-to-run noise for all four stacks.</p>
+    <div class="table-scroll">
+      <table class="runs bench">
+        <caption>Criterion, 2026-11-05, Ryzen 9 9950X3D, PostgreSQL in Docker on WSL2. <a href="https://github.com/ikarys/rango-orm/tree/main/benchmarks">Full results and method</a>.</caption>
+        <thead>
+          <tr>
+            <th>Operation</th>
+            <th>sqlx, no ORM</th>
+            <th>Rango</th>
+            <th>SeaORM 2.0</th>
+            <th>Diesel async</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>select_pk</td>
+            <td>819 µs</td>
+            <td>827 µs</td>
+            <td>836 µs</td>
+            <td>833 µs</td>
+          </tr>
+          <tr>
+            <td>select_filter_100</td>
+            <td>939 µs</td>
+            <td>927 µs</td>
+            <td>968 µs</td>
+            <td>944 µs</td>
+          </tr>
+          <tr>
+            <td>bulk_insert/1000</td>
+            <td>4.80 ms</td>
+            <td>5.47 ms</td>
+            <td>5.93 ms</td>
+            <td>10.31 ms</td>
+          </tr>
+          <tr>
+            <td>transaction_10_inserts</td>
+            <td>6.15 ms</td>
+            <td>6.52 ms</td>
+            <td>6.27 ms</td>
+            <td>12.58 ms</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
 
-<section aria-labelledby="sec">
-<div class="container">
-<h2 id="sec">Safe without thinking about it</h2>
-<p>You don't need to know what SQL injection is to be protected from it.</p>
-<ul class="plain">
-<li>Values are always bound parameters, never interpolated into SQL.</li>
-<li>Identifiers always go through <code>quote_ident</code>; string column names are checked against the model schema.</li>
-<li><code>#![forbid(unsafe_code)]</code> in every crate.</li>
-<li><code>cargo audit</code> and <code>cargo deny</code> run in CI.</li>
-<li>A known-CVE checklist (Django, Drizzle, TypeORM, PostgreSQL and others) keeps new APIs out of those bug classes.</li>
-</ul>
-<p><a href="docs/security/sql-injection.html">SQL injection</a> · <a href="docs/security/credentials.html">Credentials</a></p>
-</div>
-</section>
-
-<section aria-labelledby="start">
-<div class="container">
-<h2 id="start">From zero to a migrated database</h2>
-<div class="codebox"><div class="code-scroll"><pre><span class="prompt">$ </span>cargo add rango-orm
-<span class="prompt">$ </span>cargo install rango-orm-cli
-<span class="prompt">$ </span>rango init --backend postgres
-<span class="prompt">$ </span>rango makemigrations
-<span class="prompt">$ </span>DATABASE_URL=postgres://user:pass@localhost/mydb rango migrate</pre></div><button class="copy" type="button" aria-label="Copy commands">Copy</button></div>
-<p><a class="btn" href="docs/getting-started/quick-start.html">Read the docs</a></p>
-</div>
-</section>
+  <section class="wrap row">
+    <h2>Safe defaults, each one tested.</h2>
+    <p class="lead">Values are always bound parameters and identifiers are always quoted. Passwords are hashed with Argon2id. A remote PostgreSQL connection requires TLS unless its URL says otherwise. <a href="docs/trust/security-requirements.html">The security requirements</a> list each claim with the test that proves it, and what Rango does not protect.</p>
+  </section>
 </main>
 
-<footer class="site-footer">
-<div class="container footer-inner">
-<span>Licensed under MIT OR Apache-2.0.</span>
-<span><a href="https://github.com/ikarys/rango-orm">GitHub</a> · <a href="docs/">Docs</a> · <a href="https://crates.io/crates/rango-orm">crates.io</a> · <a href="https://github.com/ikarys/rango-orm/releases">Releases</a></span>
-</div>
+<footer class="wrap foot">
+  <p>Rango is written with AI assistance under the <a href="https://github.com/ikarys/vibecoding-convention">Vibecoding Convention</a>, level 2. <a href="docs/trust/how-rango-is-built.html">How it is built and verified</a>.</p>
+  <p>MIT or Apache-2.0. Source on <a href="https://github.com/ikarys/rango-orm">GitHub</a>.</p>
 </footer>
 
 <script>
-document.querySelectorAll(".copy").forEach(function(b){
-  b.addEventListener("click",function(){
-    var pre=b.parentNode.querySelector("pre").cloneNode(true);
-    pre.querySelectorAll(".prompt").forEach(function(p){p.remove()});
-    navigator.clipboard.writeText(pre.textContent).then(function(){
-      b.textContent="Copied";setTimeout(function(){b.textContent="Copy"},1500);
+(function(){
+  var buttons = document.querySelectorAll('button.copy');
+  buttons.forEach(function(btn){
+    btn.addEventListener('click', function(){
+      var p;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        p = navigator.clipboard.writeText(btn.dataset.copy);
+      } else {
+        p = Promise.reject();
+      }
+      p.then(function(){
+        btn.textContent = 'Copied';
+        setTimeout(function(){ btn.textContent = 'Copy'; }, 1500);
+      }).catch(function(){
+        btn.textContent = 'Select and copy';
+        setTimeout(function(){ btn.textContent = 'Copy'; }, 1500);
+      });
     });
   });
-});
+})();
 </script>
 </body>
 </html>
