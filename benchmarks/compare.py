@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Print a Markdown table comparing Criterion results: Rango vs sqlx raw, SeaORM, Diesel.
+"""Print a Markdown table comparing Criterion results: Rango vs sqlx raw, SeaORM, Diesel, Butane.
 
 Usage: python3 benchmarks/compare.py [target/criterion dir]
 """
@@ -7,7 +7,7 @@ import json
 import pathlib
 import sys
 
-LIBS = ["sqlx_raw", "rango", "seaorm", "diesel_async"]
+LIBS = ["sqlx_raw", "rango", "seaorm", "diesel_async", "butane"]
 root = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else "benchmarks/target/criterion")
 
 results = {}  # bench name -> lib -> mean ns
@@ -30,6 +30,6 @@ print("|---" * (len(LIBS) + 2) + "|")
 for bench in sorted(results):
     row = results[bench]
     cells = [fmt(row[lib]) if lib in row else "—" for lib in LIBS]
-    orms = [row[lib] for lib in ("seaorm", "diesel_async") if lib in row]
+    orms = [row[lib] for lib in ("seaorm", "diesel_async", "butane") if lib in row]
     delta = f"{(row['rango'] / min(orms) - 1) * 100:+.0f}%" if "rango" in row and orms else "—"
     print(f"| `{bench}` | " + " | ".join(cells) + f" | {delta} |")

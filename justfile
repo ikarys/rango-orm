@@ -53,9 +53,9 @@ bench-postgres: db
     DATABASE_URL={{database_url}} cargo bench -p rango-bench --bench postgres; \
     docker compose down -v
 
-# Compare Rango vs sqlx raw, SeaORM and Diesel on Postgres (requires Docker), prints a Markdown table
+# Compare Rango vs sqlx raw, SeaORM, Diesel and Butane on Postgres (requires Docker), prints a Markdown table
 bench-compare: db
-    cd benchmarks && for p in sqlx-raw rango seaorm diesel; do \
+    cd benchmarks && for p in sqlx-raw rango seaorm diesel butane; do \
         DATABASE_URL={{database_url}} cargo bench -p bench-$p; done
     python3 benchmarks/compare.py
 
