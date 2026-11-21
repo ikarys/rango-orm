@@ -20,6 +20,7 @@
   --slate-ink:#dbe0ea;
   --slate-dim:#7d879b;
   --err:#ff6b6b;
+  --str:#e7b872;
   --blue:#7aa2ff;
   color-scheme: light;
   --display: "Bricolage Grotesque", system-ui, sans-serif;
@@ -74,8 +75,9 @@ h2{
 }
 pre{
   font:400 14.5px/1.55 var(--mono);
-  background:var(--surface);
-  border:1px solid var(--line);
+  background:var(--slate);
+  color:var(--slate-ink);
+  border:1px solid #232c3b;
   border-radius:8px;
   padding:18px 20px;
   margin:0;
@@ -89,14 +91,10 @@ code{
   border-radius:4px;
 }
 .d{color:var(--muted);}
-.rustc{
-  background:var(--slate);
-  color:var(--slate-ink);
-  border-color:#232c3b;
-}
-.rustc .e{color:var(--err);font-weight:700;}
-.rustc .b{color:var(--blue);}
-.rustc .d{color:var(--slate-dim);}
+pre .e{color:var(--err);font-weight:700;}
+pre .b{color:var(--blue);}
+pre .s{color:var(--str);}
+pre .d{color:var(--slate-dim);}
 .wrap{
   max-width:1180px;
   margin:0 auto;
@@ -338,7 +336,7 @@ table.runs caption{
   <p class="sub">An async ORM for Rust, modelled on Django's. You declare a struct; Rango writes the SQL for PostgreSQL, SQLite and MySQL or MariaDB, generates the migrations and checks the column types in your queries at compile time.</p>
   <div class="install">
     <div class="cmd">
-      <pre><span class="d">$ </span>cargo add rango-orm</pre>
+      <pre><span class="d">$ </span><span class="b">cargo</span> add rango-orm</pre>
       <button class="copy" data-copy="cargo add rango-orm" aria-live="polite">Copy</button>
     </div>
     <a class="guide" href="docs/">Read the guide</a>
@@ -347,8 +345,8 @@ table.runs caption{
   </div>
   <div class="proof">
       <figure>
-        <pre>#[derive(Model)]
-struct Post {
+        <pre><span class="b">#[derive(Model)]</span>
+<span class="b">struct</span> Post {
     id: FieldUuid,
     author_id: ForeignKey&lt;User&gt;,
     title: FieldVarchar&lt;1, 255&gt;,
@@ -357,18 +355,18 @@ struct Post {
         <figcaption>What you write.</figcaption>
       </figure>
       <figure>
-        <pre>CREATE TABLE IF NOT EXISTS "post" (
-  "id" UUID PRIMARY KEY,
-  "author_id" UUID NOT NULL
-    CONSTRAINT "post_author_id_fkey"
-    REFERENCES "user" ("id")
-    ON DELETE CASCADE,
-  "title" VARCHAR(255) NOT NULL,
-  "published" BOOLEAN NOT NULL
+        <pre><span class="b">CREATE</span> <span class="b">TABLE</span> <span class="b">IF</span> <span class="b">NOT</span> <span class="b">EXISTS</span> <span class="s">"post"</span> (
+  <span class="s">"id"</span> UUID <span class="b">PRIMARY</span> <span class="b">KEY</span>,
+  <span class="s">"author_id"</span> UUID <span class="b">NOT</span> <span class="b">NULL</span>
+    <span class="b">CONSTRAINT</span> <span class="s">"post_author_id_fkey"</span>
+    <span class="b">REFERENCES</span> <span class="s">"user"</span> (<span class="s">"id"</span>)
+    <span class="b">ON</span> <span class="b">DELETE</span> <span class="b">CASCADE</span>,
+  <span class="s">"title"</span> VARCHAR(255) <span class="b">NOT</span> <span class="b">NULL</span>,
+  <span class="s">"published"</span> BOOLEAN <span class="b">NOT</span> <span class="b">NULL</span>
 );
-CREATE INDEX IF NOT EXISTS
-  "post_author_id_idx"
-  ON "post" ("author_id");</pre>
+<span class="b">CREATE</span> <span class="b">INDEX</span> <span class="b">IF</span> <span class="b">NOT</span> <span class="b">EXISTS</span>
+  <span class="s">"post_author_id_idx"</span>
+  <span class="b">ON</span> <span class="s">"post"</span> (<span class="s">"author_id"</span>);</pre>
         <figcaption>What <code>rango migrate</code> runs on PostgreSQL. The foreign key gets a real constraint, its own index and <code>ON DELETE CASCADE</code>.</figcaption>
       </figure>
       </div>
@@ -381,15 +379,15 @@ CREATE INDEX IF NOT EXISTS
     <p class="lead">Columns are typed constants on the model. Compare <code>User::AGE</code> with a string and the build stops, with a message that names the column and the value it accepts.</p>
     <div class="pair">
       <figure>
-        <pre>let adults = User::filter(&amp;pool)
-    .gte(User::AGE, 18)
-    .eq(User::ACTIVE, true)
+        <pre><span class="b">let</span> adults = User::filter(&amp;pool)
+    .gte(User::AGE, <span class="s">18</span>)
+    .eq(User::ACTIVE, <span class="b">true</span>)
     .order_by(User::CREATED_AT.desc())
-    .limit(20)
-    .all().await?;
+    .limit(<span class="s">20</span>)
+    .all().<span class="b">await</span>?;
 
-// One wrong value
-User::filter(&amp;pool).eq(User::AGE, "eighteen");</pre>
+<span class="d">// One wrong value</span>
+User::filter(&amp;pool).eq(User::AGE, <span class="e">"eighteen"</span>);</pre>
         <figcaption><code>User::AGE</code> is a <code>FieldInt</code> column.</figcaption>
       </figure>
       <figure>
@@ -413,18 +411,18 @@ of this model that accepts a `&amp;str` value
     <p class="lead"><code>rango makemigrations</code> compares the models with the last schema snapshot and writes the next migration. It detects renames and gives the same file every time. On SQLite, a change that needs a table rebuild runs in one transaction.</p>
     <div class="pair">
       <figure>
-        <pre><span class="d">$ </span>rango init --backend postgres
-<span class="d">$ </span>rango makemigrations --dry-run<span class="d">   # preview the SQL</span>
-<span class="d">$ </span>rango makemigrations
-<span class="d">$ </span>rango migrate
-<span class="d">$ </span>rango makemigrations --check<span class="d">     # exit 1 if pending (CI)</span></pre>
+        <pre><span class="d">$ </span><span class="b">rango</span> init --backend postgres
+<span class="d">$ </span><span class="b">rango</span> makemigrations --dry-run<span class="d">   # preview the SQL</span>
+<span class="d">$ </span><span class="b">rango</span> makemigrations
+<span class="d">$ </span><span class="b">rango</span> migrate
+<span class="d">$ </span><span class="b">rango</span> makemigrations --check<span class="d">     # exit 1 if pending (CI)</span></pre>
         <figcaption>The CLI: <code>cargo install rango-orm-cli</code>.</figcaption>
       </figure>
       <figure>
         <pre><span class="d">-- SQLite: type / NULL / FK change becomes a rebuild</span>
-CREATE TABLE "_rango_new_user" (...);
-INSERT INTO "_rango_new_user" (...) SELECT ... FROM "user";
-DROP TABLE "user";
+<span class="b">CREATE</span> <span class="b">TABLE</span> <span class="s">"_rango_new_user"</span> (...);
+<span class="b">INSERT</span> <span class="b">INTO</span> <span class="s">"_rango_new_user"</span> (...) <span class="b">SELECT</span> ... <span class="b">FROM</span> <span class="s">"user"</span>;
+<span class="b">DROP</span> <span class="b">TABLE</span> <span class="s">"user"</span>;
 <span class="d">-- ... then rename, all in one transaction</span></pre>
         <figcaption>An abridged SQLite rebuild.</figcaption>
       </figure>
