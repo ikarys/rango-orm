@@ -44,7 +44,7 @@ Rango targets Django-style ORM ergonomics on native async SQLx.
 | | **Rango** | Diesel | SeaORM | SQLx | Butane |
 |---|---|---|---|---|---|
 | Kind | Django-style ORM | Query builder + ORM | Async ORM | Raw SQL toolkit (not an ORM) | ORM |
-| Migrations | ✅ auto-generated from models (`rango makemigrations`) | ⚠️ Diesel CLI; SQL by hand | ⚠️ Rust files by hand; schema sync newer | ⚠️ sqlx-cli; SQL by hand | ✅ auto-generated from models |
+| Migrations | ✅ auto-generated from models (`rango makemigrations`) | ⚠️ `diesel migration generate --diff-schema` pre-fills SQL to review | ⚠️ Rust files by hand, or 2.0 schema sync at startup (adds, never drops) | ⚠️ sqlx-cli; SQL by hand | ✅ auto-generated from models |
 | Model definition | `#[derive(Model)]` only | `table!` macro + struct | Entity + ActiveModel, more boilerplate | None | `#[model]` struct |
 | Async | ✅ native (sqlx) | ⚠️ via `diesel-async` | ✅ | ✅ | ✅ since 0.8 |
 | Compile-time column checks | ✅ generated typed columns (`User::EMAIL`): name and value type checked; string names still accepted | ✅ strong | ❌ runtime | ✅ `query!` macros, needs a dev DB | ✅ |
@@ -53,7 +53,7 @@ Rango targets Django-style ORM ergonomics on native async SQLx.
 | Real `ON DELETE CASCADE` | ✅ | ✅ | ✅ | n/a | ✅ |
 | Raw SQL escape hatch | ✅ `raw*` | ✅ | ✅ | ✅ it's the point | ✅ |
 | Backends | PG, MySQL / MariaDB, SQLite | PG, MySQL, SQLite | PG, MySQL, SQLite | PG, MySQL, SQLite | PG, SQLite |
-| Maturity / ecosystem | Early, API not stable | Large, production at crates.io | Medium, active | Large | Small |
+| Maturity / ecosystem | Early, API not stable | Large, production at crates.io | Medium, active | Large | Small, "experimental"; last release 0.8.1 (2025-06) |
 
 ### Where Rango is weaker today
 
