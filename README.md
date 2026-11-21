@@ -121,7 +121,7 @@ In production, pass the URL via `DATABASE_URL`; never put credentials in `rango.
 
 |  | **Rango** | Diesel | SeaORM | sqlx |
 |---|---|---|---|---|
-| Migrations | generated from structs | SQL by hand | Rust files by hand | SQL by hand |
+| Migrations | generated from structs | `--diff-schema` pre-fills SQL to review | Rust files by hand, or 2.0 schema sync at startup (adds only) | SQL by hand |
 | Model definition | `#[derive(Model)]` only | `table!` macro + struct | Entity + ActiveModel | none |
 | Async | yes, native | via diesel-async | yes | yes |
 | Typed queries | typed columns, name and value checked | strong | runtime column checks | `query!` macros need a live DB |

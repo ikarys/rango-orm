@@ -1,0 +1,16 @@
+[package]
+name = "bench-butane"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dev-dependencies]
+butane = { version = "0.8.1", features = ["async", "pg", "uuid", "datetime"] }
+tokio = { version = "1", features = ["full"] }
+uuid = { version = "1", features = ["v4"] }
+chrono = "0.4"
+criterion = { version = "0.8", features = ["async_tokio"] }
+
+[[bench]]
+name = "postgres"
+harness = false
