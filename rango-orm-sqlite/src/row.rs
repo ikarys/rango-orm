@@ -86,27 +86,27 @@ impl RangoRow for SqliteRowRef<'_> {
     }
     #[inline]
     fn get_datetime(&self, col: &str) -> Result<time::OffsetDateTime, RowError> {
-        let s: String = self
+        let s: &str = self
             .0
             .try_get(col)
             .map_err(|e| RowError::new(format!("{}: {}", col, e)))?;
-        crate::datetime::parse_datetime(&s).map_err(|e| RowError::new(format!("{}: {}", col, e)))
+        crate::datetime::parse_datetime(s).map_err(|e| RowError::new(format!("{}: {}", col, e)))
     }
     #[inline]
     fn get_date(&self, col: &str) -> Result<time::Date, RowError> {
-        let s: String = self
+        let s: &str = self
             .0
             .try_get(col)
             .map_err(|e| RowError::new(format!("{}: {}", col, e)))?;
-        crate::datetime::parse_date(&s).map_err(|e| RowError::new(format!("{}: {}", col, e)))
+        crate::datetime::parse_date(s).map_err(|e| RowError::new(format!("{}: {}", col, e)))
     }
     #[inline]
     fn get_time(&self, col: &str) -> Result<time::Time, RowError> {
-        let s: String = self
+        let s: &str = self
             .0
             .try_get(col)
             .map_err(|e| RowError::new(format!("{}: {}", col, e)))?;
-        crate::datetime::parse_time(&s).map_err(|e| RowError::new(format!("{}: {}", col, e)))
+        crate::datetime::parse_time(s).map_err(|e| RowError::new(format!("{}: {}", col, e)))
     }
     #[inline]
     fn get_json(&self, col: &str) -> Result<serde_json::Value, RowError> {

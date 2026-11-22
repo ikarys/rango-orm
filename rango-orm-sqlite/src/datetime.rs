@@ -4,9 +4,16 @@
 use time::format_description::well_known::Rfc3339;
 use time::{Date, OffsetDateTime, Time, UtcOffset};
 
+use std::borrow::Cow;
+use std::fmt::Write;
+
+// Writing into one preallocated String keeps a bind to a single allocation, as chrono's
+// to_rfc3339 did; format! per part cost several percent on bulk inserts.
 pub(crate) fn format_datetime(v: OffsetDateTime) -> String {
     let v = v.to_offset(UtcOffset::UTC);
-    let mut s = format!(
+    let mut s = String::with_capacity(35);
+    let _ = write!(
+        s,
         "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}",
         v.year(),
         v.month() as u8,
@@ -21,33 +28,38 @@ pub(crate) fn format_datetime(v: OffsetDateTime) -> String {
 }
 
 pub(crate) fn format_date(v: Date) -> String {
-    format!("{:04}-{:02}-{:02}", v.year(), v.month() as u8, v.day())
+    let mut s = String::with_capacity(10);
+    let _ = write!(s, "{:04}-{:02}-{:02}", v.year(), v.month() as u8, v.day());
+    s
 }
 
 pub(crate) fn format_time(v: Time) -> String {
-    let mut s = format!("{:02}:{:02}:{:02}", v.hour(), v.minute(), v.second());
+    let mut s = String::with_capacity(18);
+    let _ = write!(s, "{:02}:{:02}:{:02}", v.hour(), v.minute(), v.second());
     push_fraction(&mut s, v.nanosecond());
     s
 }
 
 fn push_fraction(s: &mut String, nanosecond: u32) {
-    if nanosecond == 0 {
-        return;
-    }
-    if nanosecond.is_multiple_of(1_000_000) {
-        s.push_str(&format!(".{:03}", nanosecond / 1_000_000));
+    let _ = if nanosecond == 0 {
+        Ok(())
+    } else if nanosecond.is_multiple_of(1_000_000) {
+        write!(s, ".{:03}", nanosecond / 1_000_000)
     } else if nanosecond.is_multiple_of(1_000) {
-        s.push_str(&format!(".{:06}", nanosecond / 1_000));
+        write!(s, ".{:06}", nanosecond / 1_000)
     } else {
-        s.push_str(&format!(".{:09}", nanosecond));
-    }
+        write!(s, ".{:09}", nanosecond)
+    };
 }
 
 pub(crate) fn parse_datetime(s: &str) -> Result<OffsetDateTime, String> {
-    let mut s = s.to_string();
-    if s.len() > 10 && s.as_bytes()[10] == b' ' {
-        s.replace_range(10..11, "T");
-    }
+    let s = if s.len() > 10 && s.as_bytes()[10] == b' ' {
+        let mut owned = s.to_string();
+        owned.replace_range(10..11, "T");
+        Cow::Owned(owned)
+    } else {
+        Cow::Borrowed(s)
+    };
     OffsetDateTime::parse(&s, &Rfc3339)
         .map(|v| v.to_offset(UtcOffset::UTC))
         .map_err(|e| e.to_string())
