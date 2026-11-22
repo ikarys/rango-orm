@@ -817,11 +817,6 @@ async fn setup_article(pool: &SqlitePool) {
     .await
     .expect("setup_article failed");
 
-    sqlx::query(r#"TRUNCATE "test_article_sqlite""#)
-        .execute(pool)
-        .await
-        .ok(); // SQLite doesn't support TRUNCATE — ignore
-
     sqlx::query(r#"DELETE FROM "test_article_sqlite""#)
         .execute(pool)
         .await

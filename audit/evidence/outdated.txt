@@ -37,11 +37,13 @@ uuid  1.29.0   ---     1.29.3  Normal  ---
 
 rango-orm-cli
 ================
-Name  Project  Compat  Latest  Kind         Platform
-----  -------  ------  ------  ----         --------
-clap  4.6.7    ---     4.6.9   Normal       ---
-syn   3.0.9    ---     3.0.10  Normal       ---
-uuid  1.29.0   ---     1.29.3  Development  ---
+Name     Project           Compat  Latest            Kind         Platform
+----     -------           ------  ------            ----         --------
+clap     4.6.7             ---     4.6.9             Normal       ---
+syn      3.0.9             ---     3.0.10            Normal       ---
+toml     1.2.1+spec-1.1.0  ---     1.2.2+spec-1.1.0  Normal       ---
+uuid     1.29.0            ---     1.29.3            Development  ---
+walkdir  2.5.0             ---     2.5.1             Normal       ---
 
 rango-bench
 ================
