@@ -60,6 +60,37 @@ Mean time per operation, lower is better. "Rango vs best ORM" compares with the 
   into a decode error (or a silent wrong value for compatible wire formats). Not worth it.
 - Done: `bulk_create` on Postgres is one `INSERT … SELECT FROM UNNEST(…)` statement, with no 65 535-parameter chunking.
 
+## Vector search (pgvector, 2026-11-22)
+
+10 000 documents with 384-dimension embeddings, cosine distance, the 10 nearest to a query vector.
+Only sqlx raw (with the `pgvector` crate) and Rango run it: it measures Rango's overhead over hand-written
+SQL, not the ORMs against each other. `hnsw` searches a table with an HNSW index
+(`vector_cosine_ops`), `exact` the same rows without an index.
+
+| Benchmark | sqlx_raw | rango |
+|---|---|---|
+| `vector_nearest_10/hnsw` | 1.29 ms | 1.32 ms |
+| `vector_nearest_10/exact` | 2.70 ms | 2.67 ms |
+| `vector_bulk_insert/100` | 3.13 ms | 3.22 ms |
+
+- Rango is within 3% of sqlx on all three, inside the run-to-run noise.
+- The setup asserts that `EXPLAIN ANALYZE` of Rango's `nearest` query uses the HNSW index, so the
+  bound parameter does not stop Postgres from using it.
+- Of each time, ~0.86 ms is the round-trip (`select_pk`). What is left is ~0.46 ms for HNSW and
+  ~1.8 ms for the exact scan; the exact scan grows with the table, HNSW roughly with its log.
+- `vector_bulk_insert`: Rango sends vectors as a multi-row `VALUES` (sqlx here uses
+  `UNNEST($1::vector[])`); 3% apart, so Rango keeps the simpler path.
+
+## Regression check after pgvector (2026-11-22)
+
+Criterion baselines of commit 54041a9 (before pgvector) against the pgvector commit, on the
+SQLite suite (`rango-bench`, no network, so it shows CPU cost) and the Postgres suite above. Most
+benchmarks show no significant change. The few flagged ones go both ways: `sqlite/bulk_update/100` is
+10% faster, `sqlite/filter_all_1000` 5% slower. A second run of the slower ones gave −0.8%
+(`filter_all_1000`), −0.5% (`select_all_1000`) and −1.6% (`fetch_orm_1000`), and `sqlite/insert_one`
+stayed at +2.4% (4 µs on a write to disk). pgvector adds nothing to the read or bind path of
+non-vector columns, and `SqlValue` keeps its size.
+
 ## Machine
 
 AMD Ryzen 9 9950X3D 16-Core Processor, 32 threads, WSL2, Postgres 16 in Docker on the same host.
