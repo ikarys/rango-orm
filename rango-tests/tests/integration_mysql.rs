@@ -931,7 +931,7 @@ async fn exec(pool: &MySqlPool, sql: &str) {
 #[tokio::test]
 #[cfg_attr(not(feature = "integration-mysql"), ignore)]
 async fn test_mysql_all_types_roundtrip() {
-    use chrono::{NaiveDate, NaiveTime, TimeZone, Utc};
+    use time::macros::{date, datetime, time};
     let pool = pool().await;
     exec(&pool, "DROP TABLE IF EXISTS `test_types`").await;
     exec(
@@ -955,12 +955,9 @@ async fn test_mysql_all_types_roundtrip() {
         precise: FieldDouble(1.0 / 3.0),
         body: FieldText("héllo 🦎".into()),
         blob: FieldBytes(vec![0, 1, 254, 255]),
-        day: FieldDate(NaiveDate::from_ymd_opt(2026, 11, 5).unwrap()),
-        at_time: FieldTime(NaiveTime::from_hms_micro_opt(13, 37, 0, 123_456).unwrap()),
-        at: FieldDateTime(
-            Utc.with_ymd_and_hms(2026, 11, 5, 22, 0, 0).unwrap()
-                + chrono::Duration::microseconds(654_321),
-        ),
+        day: FieldDate(date!(2026 - 11 - 05)),
+        at_time: FieldTime(time!(13:37:00.123456)),
+        at: FieldDateTime(datetime!(2026-11-05 22:00:00.654321 UTC)),
         meta: FieldJson(serde_json::json!({"k": [1, "two", null]})),
         other: None,
         maybe_at: None,
@@ -2088,7 +2085,7 @@ fn bulk_mix(i: i64) -> BulkMix {
         },
         big: FieldBigInt(i * 10_000_000_000),
         price: FieldDecimal::from_decimal(Decimal::new(i * 125, 2)),
-        at: FieldDateTime(chrono::DateTime::from_timestamp(1_700_000_000 + i, 0).unwrap()),
+        at: FieldDateTime(time::OffsetDateTime::from_unix_timestamp(1_700_000_000 + i).unwrap()),
         nick: if i % 5 == 0 {
             None
         } else {
@@ -2139,7 +2136,9 @@ async fn test_mysql_bulk_update_mixed_types_over_several_chunks() {
         };
         r.big = FieldBigInt(-i * 7_000_000_000);
         r.price = FieldDecimal::from_decimal(Decimal::new(i * 3 + 1, 2));
-        r.at = FieldDateTime(chrono::DateTime::from_timestamp(1_600_000_000 + i * 60, 0).unwrap());
+        r.at = FieldDateTime(
+            time::OffsetDateTime::from_unix_timestamp(1_600_000_000 + i * 60).unwrap(),
+        );
         r.nick = if r.nick.is_some() {
             None
         } else {
@@ -2456,7 +2455,12 @@ async fn test_mysql_group_by_date_and_raw_values() {
     ] {
         sqlx::query(ddl).execute(&pool).await.unwrap();
     }
-    let d = |y, m, dd| FieldDate(chrono::NaiveDate::from_ymd_opt(y, m, dd).unwrap());
+    let d = |y, m, dd| {
+        FieldDate(
+            time::Date::from_calendar_date(y, time::Month::try_from(m as u8).unwrap(), dd as u8)
+                .unwrap(),
+        )
+    };
     let rows: Vec<DayRow> = [
         (2026, 1, 5, 1),
         (2026, 1, 20, 2),

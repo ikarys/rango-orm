@@ -18,9 +18,9 @@ macro_rules! bind {
             SqlValue::NullText => $q.bind(Option::<String>::None),
             SqlValue::NullBytes => $q.bind(Option::<Vec<u8>>::None),
             SqlValue::NullUuid => $q.bind(Option::<Vec<u8>>::None),
-            SqlValue::NullDateTime => $q.bind(Option::<chrono::DateTime<chrono::Utc>>::None),
-            SqlValue::NullDate => $q.bind(Option::<chrono::NaiveDate>::None),
-            SqlValue::NullTime => $q.bind(Option::<chrono::NaiveTime>::None),
+            SqlValue::NullDateTime => $q.bind(Option::<time::OffsetDateTime>::None),
+            SqlValue::NullDate => $q.bind(Option::<time::Date>::None),
+            SqlValue::NullTime => $q.bind(Option::<time::Time>::None),
             SqlValue::NullJson | SqlValue::NullVector => $q.bind(Option::<serde_json::Value>::None),
             // Values
             SqlValue::Bool(v) => $q.bind(v),

@@ -84,7 +84,7 @@ let article = Article {
     title: FieldVarchar::new("Hello")?,
     body: "text".into(),
     published: true.into(),
-    created_at: chrono::Utc::now().into(),
+    created_at: FieldDateTime::now(),
 };
 ```
 

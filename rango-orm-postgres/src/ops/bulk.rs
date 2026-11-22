@@ -200,9 +200,9 @@ unnest_cols! {
     Text, NullText, String, "text[]";
     Bytes, NullBytes, Vec<u8>, "bytea[]";
     Uuid, NullUuid, uuid::Uuid, "uuid[]";
-    DateTime, NullDateTime, chrono::DateTime<chrono::Utc>, "timestamptz[]";
-    Date, NullDate, chrono::NaiveDate, "date[]";
-    Time, NullTime, chrono::NaiveTime, "time[]";
+    DateTime, NullDateTime, time::OffsetDateTime, "timestamptz[]";
+    Date, NullDate, time::Date, "date[]";
+    Time, NullTime, time::Time, "time[]";
 }
 
 fn unnest_sql(table: &str, cols: &[(&str, &str)]) -> String {

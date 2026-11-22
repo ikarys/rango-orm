@@ -10,7 +10,7 @@ let user = User {
     email: FieldEmail::new("alice@example.com")?,
     name: FieldVarchar::new("Alice")?,
     active: FieldBool(true),
-    created_at: FieldDateTime(chrono::Utc::now()),
+    created_at: FieldDateTime::now(),
 };
 
 let inserted = insert(&pool, user).await?;

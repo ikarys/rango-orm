@@ -45,4 +45,4 @@ sqlx = { version = "0.9", features = ["runtime-tokio", "postgres", "mysql", "sql
 # Contract and real-project tests compile the same models the CLI scans.
 rango-orm = { path = "../rango-orm", features = ["postgres", "sqlite", "mysql"] }
 uuid = { version = "1", features = ["v4"] }
-chrono = "0.4"
+time = { version = "0.3.55", features = ["macros"] }

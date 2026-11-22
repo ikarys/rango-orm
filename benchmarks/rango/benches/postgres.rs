@@ -26,7 +26,9 @@ struct BenchUser {
 async fn setup() -> PgPool {
     let url = std::env::var("DATABASE_URL")
         .unwrap_or_else(|_| "postgres://postgres:postgres@localhost:5433/rango_test".to_string());
-    let pool = PgPool::connect(&url).await.expect("Failed to connect — set DATABASE_URL");
+    let pool = PgPool::connect(&url)
+        .await
+        .expect("Failed to connect — set DATABASE_URL");
     sqlx::query(
         r#"CREATE TABLE IF NOT EXISTS "rango_bench_user" (
             "id"         UUID PRIMARY KEY,
@@ -37,9 +39,13 @@ async fn setup() -> PgPool {
             "created_at" TIMESTAMPTZ NOT NULL
         )"#,
     )
-    .execute(&pool).await.unwrap();
+    .execute(&pool)
+    .await
+    .unwrap();
     sqlx::query(r#"TRUNCATE "rango_bench_user""#)
-        .execute(&pool).await.unwrap();
+        .execute(&pool)
+        .await
+        .unwrap();
     pool
 }
 
@@ -50,7 +56,7 @@ fn make_user(i: usize) -> BenchUser {
         name: FieldVarchar::new("Bench User").unwrap(),
         active: FieldBool(true),
         score: Some(FieldInt(i as i32)),
-        created_at: FieldDateTime(chrono::Utc::now()),
+        created_at: FieldDateTime::now(),
     }
 }
 
@@ -102,9 +108,7 @@ fn bench_select(c: &mut Criterion) {
     });
 
     c.bench_function("rango/select_pk", |b| {
-        b.iter(|| {
-            rt.block_on(async { get::<_, BenchUser>(&pool, &first_id).await.unwrap() })
-        })
+        b.iter(|| rt.block_on(async { get::<_, BenchUser>(&pool, &first_id).await.unwrap() }))
     });
 
     c.bench_function("rango/select_filter_100", |b| {
@@ -121,17 +125,11 @@ fn bench_select(c: &mut Criterion) {
     });
 
     c.bench_function("rango/select_all_1000", |b| {
-        b.iter(|| {
-            rt.block_on(async {
-                BenchUser::filter(&pool).unlimited().all().await.unwrap()
-            })
-        })
+        b.iter(|| rt.block_on(async { BenchUser::filter(&pool).unlimited().all().await.unwrap() }))
     });
 
     c.bench_function("rango/count", |b| {
-        b.iter(|| {
-            rt.block_on(async { BenchUser::filter(&pool).count().await.unwrap() })
-        })
+        b.iter(|| rt.block_on(async { BenchUser::filter(&pool).count().await.unwrap() }))
     });
 }
 
@@ -208,11 +206,7 @@ fn bench_deserialize_only(c: &mut Criterion) {
 
     // Full ORM deserialization
     c.bench_function("rango/fetch_orm_1000", |b| {
-        b.iter(|| {
-            rt.block_on(async {
-                BenchUser::filter(&pool).unlimited().all().await.unwrap()
-            })
-        })
+        b.iter(|| rt.block_on(async { BenchUser::filter(&pool).unlimited().all().await.unwrap() }))
     });
 }
 // ── pgvector ──────────────────────────────────────────────────────────────────
