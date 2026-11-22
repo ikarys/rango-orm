@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Perf: 1000-row selects on Postgres decode as fast as hand-written sqlx (1.28 ms vs 1.30 ms in the benchmarks, from 1.46 ms): the derives implement the new `FromRow::from_row_in<R: RangoRow>` (static dispatch, inlinable getters), columns are read by position with a name check (`RangoRow::get_*_at`, `is_null_at`, `PrimaryKey::from_row_at`, all with by-name defaults), and rows are decoded as they stream from the connection. Additive: hand-written `FromRow`, `RangoRow` and `PrimaryKey` impls keep compiling.
+
 ## 0.3.1 (2026-11-20)
 
 - Security: sqlx 0.9.1 with `libsqlite3-sys` 0.40.0 (bundled SQLite 3.54.1) for RUSTSEC-2026-0459, where SQLite before 3.54 could return uninitialized memory when opening a crafted `-wal` file. Users of 0.3.0 on SQLite can also run `cargo update -p sqlx -p libsqlite3-sys`.

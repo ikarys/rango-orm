@@ -86,7 +86,9 @@ where
     let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*sql)), vec![pk.clone()]);
     let row = q.fetch_optional(executor).await.map_err(db_err)?;
     match row {
-        Some(r) => Ok(Some(M::from_row(&MySqlRangoRow(r)).map_err(Error::from)?)),
+        Some(r) => Ok(Some(
+            M::from_row_in(&MySqlRangoRow(r)).map_err(Error::from)?,
+        )),
         None => Ok(None),
     }
 }
@@ -140,7 +142,7 @@ where
     let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*select_sql)), select_vals);
     let row = q.fetch_one(&mut *conn).await.map_err(db_err)?;
     Ok((
-        M::from_row(&MySqlRangoRow(row)).map_err(Error::from)?,
+        M::from_row_in(&MySqlRangoRow(row)).map_err(Error::from)?,
         false,
     ))
 }
@@ -167,7 +169,7 @@ where
     let row = q.fetch_optional(&mut *conn).await.map_err(db_err)?;
     if let Some(row) = row {
         // Update the row that exists (its PK), not the PK carried by `values`.
-        let existing = M::from_row(&MySqlRangoRow(row)).map_err(Error::from)?;
+        let existing = M::from_row_in(&MySqlRangoRow(row)).map_err(Error::from)?;
         before_update(&mut values).await?;
         let (update_sql, update_vals) = build_update_sql::<M>(&values, existing.pk_value());
         let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*update_sql)), update_vals);
@@ -176,7 +178,7 @@ where
         let (sel_sql, sel_vals) = build_lookup_sql::<M>(&[(M::pk_column(), existing.pk_value())]);
         let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*sel_sql)), sel_vals);
         let row = q.fetch_one(&mut *conn).await.map_err(db_err)?;
-        let saved = M::from_row(&MySqlRangoRow(row)).map_err(Error::from)?;
+        let saved = M::from_row_in(&MySqlRangoRow(row)).map_err(Error::from)?;
         after_update(&saved).await?;
         Ok(saved)
     } else {

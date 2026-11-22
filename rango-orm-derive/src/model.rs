@@ -144,6 +144,8 @@ pub fn expand(input: DeriveInput) -> Result<TokenStream> {
 
     // Generate FromRow impl (ManyToMany fields are always empty — loaded separately)
     let mut from_row_fields = Vec::new();
+    // Position of the column in `SELECT *`: M2M fields have no column.
+    let mut pos = 0;
     for f in fields.iter() {
         if is_many_to_many(&f.ty) {
             let fname = f.ident.as_ref().unwrap();
@@ -155,8 +157,9 @@ pub fn expand(input: DeriveInput) -> Result<TokenStream> {
         let (nullable, inner_ty) = extract_option(&f.ty);
         let type_str = type_name(inner_ty);
 
-        let getter = field_type_to_getter(&type_str, &col_name, nullable, &core);
+        let getter = field_type_to_getter(&type_str, &col_name, pos, nullable, &core);
         from_row_fields.push(quote! { #fname: #getter });
+        pos += 1;
     }
 
     // Typed column constants: `User::AGE` → `Column<User, FieldInt>`; filters check
@@ -235,6 +238,9 @@ pub fn expand(input: DeriveInput) -> Result<TokenStream> {
 
         impl #core2::FromRow for #struct_name {
             fn from_row(row: &dyn #core2::RangoRow) -> Result<Self, #core2::RowError> {
+                Self::from_row_in(row)
+            }
+            fn from_row_in<R: #core2::RangoRow + ?Sized>(row: &R) -> Result<Self, #core2::RowError> {
                 Ok(Self {
                     #(#from_row_fields),*
                 })
@@ -472,99 +478,62 @@ fn generate_column_def(field: &Field, core: &TokenStream) -> Result<TokenStream>
 pub(crate) fn field_type_to_getter(
     type_str: &str,
     col: &impl quote::ToTokens,
+    pos: usize,
     nullable: bool,
     core: &TokenStream,
 ) -> TokenStream {
+    let pos = proc_macro2::Literal::usize_unsuffixed(pos);
     let getter = match type_str {
-        "FieldBool" => quote! { row.get_bool(#col).map(#core::FieldBool)? },
-        "FieldSmallInt" => quote! { row.get_i16(#col).map(#core::FieldSmallInt)? },
-        "FieldInt" => quote! { row.get_i32(#col).map(#core::FieldInt)? },
-        "FieldBigInt" => quote! { row.get_i64(#col).map(#core::FieldBigInt)? },
-        "FieldAutoInt" => quote! { #core::FieldAutoInt(Some(row.get_i32(#col)?)) },
-        "FieldAutoBigInt" => quote! { #core::FieldAutoBigInt(Some(row.get_i64(#col)?)) },
-        "FieldFloat" => quote! { row.get_f32(#col).map(#core::FieldFloat)? },
-        "FieldDouble" => quote! { row.get_f64(#col).map(#core::FieldDouble)? },
-        "FieldText" => quote! { row.get_string(#col).map(#core::FieldText)? },
-        "FieldEmail" => quote! { row.get_string(#col).map(#core::FieldEmail::from_db)? },
-        "FieldUrl" => quote! { row.get_string(#col).map(#core::FieldUrl::from_db)? },
-        "FieldBytes" => quote! { row.get_bytes(#col).map(#core::FieldBytes)? },
-        "FieldUuid" => quote! { row.get_uuid(#col).map(#core::FieldUuid)? },
-        "FieldDateTime" => quote! { row.get_datetime(#col).map(#core::FieldDateTime)? },
-        "FieldDate" => quote! { row.get_date(#col).map(#core::FieldDate)? },
-        "FieldTime" => quote! { row.get_time(#col).map(#core::FieldTime)? },
-        "FieldJson" => quote! { row.get_json(#col).map(#core::FieldJson)? },
+        "FieldBool" => quote! { row.get_bool_at(#pos, #col).map(#core::FieldBool)? },
+        "FieldSmallInt" => quote! { row.get_i16_at(#pos, #col).map(#core::FieldSmallInt)? },
+        "FieldInt" => quote! { row.get_i32_at(#pos, #col).map(#core::FieldInt)? },
+        "FieldBigInt" => quote! { row.get_i64_at(#pos, #col).map(#core::FieldBigInt)? },
+        "FieldAutoInt" => quote! { #core::FieldAutoInt(Some(row.get_i32_at(#pos, #col)?)) },
+        "FieldAutoBigInt" => quote! { #core::FieldAutoBigInt(Some(row.get_i64_at(#pos, #col)?)) },
+        "FieldFloat" => quote! { row.get_f32_at(#pos, #col).map(#core::FieldFloat)? },
+        "FieldDouble" => quote! { row.get_f64_at(#pos, #col).map(#core::FieldDouble)? },
+        "FieldText" => quote! { row.get_string_at(#pos, #col).map(#core::FieldText)? },
+        "FieldEmail" => quote! { row.get_string_at(#pos, #col).map(#core::FieldEmail::from_db)? },
+        "FieldUrl" => quote! { row.get_string_at(#pos, #col).map(#core::FieldUrl::from_db)? },
+        "FieldBytes" => quote! { row.get_bytes_at(#pos, #col).map(#core::FieldBytes)? },
+        "FieldUuid" => quote! { row.get_uuid_at(#pos, #col).map(#core::FieldUuid)? },
+        "FieldDateTime" => quote! { row.get_datetime_at(#pos, #col).map(#core::FieldDateTime)? },
+        "FieldDate" => quote! { row.get_date_at(#pos, #col).map(#core::FieldDate)? },
+        "FieldTime" => quote! { row.get_time_at(#pos, #col).map(#core::FieldTime)? },
+        "FieldJson" => quote! { row.get_json_at(#pos, #col).map(#core::FieldJson)? },
         s if s.starts_with("ForeignKey<") => {
             let target = fk_target(s);
-            quote! { <<#target as #core::Model>::Pk as #core::PrimaryKey>::from_row(row, #col).map(#core::ForeignKey::<#target>::new)? }
+            quote! { <<#target as #core::Model>::Pk as #core::PrimaryKey>::from_row_at(row, #pos, #col).map(#core::ForeignKey::<#target>::new)? }
         }
         s if s.starts_with("FieldVarchar<") => {
             let (min, max) = parse_two_generics(s, "FieldVarchar");
             let min_lit = proc_macro2::Literal::usize_unsuffixed(min);
             let max_lit = proc_macro2::Literal::usize_unsuffixed(max);
-            quote! { row.get_string(#col).map(#core::FieldVarchar::<#min_lit, #max_lit>::from_db)? }
+            quote! { row.get_string_at(#pos, #col).map(#core::FieldVarchar::<#min_lit, #max_lit>::from_db)? }
         }
         s if s.starts_with("FieldPassword<") => {
             let (min, max) = parse_two_generics(s, "FieldPassword");
             let min_lit = proc_macro2::Literal::usize_unsuffixed(min);
             let max_lit = proc_macro2::Literal::usize_unsuffixed(max);
-            quote! { row.get_string(#col).map(|s| #core::FieldPassword::<#min_lit, #max_lit>::from_hash(s))? }
+            quote! { row.get_string_at(#pos, #col).map(|s| #core::FieldPassword::<#min_lit, #max_lit>::from_hash(s))? }
         }
         s if s.starts_with("FieldDecimal<") => {
             let (p, sc) = parse_two_generics(s, "FieldDecimal");
             let p_lit = proc_macro2::Literal::u8_unsuffixed(p as u8);
             let sc_lit = proc_macro2::Literal::u8_unsuffixed(sc as u8);
-            quote! { row.get_decimal(#col).map(#core::FieldDecimal::<#p_lit, #sc_lit>::from_decimal)? }
+            quote! { row.get_decimal_at(#pos, #col).map(#core::FieldDecimal::<#p_lit, #sc_lit>::from_decimal)? }
         }
         s if s.starts_with("FieldRange<") => {
             let (min, max) = parse_two_generics_i64(s, "FieldRange");
             let min_lit = proc_macro2::Literal::i64_unsuffixed(min);
             let max_lit = proc_macro2::Literal::i64_unsuffixed(max);
-            quote! { row.get_i64(#col).map(#core::FieldRange::<#min_lit, #max_lit>::from_db)? }
+            quote! { row.get_i64_at(#pos, #col).map(#core::FieldRange::<#min_lit, #max_lit>::from_db)? }
         }
         _ => quote! { compile_error!("Unknown field type in FromRow") },
     };
 
     if nullable {
-        match type_str {
-            "FieldBool" => {
-                quote! { if row.is_null(#col) { None } else { Some(row.get_bool(#col).map(#core::FieldBool)?) } }
-            }
-            "FieldSmallInt" => {
-                quote! { if row.is_null(#col) { None } else { Some(row.get_i16(#col).map(#core::FieldSmallInt)?) } }
-            }
-            "FieldInt" => {
-                quote! { if row.is_null(#col) { None } else { Some(row.get_i32(#col).map(#core::FieldInt)?) } }
-            }
-            "FieldBigInt" => {
-                quote! { if row.is_null(#col) { None } else { Some(row.get_i64(#col).map(#core::FieldBigInt)?) } }
-            }
-            "FieldText" => {
-                quote! { if row.is_null(#col) { None } else { Some(row.get_string(#col).map(#core::FieldText)?) } }
-            }
-            "FieldEmail" => {
-                quote! { if row.is_null(#col) { None } else { Some(row.get_string(#col).map(#core::FieldEmail::from_db)?) } }
-            }
-            "FieldUuid" => {
-                quote! { if row.is_null(#col) { None } else { Some(row.get_uuid(#col).map(#core::FieldUuid)?) } }
-            }
-            "FieldDateTime" => {
-                quote! { if row.is_null(#col) { None } else { Some(row.get_datetime(#col).map(#core::FieldDateTime)?) } }
-            }
-            "FieldJson" => {
-                quote! { if row.is_null(#col) { None } else { Some(row.get_json(#col).map(#core::FieldJson)?) } }
-            }
-            s if s.starts_with("ForeignKey<") => {
-                let target = fk_target(s);
-                quote! { if row.is_null(#col) { None } else { Some(<<#target as #core::Model>::Pk as #core::PrimaryKey>::from_row(row, #col).map(#core::ForeignKey::<#target>::new)?) } }
-            }
-            s if s.starts_with("FieldVarchar<") => {
-                let (min, max) = parse_two_generics(s, "FieldVarchar");
-                let min_lit = proc_macro2::Literal::usize_unsuffixed(min);
-                let max_lit = proc_macro2::Literal::usize_unsuffixed(max);
-                quote! { if row.is_null(#col) { None } else { Some(row.get_string(#col).map(#core::FieldVarchar::<#min_lit, #max_lit>::from_db)?) } }
-            }
-            _ => quote! { if row.is_null(#col) { None } else { Some(#getter) } },
-        }
+        quote! { if row.is_null_at(#pos, #col) { None } else { Some(#getter) } }
     } else {
         getter
     }

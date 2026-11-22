@@ -919,6 +919,39 @@ async fn test_raw_execute() {
     teardown(&pool).await;
 }
 
+/// The derive reads each column at its struct position when the name there matches, and by
+/// name otherwise: a `SELECT` that reorders or prepends columns must still decode correctly.
+#[tokio::test]
+#[cfg_attr(not(feature = "integration"), ignore)]
+async fn test_decode_falls_back_to_name_when_columns_are_reordered() {
+    let pool = pool().await;
+    setup(&pool).await;
+
+    let mut u = user("reorder@test.com");
+    u.score = Some(FieldInt(42));
+    insert(&pool, u.clone()).await.unwrap();
+
+    let reordered: Vec<TestUser> = raw(
+        &pool,
+        "SELECT score, active, name, email, id FROM rango_test_user WHERE email = $1",
+        vec![SqlValue::Text("reorder@test.com".to_string())],
+    )
+    .await
+    .expect("raw failed");
+    assert_eq!(reordered, vec![u.clone()]);
+
+    let shifted: Vec<TestUser> = raw(
+        &pool,
+        "SELECT 1 AS n, u.* FROM rango_test_user u WHERE email = $1",
+        vec![SqlValue::Text("reorder@test.com".to_string())],
+    )
+    .await
+    .expect("raw failed");
+    assert_eq!(shifted, vec![u]);
+
+    teardown(&pool).await;
+}
+
 /// No `rango::call`: a procedure or function is plain SQL through `raw*`, values bound.
 #[tokio::test]
 #[cfg_attr(not(feature = "integration"), ignore)]

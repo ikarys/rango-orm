@@ -4,7 +4,7 @@ use rango_orm_core::{Dialect, Result};
 use rango_orm_core::{FromRow, Model, ModelValues};
 
 use crate::ops::bind_sql_values;
-use crate::row::decode_all;
+use crate::row::fetch_decoded;
 
 /// Pairs per `INSERT` of `add_many` / `set` (two binds each, far under every bind limit).
 const PAIRS_PER_STATEMENT: usize = 1000;
@@ -87,9 +87,7 @@ where
             sqlx::query(sqlx::AssertSqlSafe(&*sql)),
             vec![from.pk_value()],
         );
-        let rows = q.fetch_all(executor).await.map_err(db_err)?;
-
-        decode_all::<To>(rows)
+        fetch_decoded::<To, _>(q, executor).await
     }
 
     /// Get all `From` models related to a given `to` instance (reverse).
@@ -101,9 +99,7 @@ where
     {
         let sql = Self::sql().reverse(From::pk_column());
         let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*sql)), vec![to.pk_value()]);
-        let rows = q.fetch_all(executor).await.map_err(db_err)?;
-
-        decode_all::<From>(rows)
+        fetch_decoded::<From, _>(q, executor).await
     }
 
     /// Set exact relations — replaces all existing with the given list, atomically.

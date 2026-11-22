@@ -88,6 +88,19 @@ where
     q.fetch_all(executor).await.map_err(db_err)
 }
 
+async fn bind_and_fetch_decoded<'e, E, M>(
+    executor: E,
+    sql: &str,
+    binds: Vec<SqlValue>,
+) -> Result<Vec<M>>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Postgres>,
+    M: FromRow,
+{
+    let q = sqlx::query(sqlx::AssertSqlSafe(sql));
+    crate::row::fetch_decoded(bind_sql_values(q, binds), executor).await
+}
+
 /// Run `sql` with the keys bound as one Postgres array (`$1`).
 /// Keys come from `sql_value_key`, so they are UUIDs, integers or text, all of one type.
 async fn fetch_by_keys<'e, E>(executor: E, sql: &str, keys: Vec<SqlValue>) -> Result<Vec<PgRow>>
