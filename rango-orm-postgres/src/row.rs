@@ -85,6 +85,23 @@ macro_rules! impl_rangorow {
             }
 
             #[inline]
+            fn get_vector(&self, col: &str) -> Result<Vec<f32>, RowError> {
+                self.0
+                    .try_get::<pgvector::Vector, _>(col)
+                    .map(Vec::<f32>::from)
+                    .map_err(|e| col_err(col, e))
+            }
+            #[inline]
+            fn get_vector_at(&self, pos: usize, col: &str) -> Result<Vec<f32>, RowError> {
+                match at(&self.0, pos, col) {
+                    Some(i) => self.0.try_get::<pgvector::Vector, _>(i),
+                    None => self.0.try_get::<pgvector::Vector, _>(col),
+                }
+                .map(Vec::<f32>::from)
+                .map_err(|e| col_err(col, e))
+            }
+
+            #[inline]
             fn is_null(&self, col: &str) -> bool {
                 self.0
                     .try_get_raw(col)
@@ -166,6 +183,9 @@ impl RangoRow for PgPrefixedRow<'_> {
     }
     fn get_json(&self, col: &str) -> Result<serde_json::Value, RowError> {
         PgRangoRow2(self.row).get_json(&self.col(col))
+    }
+    fn get_vector(&self, col: &str) -> Result<Vec<f32>, RowError> {
+        PgRangoRow2(self.row).get_vector(&self.col(col))
     }
     fn is_null(&self, col: &str) -> bool {
         PgRangoRow2(self.row).is_null(&self.col(col))

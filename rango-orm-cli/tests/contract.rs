@@ -32,6 +32,7 @@ fn col_type(t: &ColumnType) -> String {
         ColumnType::Json => "json".into(),
         ColumnType::Jsonb => "jsonb".into(),
         ColumnType::Varchar(n) => format!("varchar({n})"),
+        ColumnType::Vector(n) => format!("vector({n})"),
         ColumnType::Decimal { precision, scale } => format!("decimal({precision},{scale})"),
     }
 }

@@ -228,6 +228,8 @@ pub struct Filter<M> {
     dialect: Dialect,
     conditions: Vec<ConditionGroup>,
     order_by: Vec<String>,
+    /// Binds of `raw_order_by` terms, in the order their `$__` appear in `order_by`.
+    order_binds: Vec<SqlValue>,
     limit: Option<i64>,
     offset: Option<i64>,
     explicit_limit: bool,
@@ -257,6 +259,7 @@ impl<M: Model + ModelValues> Filter<M> {
             dialect,
             conditions: Vec::new(),
             order_by: Vec::new(),
+            order_binds: Vec::new(),
             limit: None,
             offset: None,
             explicit_limit: false,
@@ -283,6 +286,14 @@ impl<M: Model + ModelValues> Filter<M> {
         self
     }
 
+    /// Raw ORDER BY term from backend extensions, ordered before every other term.
+    /// On Postgres `$__` becomes `$N`, numbered after the WHERE binds.
+    pub fn raw_order_by(mut self, sql: String, binds: Vec<SqlValue>) -> Self {
+        self.order_by.insert(0, sql);
+        self.order_binds.splice(0..0, binds);
+        self
+    }
+
     /// Remember the first unknown column of model `T`; reported when the query runs.
     pub fn check_col<T: Model>(&mut self, name: &str) {
         if self.invalid.is_none() {
@@ -291,7 +302,7 @@ impl<M: Model + ModelValues> Filter<M> {
     }
 
     /// Remember the first value whose type does not fit column `name` of `M`.
-    fn check_value(&mut self, name: &str, value: &SqlValue) {
+    pub fn check_value(&mut self, name: &str, value: &SqlValue) {
         if self.invalid.is_none() {
             self.invalid = crate::value_mismatch::<M>(name, value);
         }
@@ -899,13 +910,21 @@ impl<M: Model + ModelValues> Filter<M> {
 
     /// `SELECT <cols> FROM t WHERE .. ORDER BY .. LIMIT .. OFFSET ..`, plus the ORDER BY clause alone.
     fn plain_select(&self, cols: &str) -> (String, String, Vec<SqlValue>) {
-        let (where_clause, binds) = self.build_where();
+        let (where_clause, mut binds) = self.build_where();
         let mut sql = format!("SELECT {cols} FROM {}", self.q(M::table_name()));
         if !where_clause.is_empty() {
             sql.push(' ');
             sql.push_str(&where_clause);
         }
-        let order_by = self.order_by_sql();
+        let mut order_by = self.order_by_sql();
+        let mut idx = binds.len() + 1;
+        for bind in &self.order_binds {
+            let p = self.dialect.placeholder(&mut idx);
+            if self.dialect == Dialect::Postgres {
+                order_by = order_by.replacen("$__", &p, 1);
+            }
+            binds.push(bind.clone());
+        }
         sql.push_str(&order_by);
         sql.push_str(&self.limit_offset_sql());
         (sql, order_by, binds)
@@ -994,6 +1013,11 @@ impl<M: Model + ModelValues> Filter<M> {
                 ));
             }
             sql.push_str(&format!(" HAVING {}", parts.join(" AND ")));
+        }
+        if !self.order_binds.is_empty() {
+            return Err(Error::Invalid(
+                "aggregate() does not accept a distance ordering (nearest)".into(),
+            ));
         }
         // Explicit `order_by` only: the model's default ordering would break GROUP BY.
         if !self.order_by.is_empty() {

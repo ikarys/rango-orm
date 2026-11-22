@@ -54,6 +54,18 @@ pub fn column_type(type_str: &str) -> Result<ColumnType, TypeMapError> {
             }
         }
         s if s.starts_with("FieldRange<") => ColumnType::BigInt,
+        s if s.starts_with("FieldVector<") => {
+            let n: u32 = s
+                .strip_prefix("FieldVector<")
+                .and_then(|r| r.strip_suffix('>'))
+                .and_then(|n| n.trim().parse().ok())
+                .ok_or(TypeMapError::Invalid("FieldVector"))?;
+            // pgvector's own bounds for the `vector` type.
+            if !(1..=16000).contains(&n) {
+                return Err(TypeMapError::Invalid("FieldVector"));
+            }
+            ColumnType::Vector(n)
+        }
         _ => return Err(TypeMapError::Unknown),
     })
 }
@@ -109,6 +121,10 @@ mod tests {
             })
         );
         assert_eq!(column_type("FieldRange<1,5>"), Ok(ColumnType::BigInt));
+        assert_eq!(column_type("FieldVector<384>"), Ok(ColumnType::Vector(384)));
+        for bad in ["FieldVector<0>", "FieldVector<16001>", "FieldVector<N>"] {
+            assert_eq!(column_type(bad), Err(TypeMapError::Invalid("FieldVector")));
+        }
         assert_eq!(column_type("String"), Err(TypeMapError::Unknown));
         assert_eq!(
             column_type("FieldVarchar<1>"),

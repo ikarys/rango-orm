@@ -3,7 +3,7 @@ use crate::commands::{export, import};
 use crate::migration::{
     diff::{SchemaDiff, diff},
     snapshot::Snapshot,
-    sql::generate_sql_from_diff,
+    sql::{check_vector_backend, generate_sql_from_diff},
 };
 use anyhow::{Context, Result, bail};
 use flate2::{Compression, read::GzDecoder, write::GzEncoder};
@@ -173,6 +173,7 @@ pub async fn restore(database_url: &str, input: &str, migrations_dir: &str) -> R
                 .into_iter()
                 .map(SchemaDiff::CreateTable)
                 .collect();
+            check_vector_backend(&diffs, backend)?;
             Some(generate_sql_from_diff(&diffs, backend))
         }
         _ => None,

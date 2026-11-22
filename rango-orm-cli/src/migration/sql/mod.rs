@@ -4,6 +4,45 @@ use rango_orm_core::{
     constraints::constraint_name,
 };
 
+/// `(table, column)` of every column a diff creates or retypes as `vector(N)`.
+fn vector_columns(diffs: &[SchemaDiff]) -> impl Iterator<Item = (&str, &str)> {
+    diffs.iter().flat_map(|d| -> Vec<(&str, &str)> {
+        let is_vec = |c: &ColumnDef| matches!(c.col_type, ColumnType::Vector(_));
+        match d {
+            SchemaDiff::CreateTable(s) => s
+                .columns
+                .iter()
+                .filter(|c| is_vec(c))
+                .map(|c| (s.table_name.as_str(), c.name.as_str()))
+                .collect(),
+            SchemaDiff::AddColumn { table, column }
+            | SchemaDiff::AlterColumnType { table, column }
+                if is_vec(column) =>
+            {
+                vec![(table.as_str(), column.name.as_str())]
+            }
+            _ => Vec::new(),
+        }
+    })
+}
+
+/// pgvector exists only on PostgreSQL. SQLite would accept `vector(N)` as a column type
+/// name and store anything in it, so the refusal has to happen here.
+pub(crate) fn check_vector_backend(
+    diffs: &[SchemaDiff],
+    backend: BackendKind,
+) -> anyhow::Result<()> {
+    if backend == BackendKind::Postgres {
+        return Ok(());
+    }
+    if let Some((table, column)) = vector_columns(diffs).next() {
+        anyhow::bail!(
+            "\"{table}\".\"{column}\" is a vector column: FieldVector needs the PostgreSQL backend (pgvector)"
+        );
+    }
+    Ok(())
+}
+
 pub(crate) fn generate_sql_from_diff(diffs: &[SchemaDiff], backend: BackendKind) -> String {
     let mut creates: Vec<TableSchema> = Vec::new();
     let mut others: Vec<SchemaDiff> = Vec::new();
@@ -72,6 +111,10 @@ pub(crate) fn generate_sql_from_diff(diffs: &[SchemaDiff], backend: BackendKind)
 
     for d in &drops {
         sql.push_str(&diff_to_sql(d, backend));
+    }
+
+    if backend == BackendKind::Postgres && vector_columns(diffs).next().is_some() {
+        sql.insert_str(0, "CREATE EXTENSION IF NOT EXISTS vector;\n\n");
     }
 
     if backend == BackendKind::Mysql && !sql.is_empty() {

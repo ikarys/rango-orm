@@ -1,5 +1,5 @@
 use super::table::column_definition;
-use super::{generate_sql_from_diff, object_name};
+use super::{check_vector_backend, generate_sql_from_diff, object_name};
 use crate::migration::diff::SchemaDiff;
 use crate::migration::scanner::{M2MRelation, generate_pivot_table};
 use crate::migration::snapshot::SnapshotConstraint;
@@ -912,4 +912,48 @@ fn mysql_skipped_partial_uniques_are_collected() {
     assert!(w[0].contains("\"active_only\" on \"t\""), "{w:?}");
     assert!(w[1].contains("\"u_active_unique\" on \"u\""), "{w:?}");
     assert!(skipped_partial_uniques(&diffs, BackendKind::Postgres).is_empty());
+}
+
+// ── pgvector ───────────────────────────────────────────────────────────────
+fn vector_table() -> TableSchema {
+    let mut t = simple_table("docs");
+    t.columns.push(ColumnDef {
+        name: "embedding".into(),
+        col_type: ColumnType::Vector(3),
+        ..text_col("embedding")
+    });
+    t
+}
+
+#[test]
+fn vector_column_creates_the_extension_on_postgres() {
+    let sql = generate_sql_from_diff(
+        &[SchemaDiff::CreateTable(vector_table())],
+        BackendKind::Postgres,
+    );
+    assert!(
+        sql.starts_with("CREATE EXTENSION IF NOT EXISTS vector;"),
+        "got: {sql}"
+    );
+    assert!(
+        sql.contains("\"embedding\" vector(3) NOT NULL"),
+        "got: {sql}"
+    );
+    let plain = generate_sql_from_diff(
+        &[SchemaDiff::CreateTable(simple_table("t"))],
+        BackendKind::Postgres,
+    );
+    assert!(!plain.contains("EXTENSION"), "got: {plain}");
+}
+
+#[test]
+fn vector_column_is_refused_off_postgres() {
+    let diffs = [SchemaDiff::CreateTable(vector_table())];
+    assert!(check_vector_backend(&diffs, BackendKind::Postgres).is_ok());
+    for b in [BackendKind::Sqlite, BackendKind::Mysql] {
+        let err = check_vector_backend(&diffs, b).unwrap_err().to_string();
+        assert!(err.contains("\"docs\".\"embedding\""), "got: {err}");
+    }
+    let plain = [SchemaDiff::CreateTable(simple_table("t"))];
+    assert!(check_vector_backend(&plain, BackendKind::Sqlite).is_ok());
 }

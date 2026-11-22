@@ -26,6 +26,7 @@ macro_rules! bind {
             SqlValue::NullDate => $q.bind(Option::<chrono::NaiveDate>::None),
             SqlValue::NullTime => $q.bind(Option::<chrono::NaiveTime>::None),
             SqlValue::NullJson => $q.bind(Option::<sqlx::types::Json<serde_json::Value>>::None),
+            SqlValue::NullVector => $q.bind(Option::<pgvector::Vector>::None),
             // Non-null values
             SqlValue::Bool(v) => $q.bind(v),
             SqlValue::SmallInt(v) => $q.bind(v),
@@ -41,6 +42,7 @@ macro_rules! bind {
             SqlValue::Date(v) => $q.bind(v),
             SqlValue::Time(v) => $q.bind(v),
             SqlValue::Json(v) => $q.bind(sqlx::types::Json(v)),
+            SqlValue::Vector(v) => $q.bind(pgvector::Vector::from(v)),
         }
     };
 }

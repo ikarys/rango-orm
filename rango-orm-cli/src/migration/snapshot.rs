@@ -192,6 +192,8 @@ fn parse_col_type(s: &str) -> Result<ColumnType> {
         _ => {
             if let Some(n) = args("varchar(").and_then(|n| n.parse().ok()) {
                 ColumnType::Varchar(n)
+            } else if let Some(n) = args("vector(").and_then(|n| n.parse().ok()) {
+                ColumnType::Vector(n)
             } else if let Some((p, sc)) = args("decimal(").and_then(|a| a.split_once(',')) {
                 match (p.parse(), sc.parse()) {
                     (Ok(precision), Ok(scale)) => ColumnType::Decimal { precision, scale },
@@ -277,6 +279,7 @@ pub(crate) fn serialize_col_type(t: &ColumnType) -> String {
         ColumnType::Json => "json".into(),
         ColumnType::Jsonb => "jsonb".into(),
         ColumnType::Varchar(n) => format!("varchar({})", n),
+        ColumnType::Vector(n) => format!("vector({})", n),
         ColumnType::Decimal { precision, scale } => format!("decimal({},{})", precision, scale),
     }
 }
@@ -329,6 +332,14 @@ mod tests {
         let col = &table.columns[0];
         assert!(!col.index);
         assert!(col.references.is_none());
+    }
+
+    #[test]
+    fn vector_col_type_round_trips() {
+        let t = parse_col_type("vector(384)").unwrap();
+        assert_eq!(t, ColumnType::Vector(384));
+        assert_eq!(serialize_col_type(&t), "vector(384)");
+        assert!(parse_col_type("vector(x)").is_err());
     }
 
     #[test]

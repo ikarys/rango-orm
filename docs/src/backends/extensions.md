@@ -28,6 +28,8 @@ If you migrate from Postgres to SQLite, the compiler tells you exactly where bac
 | `.json_has_key(col, key)` | `col ? key` | JSONB key existence |
 | `.json_field_eq(col, key, val)` | `col->>'key' = val` | JSONB field equality |
 | `.array_contains(col, vals)` | `col @> ARRAY[...]` | Array containment |
+| `.nearest(col, &v, k, distance)` | `ORDER BY col <-> $1 LIMIT k` | k nearest vectors, see [pgvector](./pgvector.md) |
+| `.within(col, &v, max, distance)` | `col <-> $1 < max` | Vectors within a distance |
 
 ## SqliteQueryExt (SQLite)
 

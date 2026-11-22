@@ -148,6 +148,7 @@ fn sql_type_cast(val: &SqlValue) -> &'static str {
         SqlValue::Date(_) => "::date",
         SqlValue::Time(_) => "::time",
         SqlValue::Json(_) => "::jsonb",
+        SqlValue::NullVector | SqlValue::Vector(_) => "::vector",
     }
 }
 
