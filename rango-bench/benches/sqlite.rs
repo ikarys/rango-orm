@@ -135,7 +135,7 @@ fn bench_filter(c: &mut Criterion) {
         b.iter(|| {
             rt.block_on(async {
                 BenchUser::filter(&pool)
-                    .eq("active", 1i32)
+                    .eq("active", true)
                     .limit(100)
                     .all()
                     .await

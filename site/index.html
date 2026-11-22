@@ -437,6 +437,14 @@ table.runs caption,.tnote{
             <td>PostgreSQL, SQLite</td>
           </tr>
           <tr>
+            <th scope="row">Vector search</th>
+            <td><code>FieldVector&lt;N&gt;</code>, <code>nearest</code> and <code>within</code>, on PostgreSQL with pgvector</td>
+            <td>Through the <code>pgvector</code> crate</td>
+            <td>Through the <code>pgvector</code> crate</td>
+            <td><code>postgres-vector</code> feature</td>
+            <td>No vector type</td>
+          </tr>
+          <tr>
             <th scope="row">Async</th>
             <td>Native, on sqlx</td>
             <td>Native</td>
@@ -455,7 +463,7 @@ table.runs caption,.tnote{
         </tbody>
       </table>
     </div>
-    <p class="tnote">Where Rango is weaker: a small ecosystem. Checked against each project&rsquo;s documentation on 2026-11-21. <a href="docs/">Full comparison in the guide</a>.</p>
+    <p class="tnote">Where Rango is weaker: a small ecosystem. Checked against each project&rsquo;s documentation on 2026-11-22. <a href="docs/">Full comparison in the guide</a>.</p>
   </section>
 
   <section class="wrap row">
@@ -575,7 +583,7 @@ of this model that accepts a `&amp;str` value
     <p class="lead">The same workloads on one PostgreSQL 16, mean time per operation. Run-to-run noise is 3 to 5%. Butane has no multi-row insert, so its bulk insert saves one row at a time.</p>
     <div class="table-scroll">
       <table class="runs bench">
-        <caption>Criterion, 2026-11-21, Ryzen 9 9950X3D, PostgreSQL in Docker on WSL2. <a href="https://github.com/ikarys/rango-orm/tree/main/benchmarks">Full results and method</a>.</caption>
+        <caption>Criterion, 2026-11-22, Ryzen 9 9950X3D, PostgreSQL in Docker on WSL2. <a href="https://github.com/ikarys/rango-orm/tree/main/benchmarks">Full results and method</a>.</caption>
         <thead>
           <tr>
             <th>Operation</th>
@@ -589,43 +597,73 @@ of this model that accepts a `&amp;str` value
         <tbody>
           <tr>
             <td>select_pk</td>
-            <td>853 µs</td>
-            <td>879 µs</td>
-            <td>888 µs</td>
-            <td>955 µs</td>
-            <td>1.03 ms</td>
+            <td>876 µs</td>
+            <td>862 µs</td>
+            <td>831 µs</td>
+            <td>862 µs</td>
+            <td>1.02 ms</td>
           </tr>
           <tr>
             <td>select_filter_100</td>
-            <td>949 µs</td>
-            <td>1.00 ms</td>
-            <td>991 µs</td>
-            <td>1.04 ms</td>
-            <td>1.10 ms</td>
+            <td>958 µs</td>
+            <td>975 µs</td>
+            <td>985 µs</td>
+            <td>1.01 ms</td>
+            <td>1.11 ms</td>
           </tr>
           <tr>
             <td>select_all_1000</td>
             <td>1.30 ms</td>
-            <td>1.46 ms</td>
+            <td>1.28 ms</td>
             <td>1.42 ms</td>
-            <td>1.29 ms</td>
-            <td>1.51 ms</td>
+            <td>1.27 ms</td>
+            <td>1.49 ms</td>
           </tr>
           <tr>
             <td>bulk_insert/1000</td>
-            <td>5.01 ms</td>
-            <td>4.71 ms</td>
-            <td>5.94 ms</td>
-            <td>9.39 ms</td>
-            <td>988 ms</td>
+            <td>4.62 ms</td>
+            <td>4.67 ms</td>
+            <td>5.61 ms</td>
+            <td>9.36 ms</td>
+            <td>978 ms</td>
           </tr>
           <tr>
             <td>transaction_10_inserts</td>
-            <td>6.58 ms</td>
-            <td>6.69 ms</td>
-            <td>6.89 ms</td>
-            <td>12.32 ms</td>
-            <td>12.31 ms</td>
+            <td>6.63 ms</td>
+            <td>6.72 ms</td>
+            <td>6.71 ms</td>
+            <td>12.27 ms</td>
+            <td>12.13 ms</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="lead">Vector search costs the same as hand-written SQL: 10&#8239;000 embeddings of 384 dimensions, the 10 nearest by cosine distance, with an HNSW index and without one. Postgres uses the HNSW index for the query Rango builds; the benchmark asserts it with <code>EXPLAIN ANALYZE</code>.</p>
+    <div class="table-scroll">
+      <table class="runs bench">
+        <caption>Same machine and date. <a href="https://github.com/ikarys/rango-orm/tree/main/benchmarks#vector-search-pgvector-2026-11-22">Vector results and method</a>.</caption>
+        <thead>
+          <tr>
+            <th>Operation</th>
+            <th>sqlx + pgvector</th>
+            <th>Rango</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>vector_nearest_10/hnsw</td>
+            <td>1.29 ms</td>
+            <td>1.32 ms</td>
+          </tr>
+          <tr>
+            <td>vector_nearest_10/exact</td>
+            <td>2.70 ms</td>
+            <td>2.67 ms</td>
+          </tr>
+          <tr>
+            <td>vector_bulk_insert/100</td>
+            <td>3.13 ms</td>
+            <td>3.22 ms</td>
           </tr>
         </tbody>
       </table>

@@ -3,6 +3,7 @@
 ///
 /// Run: DATABASE_URL=postgres://... cargo bench -p bench-sqlx-raw
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, Throughput};
+use pgvector::Vector;
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -256,5 +257,134 @@ criterion_group!(
     bench_select,
     bench_update,
     bench_transaction,
+    bench_vector,
 );
 criterion_main!(benches);
+// ── pgvector ──────────────────────────────────────────────────────────────────
+// Same data as bench-rango: 10k deterministic unit vectors of 384 dimensions, cosine distance.
+
+const DOCS: usize = 10_000;
+const DIM: usize = 384;
+
+/// xorshift64, identical to bench-rango's.
+fn unit_vector(seed: u64) -> Vec<f32> {
+    let mut x = seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1;
+    let v: Vec<f32> = (0..DIM)
+        .map(|_| {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            (x >> 40) as f32 / (1u64 << 24) as f32 - 0.5
+        })
+        .collect();
+    let norm = v.iter().map(|a| a * a).sum::<f32>().sqrt();
+    v.into_iter().map(|a| a / norm).collect()
+}
+
+async fn vector_setup() -> PgPool {
+    let pool = setup().await;
+    sqlx::query("CREATE EXTENSION IF NOT EXISTS vector")
+        .execute(&pool)
+        .await
+        .unwrap();
+    for t in ["bench_doc", "bench_doc_exact"] {
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            r#"CREATE TABLE IF NOT EXISTS "{t}" ("id" BIGINT PRIMARY KEY, "embedding" vector(384) NOT NULL)"#
+        )))
+        .execute(&pool).await.unwrap();
+    }
+    sqlx::query(r#"CREATE TABLE IF NOT EXISTS "bench_doc_ins" ("id" UUID PRIMARY KEY, "embedding" vector(384) NOT NULL)"#)
+        .execute(&pool).await.unwrap();
+    let (have, exact): (i64, i64) = sqlx::query_as(
+        r#"SELECT (SELECT count(*) FROM "bench_doc"), (SELECT count(*) FROM "bench_doc_exact")"#,
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    if have != DOCS as i64 || exact != DOCS as i64 {
+        sqlx::query(r#"TRUNCATE "bench_doc", "bench_doc_exact""#)
+            .execute(&pool)
+            .await
+            .unwrap();
+        for chunk in (0..DOCS as i64).collect::<Vec<_>>().chunks(1000) {
+            let vecs: Vec<Vector> = chunk
+                .iter()
+                .map(|&i| Vector::from(unit_vector(i as u64)))
+                .collect();
+            sqlx::query(
+                r#"INSERT INTO "bench_doc" SELECT * FROM UNNEST($1::int8[], $2::vector[])"#,
+            )
+            .bind(chunk)
+            .bind(vecs)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        sqlx::query(r#"INSERT INTO "bench_doc_exact" SELECT * FROM "bench_doc""#)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(r#"CREATE INDEX IF NOT EXISTS "bench_doc_hnsw" ON "bench_doc" USING hnsw ("embedding" vector_cosine_ops)"#)
+            .execute(&pool).await.unwrap();
+        sqlx::query(r#"ANALYZE "bench_doc", "bench_doc_exact""#)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+    pool
+}
+
+async fn nearest(pool: &PgPool, table: &'static str, q: &Vector) -> Vec<(i64, Vec<f32>)> {
+    let sql = match table {
+        "bench_doc" => {
+            r#"SELECT "id", "embedding" FROM "bench_doc" ORDER BY "embedding" <=> $1 LIMIT 10"#
+        }
+        _ => {
+            r#"SELECT "id", "embedding" FROM "bench_doc_exact" ORDER BY "embedding" <=> $1 LIMIT 10"#
+        }
+    };
+    sqlx::query_as::<_, (i64, Vector)>(sql)
+        .bind(q)
+        .fetch_all(pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|(id, v)| (id, v.to_vec()))
+        .collect()
+}
+
+fn bench_vector(c: &mut Criterion) {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let pool = rt.block_on(vector_setup());
+    let query = Vector::from(unit_vector(DOCS as u64 + 1));
+
+    let mut group = c.benchmark_group("sqlx_raw/vector_nearest_10");
+    group.bench_function("hnsw", |b| {
+        b.iter(|| rt.block_on(nearest(&pool, "bench_doc", &query)))
+    });
+    group.bench_function("exact", |b| {
+        b.iter(|| rt.block_on(nearest(&pool, "bench_doc_exact", &query)))
+    });
+    group.finish();
+
+    c.bench_function("sqlx_raw/vector_bulk_insert/100", |b| {
+        b.iter_batched(
+            || {
+                let ids: Vec<Uuid> = (0..100).map(|_| Uuid::new_v4()).collect();
+                let vecs: Vec<Vector> = (0..100u64).map(|i| Vector::from(unit_vector(i))).collect();
+                (ids, vecs)
+            },
+            |(ids, vecs)| {
+                rt.block_on(async {
+                    sqlx::query(r#"INSERT INTO "bench_doc_ins" SELECT * FROM UNNEST($1::uuid[], $2::vector[])"#)
+                        .bind(ids)
+                        .bind(vecs)
+                        .execute(&pool)
+                        .await
+                        .unwrap()
+                })
+            },
+            BatchSize::SmallInput,
+        )
+    });
+}

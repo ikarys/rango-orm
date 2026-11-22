@@ -77,6 +77,13 @@ async fn run(pool: &PgPool) -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+## Performance
+
+On 10 000 rows of 384 dimensions, a `nearest` query takes the same time through Rango as the
+same SQL written by hand with sqlx, within 3%. Postgres uses the HNSW index for the query Rango
+builds; the benchmark checks that with `EXPLAIN ANALYZE`. Numbers and method are in
+[benchmarks/README.md](https://github.com/ikarys/rango-orm/tree/main/benchmarks#vector-search-pgvector-2026-11-22).
+
 ## Errors and safety
 
 The column must be a vector column of the model. The query vector must have the column's dimension and finite values. Otherwise rango returns `Error::Invalid` before any SQL runs. The operator is a fixed string. The column name is checked against the model and quoted. The query vector is bound as a parameter and is never formatted into the SQL.
