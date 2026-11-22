@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.0 (2026-11-22)
 
 - Breaking: dates and times use the `time` crate instead of `chrono`, which is unmaintained (RUSTSEC-2026-0543). `FieldDateTime` wraps `time::OffsetDateTime` (UTC), `FieldDate` wraps `time::Date`, `FieldTime` wraps `time::Time`; the same types appear in `SqlValue`, the `RangoRow` getters and `min`/`max`. Replace `chrono` with `time` in your `Cargo.toml`; `FieldDateTime::now()` is unchanged. Stored data needs no migration: SQLite keeps the same text format, and JSON stays RFC 3339 / `YYYY-MM-DD` / `HH:MM:SS`.
 

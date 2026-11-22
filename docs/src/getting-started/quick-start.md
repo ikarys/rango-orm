@@ -12,7 +12,7 @@ rango init --backend sqlite
 Add Rango to `Cargo.toml`:
 ```toml
 [dependencies]
-rango-orm = { version = "0.4", default-features = false, features = ["sqlite"] }
+rango-orm = { version = "0.5", default-features = false, features = ["sqlite"] }
 tokio = { version = "1", features = ["full"] }
 anyhow = "1"
 uuid = { version = "1", features = ["v4"] }   # you add these two: Rango does not re-export them
