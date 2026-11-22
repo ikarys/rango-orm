@@ -2,7 +2,7 @@ use super::table::column_definition;
 use super::{check_vector_backend, generate_sql_from_diff, object_name};
 use crate::migration::diff::SchemaDiff;
 use crate::migration::scanner::{M2MRelation, generate_pivot_table};
-use crate::migration::snapshot::SnapshotConstraint;
+use crate::migration::snapshot::{Snapshot, SnapshotConstraint};
 use rango_orm_core::{
     BackendKind, ColumnDef, ColumnType, FkReference, ReferentialAction, TableSchema,
 };
@@ -17,6 +17,7 @@ fn uuid_col(name: &str, pk: bool) -> ColumnDef {
         default: None,
         references: None,
         index: false,
+        vector_index: None,
     }
 }
 
@@ -30,6 +31,7 @@ fn text_col(name: &str) -> ColumnDef {
         default: None,
         references: None,
         index: false,
+        vector_index: None,
     }
 }
 
@@ -43,6 +45,7 @@ fn int_col(name: &str) -> ColumnDef {
         default: None,
         references: None,
         index: false,
+        vector_index: None,
     }
 }
 
@@ -56,6 +59,7 @@ fn datetime_col(name: &str) -> ColumnDef {
         default: None,
         references: None,
         index: false,
+        vector_index: None,
     }
 }
 
@@ -74,6 +78,7 @@ fn fk_col(name: &str, table: &str, on_delete: ReferentialAction) -> ColumnDef {
             on_update: ReferentialAction::NoAction,
         }),
         index: true,
+        vector_index: None,
     }
 }
 
@@ -682,6 +687,7 @@ fn auto_pk_ddl_per_backend() {
         default: None,
         references: None,
         index: false,
+        vector_index: None,
     };
     assert_eq!(
         column_definition("t", &col, BackendKind::Postgres),
@@ -745,6 +751,7 @@ fn int_key(name: &str, ty: ColumnType) -> ColumnDef {
         default: None,
         references: None,
         index: false,
+        vector_index: None,
     }
 }
 
@@ -956,4 +963,76 @@ fn vector_column_is_refused_off_postgres() {
     }
     let plain = [SchemaDiff::CreateTable(simple_table("t"))];
     assert!(check_vector_backend(&plain, BackendKind::Sqlite).is_ok());
+}
+
+fn indexed_vector_table(distance: Option<rango_orm_core::Distance>) -> TableSchema {
+    let mut t = vector_table();
+    t.columns.last_mut().unwrap().vector_index = distance;
+    t
+}
+
+#[test]
+fn vector_index_is_created_with_the_table_and_the_column() {
+    use rango_orm_core::Distance;
+    let hnsw = "CREATE INDEX IF NOT EXISTS \"docs_embedding_hnsw\" ON \"docs\" USING hnsw (\"embedding\" vector_cosine_ops);";
+    let table = indexed_vector_table(Some(Distance::Cosine));
+    let create = generate_sql_from_diff(
+        &[SchemaDiff::CreateTable(table.clone())],
+        BackendKind::Postgres,
+    );
+    assert!(create.contains(hnsw), "got: {create}");
+    let add = generate_sql_from_diff(
+        &[SchemaDiff::AddColumn {
+            table: "docs".into(),
+            column: table.columns.last().unwrap().clone(),
+        }],
+        BackendKind::Postgres,
+    );
+    assert!(add.contains(hnsw), "got: {add}");
+    let none = generate_sql_from_diff(
+        &[SchemaDiff::CreateTable(vector_table())],
+        BackendKind::Postgres,
+    );
+    assert!(!none.contains("hnsw"), "got: {none}");
+}
+
+#[test]
+fn vector_index_change_is_diffed_and_survives_the_snapshot() {
+    use crate::migration::diff::diff;
+    use rango_orm_core::Distance;
+    let old = Snapshot::from_schemas(&[indexed_vector_table(Some(Distance::Cosine))]);
+    assert!(diff(&old, &[indexed_vector_table(Some(Distance::Cosine))]).is_empty());
+    assert_eq!(
+        old.to_schemas().unwrap()[0]
+            .columns
+            .last()
+            .unwrap()
+            .vector_index,
+        Some(Distance::Cosine)
+    );
+
+    let changed = diff(&old, &[indexed_vector_table(Some(Distance::L2))]);
+    let sql = generate_sql_from_diff(&changed, BackendKind::Postgres);
+    assert_eq!(
+        sql.trim(),
+        "DROP INDEX IF EXISTS \"docs_embedding_hnsw\";\nCREATE INDEX IF NOT EXISTS \"docs_embedding_hnsw\" ON \"docs\" USING hnsw (\"embedding\" vector_l2_ops);"
+    );
+    let removed = generate_sql_from_diff(&diff(&old, &[vector_table()]), BackendKind::Postgres);
+    assert_eq!(
+        removed.trim(),
+        "DROP INDEX IF EXISTS \"docs_embedding_hnsw\";"
+    );
+}
+
+#[test]
+fn snapshot_with_an_unknown_vector_index_is_refused() {
+    let mut snap = Snapshot::from_schemas(&[vector_table()]);
+    snap.tables
+        .get_mut("docs")
+        .unwrap()
+        .columns
+        .last_mut()
+        .unwrap()
+        .vector_index = Some("x); DROP TABLE docs; --".into());
+    assert!(snap.to_schemas().is_err());
 }

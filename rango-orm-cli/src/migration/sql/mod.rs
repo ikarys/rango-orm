@@ -191,6 +191,28 @@ fn object_name(backend: BackendKind, name: &str) -> String {
     backend.quote_ident(&format!("{}_{:08x}", &name[..cut], hash))
 }
 
+/// Name of the HNSW index on `table.column`: one per vector column.
+fn hnsw_index_name(backend: BackendKind, table: &str, column: &str) -> String {
+    object_name(backend, &format!("{table}_{column}_hnsw"))
+}
+
+/// `CREATE INDEX` for a pgvector HNSW index; `distance` picks the operator class, which must
+/// match the operator `nearest`/`within` use, or Postgres ignores the index.
+fn hnsw_index_sql(
+    backend: BackendKind,
+    table: &str,
+    column: &str,
+    distance: rango_orm_core::Distance,
+) -> String {
+    format!(
+        "CREATE INDEX IF NOT EXISTS {} ON {} USING hnsw ({} {});\n",
+        hnsw_index_name(backend, table, column),
+        backend.quote_ident(table),
+        backend.quote_ident(column),
+        distance.index_ops()
+    )
+}
+
 fn referential_action_sql(action: &ReferentialAction) -> &'static str {
     match action {
         ReferentialAction::Cascade => "CASCADE",

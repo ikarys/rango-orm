@@ -1,0 +1,17 @@
+error[E0308]: mismatched types
+  --> tests/ui/vector_wrong_dimension.rs:10:46
+   |
+ 9 | fn search<'a>(pool: &'a PgPool, q: &FieldVector<4>) -> QueryBuilder<'a, Doc> {
+   |                                                        --------------------- this return type influences the call expression's return type
+10 |     Doc::filter(pool).within(Doc::EMBEDDING, q, 0.5, Distance::L2)
+   |                       ------                 ^ expected `3`, found `4`
+   |                       |
+   |                       arguments to this method are incorrect
+   |
+   = note: expected reference `&rango::FieldVector<3>`
+              found reference `&rango::FieldVector<4>`
+note: method defined here
+  --> $WORKSPACE/rango-orm-postgres/src/pg_ext.rs
+   |
+   |     fn within<const N: usize>(
+   |        ^^^^^^

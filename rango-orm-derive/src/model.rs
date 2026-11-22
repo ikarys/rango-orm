@@ -14,6 +14,8 @@ use crate::utils::to_snake_case;
 struct FieldAttr {
     unique: bool,
     index: bool,
+    /// `index = "<distance>"`: an HNSW index on a vector field.
+    vector_index: Option<syn::LitStr>,
     primary_key: bool,
     auto_now_add: bool,
     auto_now: bool,
@@ -329,7 +331,7 @@ fn parse_model_attr(input: &DeriveInput) -> Result<ModelAttr> {
     Ok(attr)
 }
 
-/// Parse `#[field(unique, index, primary_key, auto_now_add, auto_now, column="...", default="...", comment="...")]`
+/// Parse `#[field(unique, index, index = "<distance>", primary_key, auto_now_add, auto_now, column="...", default="...", comment="...")]`
 fn parse_field_attr(field: &Field) -> Result<FieldAttr> {
     let mut attr = FieldAttr::default();
     for a in &field.attrs {
@@ -344,6 +346,13 @@ fn parse_field_attr(field: &Field) -> Result<FieldAttr> {
                 Meta::Path(p) if p.is_ident("primary_key") => attr.primary_key = true,
                 Meta::Path(p) if p.is_ident("auto_now_add") => attr.auto_now_add = true,
                 Meta::Path(p) if p.is_ident("auto_now") => attr.auto_now = true,
+                Meta::NameValue(nv) if nv.path.is_ident("index") => {
+                    if let syn::Expr::Lit(expr_lit) = &nv.value
+                        && let Lit::Str(s) = &expr_lit.lit
+                    {
+                        attr.vector_index = Some(s.clone());
+                    }
+                }
                 Meta::NameValue(nv) if nv.path.is_ident("column") => {
                     if let syn::Expr::Lit(expr_lit) = &nv.value
                         && let Lit::Str(s) = &expr_lit.lit
@@ -413,6 +422,34 @@ fn generate_column_def(field: &Field, core: &TokenStream) -> Result<TokenStream>
         }
     }
 
+    let is_vector = type_name(inner_ty).starts_with("FieldVector<");
+    let vector_index = match (&attr.vector_index, is_vector) {
+        (Some(lit), true) => {
+            let Some(d) = rango_orm_core::Distance::from_name(&lit.value()) else {
+                let names: Vec<_> = rango_orm_core::Distance::ALL.map(|d| d.name()).into();
+                return Err(syn::Error::new_spanned(
+                    lit,
+                    format!("unknown distance, expected one of: {}", names.join(", ")),
+                ));
+            };
+            let variant = syn::Ident::new(&format!("{d:?}"), lit.span());
+            quote! { Some(#core::Distance::#variant) }
+        }
+        (Some(lit), false) => {
+            return Err(syn::Error::new_spanned(
+                lit,
+                "#[field(index = \"...\")] is an HNSW index, only valid on a FieldVector field; use #[field(index)] for a b-tree index",
+            ));
+        }
+        (None, true) if attr.index => {
+            return Err(syn::Error::new_spanned(
+                field,
+                "a vector field needs a distance for its index: #[field(index = \"cosine\")], \"l2\" or \"inner_product\"",
+            ));
+        }
+        (None, _) => quote! { None },
+    };
+
     // Default value
     let default_val = if attr.auto_now_add || attr.auto_now {
         quote! { Some(#core::DefaultValue::CurrentTimestamp) }
@@ -470,6 +507,7 @@ fn generate_column_def(field: &Field, core: &TokenStream) -> Result<TokenStream>
             default: #default_val,
             references: #references,
             index: #is_index || #is_foreign_key,
+            vector_index: #vector_index,
         }
     })
 }

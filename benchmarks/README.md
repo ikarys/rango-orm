@@ -80,6 +80,11 @@ SQL, not the ORMs against each other. `hnsw` searches a table with an HNSW index
   ~1.8 ms for the exact scan; the exact scan grows with the table, HNSW roughly with its log.
 - `vector_bulk_insert`: Rango sends vectors as a multi-row `VALUES` (sqlx here uses
   `UNNEST($1::vector[])`); 3% apart, so Rango keeps the simpler path.
+- `vector_nearest_10/hnsw_with_distance` (Rango only) runs the same search through
+  `.all_with_distance()`: 1.300 ms against 1.299 ms for `.all()` in the same run. Postgres reuses
+  the ordering expression for the returned distance and keeps the HNSW index scan.
+- Typing `nearest` (`FieldVector<N>` column and query, checked at compile time) left
+  `vector_nearest_10/hnsw` unchanged against the previous commit: −0.5%, p = 0.30.
 
 ## Regression check after pgvector (2026-11-22)
 

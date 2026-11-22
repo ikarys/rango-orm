@@ -358,6 +358,7 @@ mod fuzz_tests {
             default: None,
             references: None,
             index,
+            vector_index: None,
         }
     }
 

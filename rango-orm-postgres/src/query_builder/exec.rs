@@ -16,6 +16,29 @@ where
     M: Model + ModelValues + FromRow,
 {
     // ── Terminal methods ──────────────────────────────────────────────────────
+    /// Rows of a `nearest()` query with their distance to the query vector, closest first.
+    ///
+    /// The distance is the value `nearest` orders by, computed once per row; an HNSW
+    /// index on the column still serves the query. `Error::Invalid` without `nearest()`,
+    /// or with `select_related` / `prefetch_related`.
+    #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "postgresql", db.operation = "SELECT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
+    pub async fn all_with_distance(self) -> Result<Vec<(M, f64)>> {
+        let (sql, binds) = self.f.select_with_distance_sql()?;
+        let mut source = self.conn;
+        let mut conn = source.acquire().await?;
+        let q = crate::ops::bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*sql)), binds);
+        let rows = crate::row::fetch_map(q, &mut *conn, |row| {
+            let distance = row
+                .0
+                .try_get::<f64, _>(rango_orm_core::DISTANCE_COLUMN)
+                .map_err(crate::error::db_err)?;
+            Ok((M::from_row_in(row)?, distance))
+        })
+        .await?;
+        tracing::Span::current().record("db.rows", rows.len());
+        Ok(rows)
+    }
+
     /// Fetch all matching rows, populating relation caches when specs are present.
     ///
     /// Returns `Vec<WithRelated<M>>` — each item derefs to `M`, and related

@@ -306,7 +306,7 @@ async fn vector_setup() -> PgPool {
 fn bench_vector(c: &mut Criterion) {
     let rt = tokio::runtime::Runtime::new().unwrap();
     let pool = rt.block_on(vector_setup());
-    let query = unit_vector(DOCS as u64 + 1);
+    let query = FieldVector::<DIM>::new(unit_vector(DOCS as u64 + 1)).unwrap();
 
     // The SQL rango generates (with the vector as a bound parameter) must reach the HNSW index.
     let plan = rt.block_on(async {
@@ -328,6 +328,19 @@ fn bench_vector(c: &mut Criterion) {
                 let r = BenchDoc::filter(&pool)
                     .nearest(BenchDoc::EMBEDDING, &query, 10, Distance::Cosine)
                     .all()
+                    .await
+                    .unwrap();
+                assert_eq!(r.len(), 10);
+                r
+            })
+        })
+    });
+    group.bench_function("hnsw_with_distance", |b| {
+        b.iter(|| {
+            rt.block_on(async {
+                let r = BenchDoc::filter(&pool)
+                    .nearest(BenchDoc::EMBEDDING, &query, 10, Distance::Cosine)
+                    .all_with_distance()
                     .await
                     .unwrap();
                 assert_eq!(r.len(), 10);

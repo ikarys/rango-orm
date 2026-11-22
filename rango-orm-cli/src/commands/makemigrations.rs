@@ -305,6 +305,7 @@ fn migration_label(diffs: &[SchemaDiff]) -> String {
             SchemaDiff::AlterColumnNullable { table, .. } => table.clone(),
             SchemaDiff::AlterColumnUnique { table, .. } => table.clone(),
             SchemaDiff::AlterColumnIndex { table, .. } => table.clone(),
+            SchemaDiff::AlterColumnVectorIndex { table, .. } => table.clone(),
             SchemaDiff::AlterColumnReference { table, .. } => table.clone(),
             SchemaDiff::AddConstraint { table, .. } => table.clone(),
             SchemaDiff::DropConstraint { table, .. } => table.clone(),
@@ -355,6 +356,7 @@ mod tests {
             default: None,
             references: None,
             index: false,
+            vector_index: None,
         }
     }
 
@@ -368,6 +370,7 @@ mod tests {
             default: None,
             references: None,
             index: false,
+            vector_index: None,
         }
     }
 

@@ -20,6 +20,22 @@ pub(super) fn build_column_def(field: &syn::Field) -> Result<ColumnDef> {
     let is_foreign_key = type_str.starts_with("ForeignKey<");
     let col_type = map_field_type(inner_ty)?;
 
+    let vector_index = match &field_attrs.vector_index {
+        None => None,
+        Some(name) => {
+            if !matches!(col_type, ColumnType::Vector(_)) {
+                bail!(
+                    "#[field(index = \"{name}\")] is an HNSW index, only valid on a FieldVector field"
+                );
+            }
+            Some(rango_orm_core::Distance::from_name(name).ok_or_else(|| {
+                anyhow::anyhow!(
+                    "unknown distance \"{name}\", expected one of: l2, cosine, inner_product"
+                )
+            })?)
+        }
+    };
+
     let on_delete = parse_on_delete(&field_attrs.on_delete)?;
     if on_delete == ReferentialAction::SetNull && !nullable {
         bail!("on_delete = \"set_null\" requires an Option<ForeignKey<...>> field");
@@ -52,6 +68,7 @@ pub(super) fn build_column_def(field: &syn::Field) -> Result<ColumnDef> {
         default,
         references,
         index: field_attrs.index || is_foreign_key,
+        vector_index,
     })
 }
 
@@ -65,6 +82,7 @@ pub(super) struct FieldAttrs {
     column: Option<String>,
     default: Option<String>,
     on_delete: Option<String>,
+    vector_index: Option<String>,
 }
 
 pub(super) fn parse_field_attrs(field: &syn::Field) -> FieldAttrs {
@@ -95,6 +113,13 @@ pub(super) fn parse_field_attrs(field: &syn::Field) -> FieldAttrs {
                             && let syn::Lit::Str(s) = &e.lit
                         {
                             attrs.default = Some(s.value());
+                        }
+                    }
+                    syn::Meta::NameValue(nv) if nv.path.is_ident("index") => {
+                        if let syn::Expr::Lit(e) = &nv.value
+                            && let syn::Lit::Str(s) = &e.lit
+                        {
+                            attrs.vector_index = Some(s.value());
                         }
                     }
                     syn::Meta::NameValue(nv) if nv.path.is_ident("on_delete") => {

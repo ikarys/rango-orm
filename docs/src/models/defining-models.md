@@ -105,6 +105,7 @@ pub name: FieldVarchar<1, 100>,   // NOT NULL
 ```rust
 #[field(unique)]                  // UNIQUE constraint
 #[field(index)]                   // creates an index
+#[field(index = "cosine")]        // HNSW index on a FieldVector ("l2", "inner_product"), PostgreSQL
 #[field(column = "custom_name")]  // override column name
 #[field(primary_key)]             // mark as primary key
 #[field(auto_now_add)]            // set to now() on INSERT (FieldDateTime only)

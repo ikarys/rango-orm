@@ -34,6 +34,9 @@ pub struct SnapshotColumn {
     pub default: Option<String>,
     #[serde(default)]
     pub index: bool,
+    /// Distance name of the HNSW index (`Distance::name`); absent when there is none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vector_index: Option<String>,
     #[serde(default)]
     pub references: Option<SnapshotFk>,
 }
@@ -83,6 +86,7 @@ impl Snapshot {
                     unique: c.unique,
                     default: c.default.as_ref().map(serialize_default),
                     index: c.index,
+                    vector_index: c.vector_index.map(|d| d.name().to_string()),
                     references: c.references.as_ref().map(|r| SnapshotFk {
                         table: r.table.clone(),
                         column: r.column.clone(),
@@ -135,6 +139,14 @@ impl Snapshot {
                 unique: c.unique,
                 default: c.default.as_deref().map(parse_default),
                 index: c.index,
+                vector_index: c
+                    .vector_index
+                    .as_deref()
+                    .map(|n| {
+                        rango_orm_core::Distance::from_name(n)
+                            .ok_or_else(|| anyhow::anyhow!("unknown vector index distance '{n}'"))
+                    })
+                    .transpose()?,
                 references: c
                     .references
                     .as_ref()
