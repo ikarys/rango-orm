@@ -43,6 +43,16 @@ pub trait PrimaryKey:
 
     /// Reads the key from `col`.
     fn from_row(row: &dyn crate::RangoRow, col: &str) -> Result<Self, crate::RowError>;
+
+    /// `from_row` with the row type known and the column expected at `pos`
+    /// (see `RangoRow::get_uuid_at`). The default ignores `pos` and goes through `dyn`.
+    fn from_row_at<R: crate::RangoRow + ?Sized>(
+        row: &R,
+        _pos: usize,
+        col: &str,
+    ) -> Result<Self, crate::RowError> {
+        Self::from_row(&row, col)
+    }
 }
 
 impl PrimaryKey for uuid::Uuid {
@@ -52,6 +62,13 @@ impl PrimaryKey for uuid::Uuid {
     }
     fn from_row(row: &dyn crate::RangoRow, col: &str) -> Result<Self, crate::RowError> {
         row.get_uuid(col)
+    }
+    fn from_row_at<R: crate::RangoRow + ?Sized>(
+        row: &R,
+        pos: usize,
+        col: &str,
+    ) -> Result<Self, crate::RowError> {
+        row.get_uuid_at(pos, col)
     }
 }
 
@@ -63,6 +80,13 @@ impl PrimaryKey for i32 {
     fn from_row(row: &dyn crate::RangoRow, col: &str) -> Result<Self, crate::RowError> {
         row.get_i32(col)
     }
+    fn from_row_at<R: crate::RangoRow + ?Sized>(
+        row: &R,
+        pos: usize,
+        col: &str,
+    ) -> Result<Self, crate::RowError> {
+        row.get_i32_at(pos, col)
+    }
 }
 
 impl PrimaryKey for i64 {
@@ -72,6 +96,13 @@ impl PrimaryKey for i64 {
     }
     fn from_row(row: &dyn crate::RangoRow, col: &str) -> Result<Self, crate::RowError> {
         row.get_i64(col)
+    }
+    fn from_row_at<R: crate::RangoRow + ?Sized>(
+        row: &R,
+        pos: usize,
+        col: &str,
+    ) -> Result<Self, crate::RowError> {
+        row.get_i64_at(pos, col)
     }
 }
 

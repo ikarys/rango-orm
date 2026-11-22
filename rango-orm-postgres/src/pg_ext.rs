@@ -21,7 +21,7 @@ use sqlx::{PgPool, Row};
 use crate::ops::bind_sql_values;
 use crate::query_builder::QueryBuilder;
 use crate::related::WithRelated;
-use crate::row::decode_all;
+use crate::row::fetch_decoded;
 
 /// Postgres-only extensions for `QueryBuilder`.
 pub trait PgQueryExt<M>
@@ -162,14 +162,12 @@ impl Pg {
             quote_ident(col.column_name()),
             DEFAULT_QUERY_LIMIT
         );
-        let rows = bind_sql_values(
+        let q = bind_sql_values(
             sqlx::query(sqlx::AssertSqlSafe(&*sql)),
             vec![SqlValue::Text(query.to_string())],
-        )
-        .fetch_all(pool)
-        .await
-        .map_err(db_err)?;
-        Ok(decode_all::<M>(rows)?
+        );
+        Ok(fetch_decoded::<M, _>(q, pool)
+            .await?
             .into_iter()
             .map(WithRelated::new)
             .collect())

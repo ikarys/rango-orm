@@ -1,8 +1,8 @@
 //! Where a `QueryBuilder` runs: a pool or a borrowed connection / transaction.
 
-use super::{bind_and_execute, bind_and_fetch_all, bind_and_fetch_one};
+use super::{bind_and_execute, bind_and_fetch_all, bind_and_fetch_decoded, bind_and_fetch_one};
 use crate::error::db_err;
-use rango_orm_core::{Error, Result, SqlValue};
+use rango_orm_core::{Error, FromRow, Result, SqlValue};
 use sqlx::pool::PoolConnection;
 use sqlx::postgres::PgRow;
 use sqlx::{PgConnection, PgPool, Postgres, Transaction};
@@ -83,6 +83,15 @@ impl Conn<'_> {
     ) -> Result<Vec<PgRow>> {
         let mut c = self.acquire().await?;
         bind_and_fetch_all(&mut *c, sql, binds).await
+    }
+
+    pub(super) async fn fetch_decoded<M: FromRow>(
+        &mut self,
+        sql: &str,
+        binds: Vec<SqlValue>,
+    ) -> Result<Vec<M>> {
+        let mut c = self.acquire().await?;
+        bind_and_fetch_decoded(&mut *c, sql, binds).await
     }
 
     pub(super) async fn fetch_one(&mut self, sql: &str, binds: Vec<SqlValue>) -> Result<PgRow> {

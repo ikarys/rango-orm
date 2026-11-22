@@ -1,5 +1,5 @@
 use crate::related::WithRelated;
-use crate::row::{PgPrefixedRow, PgRangoRow, PgRangoRow2, decode_all};
+use crate::row::{PgPrefixedRow, PgRangoRow, PgRangoRow2};
 use rango_orm_core::{ColumnRef, FromRow, Model, ModelValues, Partial, RangoRow, SqlValue};
 use rango_orm_core::{Error, Result};
 use sqlx::Postgres;
@@ -28,18 +28,18 @@ where
         // One connection for the main query and every prefetch query: one pool round-trip.
         let mut source = std::mem::take(&mut self.conn);
         let mut conn = source.acquire().await?;
-        let rows = bind_and_fetch_all(&mut *conn, &sql, binds).await?;
-        self.warn_if_capped(rows.len());
-        tracing::Span::current().record("db.rows", rows.len());
-        let mut results: Vec<WithRelated<M>> = Vec::with_capacity(rows.len());
-        if self.f.select_related_specs().is_empty() {
-            for row in rows {
-                results.push(WithRelated::new(M::from_row(&PgRangoRow(row))?));
-            }
+        let mut results: Vec<WithRelated<M>> = if self.f.select_related_specs().is_empty() {
+            bind_and_fetch_decoded::<_, M>(&mut *conn, &sql, binds)
+                .await?
+                .into_iter()
+                .map(WithRelated::new)
+                .collect()
         } else {
             // ── select_related: R's columns came back in the same row (LEFT JOIN) ──
+            let rows = bind_and_fetch_all(&mut *conn, &sql, binds).await?;
+            let mut results = Vec::with_capacity(rows.len());
             for row in &rows {
-                let mut wr = WithRelated::new(M::from_row(&PgRangoRow2::new(row))?);
+                let mut wr = WithRelated::new(M::from_row_in(&PgRangoRow2::new(row))?);
                 for (i, spec) in self.f.select_related_specs().iter().enumerate() {
                     let r_row = PgPrefixedRow::new(row, format!("__r{i}_"));
                     // NULL primary key: no matching R (NULL or dangling FK).
@@ -53,7 +53,10 @@ where
                 }
                 results.push(wr);
             }
-        }
+            results
+        };
+        self.warn_if_capped(results.len());
+        tracing::Span::current().record("db.rows", results.len());
 
         if results.is_empty() {
             return Ok(results);
@@ -122,7 +125,7 @@ where
 
         let rows = self.conn.fetch_all(&sql, binds).await?;
         match rows.into_iter().next() {
-            Some(r) => Ok(Some(M::from_row(&PgRangoRow(r)).map_err(Error::from)?)),
+            Some(r) => Ok(Some(M::from_row_in(&PgRangoRow(r)).map_err(Error::from)?)),
             None => Ok(None),
         }
     }
@@ -357,10 +360,10 @@ where
             ));
         }
         let (sql, binds) = self.qb.f.select_sql_cols(&Self::cols_sql());
-        let rows = self.qb.conn.fetch_all(&sql, binds).await?;
+        let rows = self.qb.conn.fetch_decoded::<P>(&sql, binds).await?;
         self.qb.warn_if_capped(rows.len());
         tracing::Span::current().record("db.rows", rows.len());
-        decode_all::<P>(rows)
+        Ok(rows)
     }
 
     /// Fetch the first matching row as `P`.
