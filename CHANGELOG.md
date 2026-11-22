@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Fix: on PostgreSQL 18, deleting a row that an `ON DELETE RESTRICT` foreign key still points to returns `Error::ForeignKeyViolation` again, not `Error::Database { code: "23001" }`.
+
 ## 0.4.0 (2026-11-22)
 
 - Security: `url` 2.5.9 in `Cargo.lock` for RUSTSEC-2026-0592 (stack overflow in `Url::origin()` on nested `blob:` URLs). Rango does not call `Url::origin()`; sqlx only parses `DATABASE_URL` with it.
