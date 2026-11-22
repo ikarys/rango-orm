@@ -48,8 +48,14 @@ Mean time per operation, lower is better. "Rango vs best ORM" compares with the 
 ### Rango optimizations
 
 - Done: decoded rows are collected into a pre-sized `Vec` (−4.5% on `select_all_1000`).
-- Measured, not worth it yet: decoding by column index instead of by name saves ~3% on
-  1000 rows, at the cost of changing the public `RangoRow` trait.
+- Measured, not worth it yet (2026-11-21): where the ~12% on `select_all_1000` goes. Of the
+  ~170 µs gap to raw sqlx, ~100 µs is row decoding and ~20 µs is collecting the rows into a
+  `Vec` before decoding them. The decoding cost has no single hotspot: per 1000 rows, the
+  `dyn RangoRow` calls cost 10–30 µs, the by-name column lookups 15–30 µs, the second lookup for
+  `Option` fields ~6 µs per field, and the rest is `Result` plumbing. Reading columns by position
+  (with a name check as fallback) saves only ~13 µs through `dyn`. Most of the gain needs a
+  `from_row` generic over the row type, a breaking change to `FromRow`, for ~4% at best:
+  about the run-to-run noise.
 - Done: `bulk_create` on Postgres is one `INSERT … SELECT FROM UNNEST(…)` statement, with no 65 535-parameter chunking.
 
 ## Machine
