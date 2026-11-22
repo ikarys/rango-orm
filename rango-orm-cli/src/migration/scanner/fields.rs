@@ -21,6 +21,9 @@ pub(super) fn build_column_def(field: &syn::Field) -> Result<ColumnDef> {
     let col_type = map_field_type(inner_ty)?;
 
     let vector_index = match &field_attrs.vector_index {
+        None if field_attrs.index && matches!(col_type, ColumnType::Vector(_)) => bail!(
+            "a vector field needs a distance for its index: #[field(index = \"cosine\")], \"l2\" or \"inner_product\""
+        ),
         None => None,
         Some(name) => {
             if !matches!(col_type, ColumnType::Vector(_)) {

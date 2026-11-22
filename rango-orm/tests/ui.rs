@@ -11,4 +11,5 @@ fn ui() {
     t.compile_fail("tests/ui/vector_wrong_column.rs");
     t.compile_fail("tests/ui/vector_wrong_dimension.rs");
     t.compile_fail("tests/ui/vector_index_attrs.rs");
+    t.compile_fail("tests/ui/vector_dimension_range.rs");
 }

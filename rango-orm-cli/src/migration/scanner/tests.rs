@@ -363,4 +363,7 @@ fn vector_index_attribute_maps_to_its_distance() {
         unknown.to_string().contains("unknown distance"),
         "{unknown}"
     );
+    // A bare `index` on a vector would be a b-tree pgvector cannot search with.
+    let bare = column("#[field(index)] e: FieldVector<3>").unwrap_err();
+    assert!(bare.to_string().contains("needs a distance"), "{bare}");
 }

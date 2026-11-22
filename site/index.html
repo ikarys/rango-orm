@@ -453,6 +453,14 @@ table.runs caption,.tnote{
             <td>Since 0.8</td>
           </tr>
           <tr>
+            <th scope="row">Usability tests</th>
+            <td><a href="#agents">Blind tests from the docs alone, reports public</a></td>
+            <td>None published</td>
+            <td>None published</td>
+            <td>None published</td>
+            <td>None published</td>
+          </tr>
+          <tr>
             <th scope="row">Maturity</th>
             <td>Early, API can change before 1.0</td>
             <td>Large</td>
@@ -523,10 +531,10 @@ of this model that accepts a `&amp;str` value
 
   <section class="wrap row" id="agents">
     <h2>Tested by agents that only had the docs.</h2>
-    <p class="lead">Each campaign gives an AI agent a fresh context, the user guide and a real app to build, with no access to the source. It seeds 100,000 rows, runs the app's queries on them and logs every point of friction. Every finding in these reports is answered with a fix or a doc change.</p>
+    <p class="lead">Each campaign gives an AI agent a fresh context, the user guide and a real app to build, with no access to the source. It seeds 20,000 to 100,000 rows, runs the app's queries on them and logs every point of friction. Every finding in these reports is answered with a fix or a doc change.</p>
     <div class="table-scroll">
       <table class="runs">
-        <caption>Campaigns of 2026-11-20 on commit 7e0d1ec. <a href="docs/trust/blind-tests.html">How the tests are run</a>.</caption>
+        <caption>Campaigns of 2026-11-20 on commit 7e0d1ec, and 2026-11-22 on df14ac8 for vector search. <a href="docs/trust/blind-tests.html">How the tests are run</a>.</caption>
         <thead>
           <tr>
             <th>App</th>
@@ -553,6 +561,12 @@ of this model that accepts a `&amp;str` value
             <td>Indie developer on MySQL</td>
             <td>MySQL 8.4, MariaDB 11.4, SQLite</td>
             <td class="score">8/10</td>
+          </tr>
+          <tr>
+            <td><a href="https://github.com/ikarys/rango-orm/blob/main/audit/2026-11-22-campaign-d-semantic-search-pgvector.md">Semantic search, 20k notes</a></td>
+            <td>Rust developer, first time with Rango</td>
+            <td>PostgreSQL + pgvector</td>
+            <td class="score">7/10</td>
           </tr>
         </tbody>
       </table>
