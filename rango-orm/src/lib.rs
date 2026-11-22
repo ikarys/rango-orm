@@ -112,7 +112,7 @@ pub use rango_orm_derive::model;
 pub use rango_orm_postgres::PgPool;
 #[cfg(feature = "postgres")]
 pub use rango_orm_postgres::{
-    Conn, M2M, Pg, PgQueryExt, QueryBuilder, RangoFilterExt, RangoTransaction, SelectAs,
+    Conn, Distance, M2M, Pg, PgQueryExt, QueryBuilder, RangoFilterExt, RangoTransaction, SelectAs,
     WithRelated, all, atomic, atomic_retry, bulk_create, bulk_update, bulk_upsert, delete, get,
     get_or_create, insert, raw, raw_execute, raw_scalar, raw_values, transaction, update,
     update_or_create,
@@ -122,10 +122,10 @@ pub use rango_orm_postgres::{
 #[cfg(feature = "postgres")]
 pub mod postgres {
     pub use rango_orm_postgres::{
-        Conn, M2M, Pg, PgPool, PgQueryExt, QueryBuilder, RangoFilterExt, RangoTransaction,
-        SelectAs, WithRelated, all, atomic, atomic_retry, bulk_create, bulk_update, bulk_upsert,
-        delete, get, get_or_create, insert, raw, raw_execute, raw_scalar, raw_values, transaction,
-        update, update_or_create,
+        Conn, Distance, M2M, Pg, PgPool, PgQueryExt, QueryBuilder, RangoFilterExt,
+        RangoTransaction, SelectAs, WithRelated, all, atomic, atomic_retry, bulk_create,
+        bulk_update, bulk_upsert, delete, get, get_or_create, insert, raw, raw_execute, raw_scalar,
+        raw_values, transaction, update, update_or_create,
     };
 }
 

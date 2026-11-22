@@ -212,7 +212,8 @@ pub fn value_mismatch<M: Model>(name: &str, value: &SqlValue) -> Option<String> 
         | V::NullDateTime
         | V::NullDate
         | V::NullTime
-        | V::NullJson => true,
+        | V::NullJson
+        | V::NullVector => true,
         V::Bool(_) => matches!(t, C::Bool),
         V::SmallInt(_) | V::Int(_) | V::BigInt(_) => num || fl,
         V::Float(_) | V::Double(_) | V::Decimal(_) => fl,
@@ -223,6 +224,10 @@ pub fn value_mismatch<M: Model>(name: &str, value: &SqlValue) -> Option<String> 
         V::Date(_) => matches!(t, C::Date),
         V::Time(_) => matches!(t, C::Time),
         V::Json(_) => matches!(t, C::Json | C::Jsonb),
+        // pgvector rejects NaN and infinities; catching them here gives Error::Invalid.
+        V::Vector(v) => {
+            matches!(t, C::Vector(n) if v.len() == *n as usize) && v.iter().all(|x| x.is_finite())
+        }
     };
     if ok {
         return None;

@@ -65,6 +65,14 @@ macro_rules! forward_ref {
                 }
             )*
             #[inline]
+            fn get_vector(&self, col: &str) -> Result<Vec<f32>, RowError> {
+                (**self).get_vector(col)
+            }
+            #[inline]
+            fn get_vector_at(&self, pos: usize, col: &str) -> Result<Vec<f32>, RowError> {
+                (**self).get_vector_at(pos, col)
+            }
+            #[inline]
             fn is_null(&self, col: &str) -> bool {
                 (**self).is_null(col)
             }
@@ -84,6 +92,15 @@ macro_rules! forward_ref {
 /// may read by position when the name matches, and must fall back to the name otherwise.
 pub trait RangoRow {
     getters!(trait_methods);
+    /// pgvector column. Only the PostgreSQL backend reads it; the default is an error.
+    fn get_vector(&self, col: &str) -> Result<Vec<f32>, RowError> {
+        Err(RowError::new(format!(
+            "column '{col}': vector columns need the PostgreSQL backend"
+        )))
+    }
+    fn get_vector_at(&self, _pos: usize, col: &str) -> Result<Vec<f32>, RowError> {
+        self.get_vector(col)
+    }
     fn is_null(&self, col: &str) -> bool;
     fn is_null_at(&self, _pos: usize, col: &str) -> bool {
         self.is_null(col)

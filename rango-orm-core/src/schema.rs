@@ -65,6 +65,8 @@ pub enum ColumnType {
     DateTime,
     Json,
     Jsonb, // Postgres-specific — backends that don't support it fall back to Json
+    /// pgvector `vector(N)`, N dimensions. PostgreSQL only: migrations refuse it elsewhere.
+    Vector(u32),
 }
 
 #[derive(Debug, Clone)]

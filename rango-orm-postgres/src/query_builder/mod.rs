@@ -52,6 +52,16 @@ where
         self.map(|f| f.raw_where(sql, binds))
     }
 
+    /// Raw ORDER BY term, ordered first — for backend-specific extensions only. `$__` as in `raw_where`.
+    pub(crate) fn raw_order_by(self, sql: String, binds: Vec<SqlValue>) -> Self {
+        self.map(|f| f.raw_order_by(sql, binds))
+    }
+
+    /// Remember the first value whose type does not fit column `name` of `M`.
+    pub(crate) fn check_value(&mut self, name: &str, value: &SqlValue) {
+        self.f.check_value(name, value);
+    }
+
     /// Remember the first unknown column of model `T`; reported when the query runs.
     pub(crate) fn check_col<T: Model>(&mut self, name: &str) {
         self.f.check_col::<T>(name);

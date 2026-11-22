@@ -17,6 +17,7 @@ impl SqlValue {
                 | SqlValue::NullDate
                 | SqlValue::NullTime
                 | SqlValue::NullJson
+                | SqlValue::NullVector
         )
     }
 }
@@ -40,6 +41,7 @@ pub enum SqlValue {
     NullDate,
     NullTime,
     NullJson,
+    NullVector,
     // Non-null values
     Bool(bool),
     SmallInt(i16),
@@ -55,6 +57,8 @@ pub enum SqlValue {
     Date(chrono::NaiveDate),
     Time(chrono::NaiveTime),
     Json(serde_json::Value),
+    /// pgvector `vector`; PostgreSQL only.
+    Vector(Vec<f32>),
 }
 
 /// Implemented by field types — converts to a SQL-bindable value.

@@ -23,6 +23,27 @@ use crate::query_builder::QueryBuilder;
 use crate::related::WithRelated;
 use crate::row::fetch_decoded;
 
+/// pgvector distance operator for [`PgQueryExt::nearest`] and [`PgQueryExt::within`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Distance {
+    /// Euclidean distance, `<->`.
+    L2,
+    /// Cosine distance (`1 - cosine similarity`, 0 to 2), `<=>`.
+    Cosine,
+    /// Negative inner product, `<#>`: smaller is closer.
+    InnerProduct,
+}
+
+impl Distance {
+    fn op(self) -> &'static str {
+        match self {
+            Distance::L2 => "<->",
+            Distance::Cosine => "<=>",
+            Distance::InnerProduct => "<#>",
+        }
+    }
+}
+
 /// Postgres-only extensions for `QueryBuilder`.
 pub trait PgQueryExt<M>
 where
@@ -65,6 +86,22 @@ where
     /// WHERE "col" @> ARRAY['a', 'b']
     /// ```
     fn array_contains(self, col: impl ColumnRef<M>, values: Vec<String>) -> Self;
+
+    /// The `k` rows whose vector column is closest to `query` (pgvector), closest first.
+    /// Sets `LIMIT k`; ordered before any `order_by`.
+    ///
+    /// ```sql
+    /// ORDER BY "col" <=> $1::vector LIMIT k
+    /// ```
+    fn nearest(self, col: impl ColumnRef<M>, query: &[f32], k: i64, distance: Distance) -> Self;
+
+    /// Rows whose vector column is less than `max` away from `query` (pgvector).
+    /// With [`Distance::InnerProduct`] the distance is the negative inner product.
+    ///
+    /// ```sql
+    /// WHERE "col" <-> $1::vector < $2
+    /// ```
+    fn within(self, col: impl ColumnRef<M>, query: &[f32], max: f64, distance: Distance) -> Self;
 }
 
 impl<M> PgQueryExt<M> for QueryBuilder<'_, M>
@@ -126,6 +163,29 @@ where
                 SqlValue::Text(key.to_string()),
                 SqlValue::Text(value.to_string()),
             ],
+        )
+    }
+
+    fn nearest(self, col: impl ColumnRef<M>, query: &[f32], k: i64, distance: Distance) -> Self {
+        let mut q = self;
+        let (name, query) = (col.column_name(), SqlValue::Vector(query.to_vec()));
+        q.check_col::<M>(name);
+        q.check_value(name, &query);
+        q.raw_order_by(
+            format!("{} {} $__::vector", quote_ident(name), distance.op()),
+            vec![query],
+        )
+        .limit(k)
+    }
+
+    fn within(self, col: impl ColumnRef<M>, query: &[f32], max: f64, distance: Distance) -> Self {
+        let mut q = self;
+        let (name, query) = (col.column_name(), SqlValue::Vector(query.to_vec()));
+        q.check_col::<M>(name);
+        q.check_value(name, &query);
+        q.raw_where(
+            format!("{} {} $__::vector < $__", quote_ident(name), distance.op()),
+            vec![query, SqlValue::Double(max)],
         )
     }
 

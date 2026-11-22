@@ -2,7 +2,9 @@ use crate::migration::diff::{SchemaDiff, diff, sqlite_rebuilds};
 use crate::migration::renames::detect_renames;
 use crate::migration::scanner::{fk_type, generate_pivot_table, scan_models};
 use crate::migration::snapshot::Snapshot;
-use crate::migration::sql::{generate_sql_from_diff, skipped_partial_uniques};
+use crate::migration::sql::{
+    check_vector_backend, generate_sql_from_diff, skipped_partial_uniques,
+};
 use anyhow::{Result, bail};
 use rango_orm_core::{BackendKind, TableSchema};
 use std::fs;
@@ -152,6 +154,7 @@ pub fn run(
     }
 
     check_not_null_additions(&diffs)?;
+    check_vector_backend(&diffs, backend)?;
 
     // Generate SQL from diff
     let destructive = destructive_items(&diffs);

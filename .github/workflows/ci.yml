@@ -130,7 +130,8 @@ jobs:
 
     services:
       postgres:
-        image: postgres:${{ matrix.pg }}
+        # pgvector image: the vector tests need the extension.
+        image: pgvector/pgvector:pg${{ matrix.pg }}
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -222,7 +223,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:16
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres

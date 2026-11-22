@@ -529,6 +529,15 @@ pub(crate) fn field_type_to_getter(
             let max_lit = proc_macro2::Literal::i64_unsuffixed(max);
             quote! { row.get_i64_at(#pos, #col).map(#core::FieldRange::<#min_lit, #max_lit>::from_db)? }
         }
+        s if s.starts_with("FieldVector<") => {
+            // Dimension already validated by `type_map::column_type` for the column def.
+            let n: usize = s["FieldVector<".len()..s.len() - 1]
+                .trim()
+                .parse()
+                .unwrap_or(0);
+            let n_lit = proc_macro2::Literal::usize_unsuffixed(n);
+            quote! { row.get_vector_at(#pos, #col).map(#core::FieldVector::<#n_lit>::from_db)? }
+        }
         _ => quote! { compile_error!("Unknown field type in FromRow") },
     };
 
@@ -657,6 +666,7 @@ fn column_type_tokens(ct: &ColumnType, core: &TokenStream) -> TokenStream {
         ColumnType::Json => quote! { #core::ColumnType::Json },
         ColumnType::Jsonb => quote! { #core::ColumnType::Jsonb },
         ColumnType::Varchar(n) => quote! { #core::ColumnType::Varchar(#n) },
+        ColumnType::Vector(n) => quote! { #core::ColumnType::Vector(#n) },
         ColumnType::Decimal { precision, scale } => {
             quote! { #core::ColumnType::Decimal { precision: #precision, scale: #scale } }
         }

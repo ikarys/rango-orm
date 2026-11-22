@@ -297,6 +297,7 @@ pub(super) fn sql_type(col_type: &ColumnType, backend: BackendKind) -> String {
             ColumnType::DateTime => "TEXT".into(), // ISO 8601
             ColumnType::Json | ColumnType::Jsonb => "TEXT".into(), // serialized JSON
             ColumnType::Varchar(_) => "TEXT".into(),
+            ColumnType::Vector(n) => format!("vector({n})"),
         },
         BackendKind::Mysql => match col_type {
             ColumnType::Bool => "BOOLEAN".into(),
@@ -318,6 +319,7 @@ pub(super) fn sql_type(col_type: &ColumnType, backend: BackendKind) -> String {
             ColumnType::Time => "TIME(6)".into(),
             ColumnType::DateTime => "DATETIME(6)".into(),
             ColumnType::Json | ColumnType::Jsonb => "JSON".into(),
+            ColumnType::Vector(n) => format!("vector({n})"),
         },
         _ => match col_type {
             ColumnType::Bool => "BOOLEAN".into(),
@@ -337,6 +339,7 @@ pub(super) fn sql_type(col_type: &ColumnType, backend: BackendKind) -> String {
             ColumnType::Json => "JSON".into(),
             ColumnType::Jsonb => "JSONB".into(),
             ColumnType::Varchar(n) => format!("VARCHAR({})", n),
+            ColumnType::Vector(n) => format!("vector({n})"),
             ColumnType::Decimal { .. } => "NUMERIC".into(),
         },
     }
