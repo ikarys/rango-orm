@@ -11,7 +11,6 @@ rango-orm-postgres = { path = "../../rango-orm-postgres" }
 criterion = { version = "0.8", features = ["async_tokio"] }
 tokio = { version = "1", features = ["full"] }
 uuid = { version = "1", features = ["v4"] }
-chrono = "0.4"
 sqlx = { version = "0.9", features = ["postgres", "runtime-tokio"] }
 
 [[bench]]

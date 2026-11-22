@@ -28,6 +28,9 @@ pub(crate) fn db_err(e: sqlx::Error) -> Error {
                 };
             }
             match code.as_deref() {
+                // restrict_violation: PostgreSQL 18 reports an ON DELETE/UPDATE RESTRICT
+                // breach with it instead of 23503, which sqlx does not classify.
+                Some("23001") => Error::ForeignKeyViolation { constraint },
                 Some("40001" | "40P01") => Error::Conflict,
                 // numeric_value_out_of_range
                 Some("22003") => Error::OutOfRange {

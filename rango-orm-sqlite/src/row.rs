@@ -85,31 +85,28 @@ impl RangoRow for SqliteRowRef<'_> {
             .map_err(|e| RowError::new(format!("{}: {}", col, e)))
     }
     #[inline]
-    fn get_datetime(&self, col: &str) -> Result<chrono::DateTime<chrono::Utc>, RowError> {
-        let s: String = self
+    fn get_datetime(&self, col: &str) -> Result<time::OffsetDateTime, RowError> {
+        let s: &str = self
             .0
             .try_get(col)
             .map_err(|e| RowError::new(format!("{}: {}", col, e)))?;
-        s.parse::<chrono::DateTime<chrono::Utc>>()
-            .map_err(|e| RowError::new(format!("{}: {}", col, e)))
+        crate::datetime::parse_datetime(s).map_err(|e| RowError::new(format!("{}: {}", col, e)))
     }
     #[inline]
-    fn get_date(&self, col: &str) -> Result<chrono::NaiveDate, RowError> {
-        let s: String = self
+    fn get_date(&self, col: &str) -> Result<time::Date, RowError> {
+        let s: &str = self
             .0
             .try_get(col)
             .map_err(|e| RowError::new(format!("{}: {}", col, e)))?;
-        s.parse::<chrono::NaiveDate>()
-            .map_err(|e| RowError::new(format!("{}: {}", col, e)))
+        crate::datetime::parse_date(s).map_err(|e| RowError::new(format!("{}: {}", col, e)))
     }
     #[inline]
-    fn get_time(&self, col: &str) -> Result<chrono::NaiveTime, RowError> {
-        let s: String = self
+    fn get_time(&self, col: &str) -> Result<time::Time, RowError> {
+        let s: &str = self
             .0
             .try_get(col)
             .map_err(|e| RowError::new(format!("{}: {}", col, e)))?;
-        s.parse::<chrono::NaiveTime>()
-            .map_err(|e| RowError::new(format!("{}: {}", col, e)))
+        crate::datetime::parse_time(s).map_err(|e| RowError::new(format!("{}: {}", col, e)))
     }
     #[inline]
     fn get_json(&self, col: &str) -> Result<serde_json::Value, RowError> {
@@ -170,15 +167,15 @@ impl RangoRow for SqliteRangoRow {
         SqliteRowRef(&self.0).get_uuid(col)
     }
     #[inline]
-    fn get_datetime(&self, col: &str) -> Result<chrono::DateTime<chrono::Utc>, RowError> {
+    fn get_datetime(&self, col: &str) -> Result<time::OffsetDateTime, RowError> {
         SqliteRowRef(&self.0).get_datetime(col)
     }
     #[inline]
-    fn get_date(&self, col: &str) -> Result<chrono::NaiveDate, RowError> {
+    fn get_date(&self, col: &str) -> Result<time::Date, RowError> {
         SqliteRowRef(&self.0).get_date(col)
     }
     #[inline]
-    fn get_time(&self, col: &str) -> Result<chrono::NaiveTime, RowError> {
+    fn get_time(&self, col: &str) -> Result<time::Time, RowError> {
         SqliteRowRef(&self.0).get_time(col)
     }
     #[inline]
@@ -250,15 +247,15 @@ impl RangoRow for SqlitePrefixedRow<'_> {
         SqliteRowRef(self.row).get_uuid(&self.col(col))
     }
     #[inline]
-    fn get_datetime(&self, col: &str) -> Result<chrono::DateTime<chrono::Utc>, RowError> {
+    fn get_datetime(&self, col: &str) -> Result<time::OffsetDateTime, RowError> {
         SqliteRowRef(self.row).get_datetime(&self.col(col))
     }
     #[inline]
-    fn get_date(&self, col: &str) -> Result<chrono::NaiveDate, RowError> {
+    fn get_date(&self, col: &str) -> Result<time::Date, RowError> {
         SqliteRowRef(self.row).get_date(&self.col(col))
     }
     #[inline]
-    fn get_time(&self, col: &str) -> Result<chrono::NaiveTime, RowError> {
+    fn get_time(&self, col: &str) -> Result<time::Time, RowError> {
         SqliteRowRef(self.row).get_time(&self.col(col))
     }
     #[inline]

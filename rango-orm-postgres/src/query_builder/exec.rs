@@ -292,7 +292,7 @@ where
     ///
     /// # Example
     /// ```rust,ignore
-    /// let oldest: Option<NaiveDate> = Event::filter(&pool).min::<NaiveDate>("date").await?;
+    /// let oldest: Option<time::Date> = Event::filter(&pool).min::<time::Date>("date").await?;
     /// let lowest: Option<f64>       = Order::filter(&pool).min::<f64>("price").await?;
     /// ```
     #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "postgresql", db.operation = "SELECT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
@@ -316,7 +316,7 @@ where
     ///
     /// # Example
     /// ```rust,ignore
-    /// let latest: Option<DateTime<Utc>> = Post::filter(&pool).max::<DateTime<Utc>>("created_at").await?;
+    /// let latest: Option<time::OffsetDateTime> = Post::filter(&pool).max::<time::OffsetDateTime>("created_at").await?;
     /// let highest: Option<f64>          = Order::filter(&pool).max::<f64>("price").await?;
     /// ```
     #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "postgresql", db.operation = "SELECT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]

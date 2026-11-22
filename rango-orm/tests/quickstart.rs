@@ -33,7 +33,7 @@ async fn quick_start_runs() -> TestResult {
         email: FieldEmail::new("alice@example.com")?,
         name: FieldVarchar::new("Alice")?,
         active: FieldBool(true),
-        created_at: FieldDateTime(chrono::Utc::now()),
+        created_at: FieldDateTime::now(),
     };
     insert(&pool, user).await?;
 

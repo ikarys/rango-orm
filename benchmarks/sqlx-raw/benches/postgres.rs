@@ -7,14 +7,23 @@ use pgvector::Vector;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-type BenchRow = (Uuid, String, String, bool, Option<i32>, chrono::DateTime<chrono::Utc>);
+type BenchRow = (
+    Uuid,
+    String,
+    String,
+    bool,
+    Option<i32>,
+    chrono::DateTime<chrono::Utc>,
+);
 
 // ── Setup ─────────────────────────────────────────────────────────────────────
 
 async fn setup() -> PgPool {
     let url = std::env::var("DATABASE_URL")
         .unwrap_or_else(|_| "postgres://postgres:postgres@localhost:5433/rango_test".to_string());
-    let pool = PgPool::connect(&url).await.expect("Failed to connect — set DATABASE_URL");
+    let pool = PgPool::connect(&url)
+        .await
+        .expect("Failed to connect — set DATABASE_URL");
     sqlx::query(
         r#"CREATE TABLE IF NOT EXISTS "sqlx_bench_user" (
             "id"       UUID PRIMARY KEY,
@@ -25,14 +34,22 @@ async fn setup() -> PgPool {
             "created_at" TIMESTAMPTZ NOT NULL
         )"#,
     )
-    .execute(&pool).await.unwrap();
+    .execute(&pool)
+    .await
+    .unwrap();
     sqlx::query(r#"TRUNCATE "sqlx_bench_user""#)
-        .execute(&pool).await.unwrap();
+        .execute(&pool)
+        .await
+        .unwrap();
     pool
 }
 
-fn user_id() -> Uuid { Uuid::new_v4() }
-fn now() -> chrono::DateTime<chrono::Utc> { chrono::Utc::now() }
+fn user_id() -> Uuid {
+    Uuid::new_v4()
+}
+fn now() -> chrono::DateTime<chrono::Utc> {
+    chrono::Utc::now()
+}
 
 // ── insert_one ────────────────────────────────────────────────────────────────
 
@@ -167,7 +184,6 @@ fn bench_select(c: &mut Criterion) {
             })
         })
     });
-
 
     c.bench_function("sqlx_raw/count", |b| {
         b.iter(|| {

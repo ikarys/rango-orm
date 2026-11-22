@@ -7,7 +7,7 @@ SQLite is the default Rango backend — ideal for development, testing, and smal
 ```toml
 # Cargo.toml
 [dependencies]
-rango-orm = { version = "0.4", default-features = false, features = ["sqlite"] }
+rango-orm = { version = "0.5", default-features = false, features = ["sqlite"] }
 ```
 
 ```toml

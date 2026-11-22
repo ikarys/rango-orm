@@ -1,4 +1,4 @@
-use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, Throughput};
+use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use diesel::pg::Pg;
 use diesel::prelude::*;
 use diesel_async::pooled_connection::{AsyncDieselConnectionManager, deadpool::Pool};
@@ -172,7 +172,10 @@ fn bench_select(c: &mut Criterion) {
         b.iter(|| {
             rt.block_on(async {
                 let mut conn = pool.get().await.unwrap();
-                diesel_bench_user::table.load::<BenchUser>(&mut conn).await.unwrap()
+                diesel_bench_user::table
+                    .load::<BenchUser>(&mut conn)
+                    .await
+                    .unwrap()
             })
         })
     });

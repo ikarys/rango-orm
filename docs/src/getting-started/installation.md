@@ -9,20 +9,20 @@ Rango is pre-1.0: a `0.x` minor release may still break the API. The package is 
 
 [dependencies]
 # PostgreSQL backend (default)
-rango-orm = "0.4"
+rango-orm = "0.5"
 
 # SQLite backend
-rango-orm = { version = "0.4", default-features = false, features = ["sqlite"] }
+rango-orm = { version = "0.5", default-features = false, features = ["sqlite"] }
 
 # MySQL 8.0+ / MariaDB 10.6+ backend
-rango-orm = { version = "0.4", default-features = false, features = ["mysql"] }
+rango-orm = { version = "0.5", default-features = false, features = ["mysql"] }
 
 tokio = { version = "1", features = ["full"] }
 
 # Rango does not re-export these: add them yourself to build
-# FieldUuid / FieldDateTime values (uuid::Uuid, chrono::Utc::now()).
+# FieldUuid / FieldDateTime values (uuid::Uuid, time::OffsetDateTime).
 uuid = { version = "1", features = ["v4"] }
-chrono = "0.4"
+time = "0.3"
 
 # Needed for `FieldJson` values and for reading JSON columns from raw results.
 serde_json = "1"

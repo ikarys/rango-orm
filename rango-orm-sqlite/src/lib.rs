@@ -22,6 +22,7 @@ pub use rango_orm_core::WithRelated;
 pub use sqlite_ext::SqliteQueryExt;
 pub use transaction::{atomic, transaction, SqliteTransaction};
 
+mod datetime;
 mod error;
 pub mod m2m;
 mod ops;

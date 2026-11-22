@@ -101,6 +101,4 @@ Active, pre-1.0. Vulnerabilities are reported privately on GitHub and acknowledg
 
 ## Dependencies held back
 
-- `chrono` is reported unmaintained (RUSTSEC-2026-0543). It is part of the public API
-  (`FieldDateTime`, `SqlValue::DateTime`) and of sqlx's decoding; replacing it is a breaking
-  change for a minor release, not a lockfile update. Declared 2026-11-20.
+None.

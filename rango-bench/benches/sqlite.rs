@@ -18,6 +18,7 @@ struct BenchUser {
     name: FieldVarchar<1, 100>,
     active: FieldBool,
     score: Option<FieldInt>,
+    created_at: FieldDateTime,
 }
 
 // ── Setup ─────────────────────────────────────────────────────────────────────
@@ -30,7 +31,8 @@ async fn setup() -> SqlitePool {
             "email"  TEXT NOT NULL,
             "name"   TEXT NOT NULL,
             "active" INTEGER NOT NULL,
-            "score"  INTEGER
+            "score"  INTEGER,
+            "created_at" TEXT NOT NULL
         )"#,
     )
     .execute(&pool)
@@ -46,6 +48,7 @@ fn make_user(i: usize) -> BenchUser {
         name: FieldVarchar::new(format!("User {}", i)).unwrap(),
         active: FieldBool(true),
         score: Some(FieldInt(i as i32)),
+        created_at: FieldDateTime::now(),
     }
 }
 

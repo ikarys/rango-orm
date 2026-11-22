@@ -2410,7 +2410,12 @@ async fn test_pg_group_by_date_and_raw_values() {
     ] {
         sqlx::query(ddl).execute(&pool).await.unwrap();
     }
-    let d = |y, m, dd| FieldDate(chrono::NaiveDate::from_ymd_opt(y, m, dd).unwrap());
+    let d = |y, m, dd| {
+        FieldDate(
+            time::Date::from_calendar_date(y, time::Month::try_from(m as u8).unwrap(), dd as u8)
+                .unwrap(),
+        )
+    };
     let rows: Vec<DayRow> = [
         (2026, 1, 5, 1),
         (2026, 1, 20, 2),

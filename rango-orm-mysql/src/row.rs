@@ -71,19 +71,19 @@ impl RangoRow for MySqlRowRef<'_> {
         uuid::Uuid::from_slice(&b).map_err(|e| RowError::new(format!("{}: {}", col, e)))
     }
     #[inline]
-    fn get_datetime(&self, col: &str) -> Result<chrono::DateTime<chrono::Utc>, RowError> {
+    fn get_datetime(&self, col: &str) -> Result<time::OffsetDateTime, RowError> {
         self.0
             .try_get(col)
             .map_err(|e| RowError::new(format!("{}: {}", col, e)))
     }
     #[inline]
-    fn get_date(&self, col: &str) -> Result<chrono::NaiveDate, RowError> {
+    fn get_date(&self, col: &str) -> Result<time::Date, RowError> {
         self.0
             .try_get(col)
             .map_err(|e| RowError::new(format!("{}: {}", col, e)))
     }
     #[inline]
-    fn get_time(&self, col: &str) -> Result<chrono::NaiveTime, RowError> {
+    fn get_time(&self, col: &str) -> Result<time::Time, RowError> {
         self.0
             .try_get(col)
             .map_err(|e| RowError::new(format!("{}: {}", col, e)))
@@ -148,15 +148,15 @@ impl RangoRow for MySqlRangoRow {
         MySqlRowRef(&self.0).get_uuid(col)
     }
     #[inline]
-    fn get_datetime(&self, col: &str) -> Result<chrono::DateTime<chrono::Utc>, RowError> {
+    fn get_datetime(&self, col: &str) -> Result<time::OffsetDateTime, RowError> {
         MySqlRowRef(&self.0).get_datetime(col)
     }
     #[inline]
-    fn get_date(&self, col: &str) -> Result<chrono::NaiveDate, RowError> {
+    fn get_date(&self, col: &str) -> Result<time::Date, RowError> {
         MySqlRowRef(&self.0).get_date(col)
     }
     #[inline]
-    fn get_time(&self, col: &str) -> Result<chrono::NaiveTime, RowError> {
+    fn get_time(&self, col: &str) -> Result<time::Time, RowError> {
         MySqlRowRef(&self.0).get_time(col)
     }
     #[inline]
@@ -228,15 +228,15 @@ impl RangoRow for MySqlPrefixedRow<'_> {
         MySqlRowRef(self.row).get_uuid(&self.col(col))
     }
     #[inline]
-    fn get_datetime(&self, col: &str) -> Result<chrono::DateTime<chrono::Utc>, RowError> {
+    fn get_datetime(&self, col: &str) -> Result<time::OffsetDateTime, RowError> {
         MySqlRowRef(self.row).get_datetime(&self.col(col))
     }
     #[inline]
-    fn get_date(&self, col: &str) -> Result<chrono::NaiveDate, RowError> {
+    fn get_date(&self, col: &str) -> Result<time::Date, RowError> {
         MySqlRowRef(self.row).get_date(&self.col(col))
     }
     #[inline]
-    fn get_time(&self, col: &str) -> Result<chrono::NaiveTime, RowError> {
+    fn get_time(&self, col: &str) -> Result<time::Time, RowError> {
         MySqlRowRef(self.row).get_time(&self.col(col))
     }
     #[inline]

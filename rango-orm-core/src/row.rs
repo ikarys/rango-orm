@@ -30,9 +30,9 @@ macro_rules! getters {
             get_string / get_string_at: String;
             get_bytes / get_bytes_at: Vec<u8>;
             get_uuid / get_uuid_at: uuid::Uuid;
-            get_datetime / get_datetime_at: chrono::DateTime<chrono::Utc>;
-            get_date / get_date_at: chrono::NaiveDate;
-            get_time / get_time_at: chrono::NaiveTime;
+            get_datetime / get_datetime_at: time::OffsetDateTime;
+            get_date / get_date_at: time::Date;
+            get_time / get_time_at: time::Time;
             get_json / get_json_at: serde_json::Value;
         }
     };

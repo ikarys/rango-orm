@@ -38,10 +38,10 @@ let lowest: Option<f64>  = Order::filter(&pool).min::<f64>("price").await?;
 let highest: Option<f64> = Order::filter(&pool).max::<f64>("price").await?;
 
 // Dates
-let oldest: Option<chrono::NaiveDate> = Event::filter(&pool).min::<chrono::NaiveDate>("date").await?;
-let latest: Option<chrono::DateTime<chrono::Utc>> = Post::filter(&pool)
+let oldest: Option<time::Date> = Event::filter(&pool).min::<time::Date>("date").await?;
+let latest: Option<time::OffsetDateTime> = Post::filter(&pool)
     .eq("published", true)
-    .max::<chrono::DateTime<chrono::Utc>>("created_at")
+    .max::<time::OffsetDateTime>("created_at")
     .await?;
 
 // Strings

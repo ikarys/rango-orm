@@ -12,11 +12,11 @@ rango init --backend sqlite
 Add Rango to `Cargo.toml`:
 ```toml
 [dependencies]
-rango-orm = { version = "0.4", default-features = false, features = ["sqlite"] }
+rango-orm = { version = "0.5", default-features = false, features = ["sqlite"] }
 tokio = { version = "1", features = ["full"] }
 anyhow = "1"
 uuid = { version = "1", features = ["v4"] }   # you add these two: Rango does not re-export them
-chrono = "0.4"
+time = "0.3"                                    # for time::OffsetDateTime values
 ```
 
 ## 2. Define a model
@@ -96,7 +96,7 @@ async fn main() -> anyhow::Result<()> {
         email: FieldEmail::new("alice@example.com")?,
         name: FieldVarchar::new("Alice")?,
         active: FieldBool(true),
-        created_at: FieldDateTime(chrono::Utc::now()),
+        created_at: FieldDateTime::now(),
     };
     let user = insert(&pool, user).await?;
 

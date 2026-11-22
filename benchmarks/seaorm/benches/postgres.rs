@@ -147,19 +147,11 @@ fn bench_select(c: &mut Criterion) {
     });
 
     c.bench_function("seaorm/select_all_1000", |b| {
-        b.iter(|| {
-            rt.block_on(async {
-                bench_user::Entity::find().all(&db).await.unwrap()
-            })
-        })
+        b.iter(|| rt.block_on(async { bench_user::Entity::find().all(&db).await.unwrap() }))
     });
 
     c.bench_function("seaorm/count", |b| {
-        b.iter(|| {
-            rt.block_on(async {
-                bench_user::Entity::find().count(&db).await.unwrap()
-            })
-        })
+        b.iter(|| rt.block_on(async { bench_user::Entity::find().count(&db).await.unwrap() }))
     });
 }
 

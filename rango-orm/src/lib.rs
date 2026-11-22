@@ -11,7 +11,7 @@
 //! rango-orm = { version = "0.2", default-features = false, features = ["mysql"] }
 //! ```
 //!
-//! Rango does not re-export `uuid` or `chrono`: add them to your own
+//! Rango does not re-export `uuid` or `time`: add them to your own
 //! `Cargo.toml` to build `FieldUuid` / `FieldDateTime` values.
 //!
 //! Then:

@@ -53,9 +53,9 @@ pub enum SqlValue {
     Text(String),
     Bytes(Vec<u8>),
     Uuid(uuid::Uuid),
-    DateTime(chrono::DateTime<chrono::Utc>),
-    Date(chrono::NaiveDate),
-    Time(chrono::NaiveTime),
+    DateTime(time::OffsetDateTime),
+    Date(time::Date),
+    Time(time::Time),
     Json(serde_json::Value),
     /// pgvector `vector`; PostgreSQL only.
     Vector(Vec<f32>),
@@ -118,18 +118,18 @@ impl From<uuid::Uuid> for SqlValue {
         SqlValue::Uuid(v)
     }
 }
-impl From<chrono::DateTime<chrono::Utc>> for SqlValue {
-    fn from(v: chrono::DateTime<chrono::Utc>) -> Self {
+impl From<time::OffsetDateTime> for SqlValue {
+    fn from(v: time::OffsetDateTime) -> Self {
         SqlValue::DateTime(v)
     }
 }
-impl From<chrono::NaiveDate> for SqlValue {
-    fn from(v: chrono::NaiveDate) -> Self {
+impl From<time::Date> for SqlValue {
+    fn from(v: time::Date) -> Self {
         SqlValue::Date(v)
     }
 }
-impl From<chrono::NaiveTime> for SqlValue {
-    fn from(v: chrono::NaiveTime) -> Self {
+impl From<time::Time> for SqlValue {
+    fn from(v: time::Time) -> Self {
         SqlValue::Time(v)
     }
 }
