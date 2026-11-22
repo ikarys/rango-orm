@@ -47,7 +47,7 @@ A typed column accepts its field type or the plain Rust equivalent: `i32` for `F
 Filter values are not validated like field constructors: searching for
 `"not-an-email"` is allowed.
 
-String names (`"email"`, `"-created_at"`) are still accepted everywhere. The name and the value
+String names (`"email"`, `"-created_at"`) are still accepted everywhere except the pgvector methods (`nearest`, `within`), which take the typed column only. The name and the value
 type are checked against the model at runtime, before any SQL runs: an unknown column or
 `.eq("seats", "lots")` on an integer column returns `Error::Invalid`, the same on every
 backend (the database would otherwise reject it on Postgres and coerce it silently on SQLite,

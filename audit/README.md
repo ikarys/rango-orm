@@ -23,9 +23,10 @@ Reports from the usability tests described in [Blind usability tests](../docs/sr
 | 2026-11-20 | [campaign A](2026-11-20-campaign-a-library-django.md) ([brief](2026-11-20-campaign-a-library-django.brief.md)) | A: library, Django developer, 100k loans | 7e0d1ec | SQLite, PostgreSQL | 8/10 | 0 |
 | 2026-11-20 | [campaign B](2026-11-20-campaign-b-saas-billing-pg.md) ([brief](2026-11-20-campaign-b-saas-billing-pg.brief.md)) | B: SaaS billing, backend engineer, 100k invoice lines | 7e0d1ec | PostgreSQL | 7/10 | 0 |
 | 2026-11-20 | [campaign C](2026-11-20-campaign-c-event-booking-mysql.md) ([brief](2026-11-20-campaign-c-event-booking-mysql.brief.md)) | C: event booking, indie developer, 100k bookings | 7e0d1ec | MySQL 8.4, MariaDB 11.4, SQLite | 8/10 | 0 |
+| 2026-11-22 | [campaign D](2026-11-22-campaign-d-semantic-search-pgvector.md) ([brief](2026-11-22-campaign-d-semantic-search-pgvector.brief.md)) | D: semantic search, Rust developer, 20k notes | df14ac8 | PostgreSQL 16 + pgvector 0.8.7 | 7/10 | 0 |
 
 ## Open findings
 
-None. Closed on 2026-11-20 (commits 8370226, 1222129): value type check for string column names, `group_by_date`, `raw_values`, `M2M::add_pairs`, `Error::OutOfRange`, the MySQL partial-index warning and the restore note.
+None. Closed on 2026-11-20 (commits 8370226, 1222129): value type check for string column names, `group_by_date`, `raw_values`, `M2M::add_pairs`, `Error::OutOfRange`, the MySQL partial-index warning and the restore note. Campaign D (2026-11-22): every finding answered in its decisions table.
 
 Not reproduced: two slow-query `WARN` events for one statement on MySQL (2026-11-08 C #21). One `SELECT SLEEP(0.7)` gives exactly one `WARN` on `sqlx::query` on MySQL 8.4 and MariaDB 11.4, and sqlx emits it once per statement; a subscriber that also receives the same event through a `log` bridge counts it twice.

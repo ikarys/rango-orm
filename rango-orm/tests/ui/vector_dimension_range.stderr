@@ -1,0 +1,7 @@
+error: Invalid FieldVector: `FieldVector<16001>`, N must be in 1..=16000
+ --> tests/ui/vector_dimension_range.rs:3:10
+  |
+3 | #[derive(Model)]
+  |          ^^^^^
+  |
+  = note: this error originates in the derive macro `Model` (in Nightly builds, run with -Z macro-backtrace for more info)

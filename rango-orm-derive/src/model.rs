@@ -680,7 +680,12 @@ fn map_field_type(ty: &Type, core: &TokenStream) -> Result<TokenStream> {
         Err(type_map::TypeMapError::Unknown) => Err(unsupported_type(ty, &type_str)),
         Err(type_map::TypeMapError::Invalid(name)) => Err(syn::Error::new(
             proc_macro2::Span::call_site(),
-            format!("Invalid {name} syntax: `{type_str}`"),
+            match name {
+                "FieldVector" => {
+                    format!("Invalid FieldVector: `{type_str}`, N must be in 1..=16000")
+                }
+                _ => format!("Invalid {name} syntax: `{type_str}`"),
+            },
         )),
     }
 }
