@@ -6,7 +6,7 @@ A Django-inspired async ORM for Rust: define a struct, Rango generates the schem
 
 > **AI assistance:** Rango is written with AI assistance under the [Vibecoding Convention](VIBECODING.md) (level 2); every quality claim comes with the check that backs it: [how Rango is built and verified](docs/src/trust/how-rango-is-built.md).
 
-> `0.3.1` is the latest release on crates.io as [`rango-orm`](https://crates.io/crates/rango-orm). Pre-1.0: a `0.x` minor release may still break the API.
+> `0.4.0` is the latest release on crates.io as [`rango-orm`](https://crates.io/crates/rango-orm). Pre-1.0: a `0.x` minor release may still break the API.
 
 ## Why Rango
 
@@ -73,11 +73,11 @@ Rango is pre-1.0: a `0.x` minor release may still break the API. The package is 
 
 ```toml
 [dependencies]
-rango-orm = "0.3" # PostgreSQL, default
+rango-orm = "0.4" # PostgreSQL, default
 # SQLite variant:
-# rango-orm = { version = "0.3", default-features = false, features = ["sqlite"] }
+# rango-orm = { version = "0.4", default-features = false, features = ["sqlite"] }
 # MySQL / MariaDB variant:
-# rango-orm = { version = "0.3", default-features = false, features = ["mysql"] }
+# rango-orm = { version = "0.4", default-features = false, features = ["mysql"] }
 tokio = { version = "1", features = ["full"] }
 ```
 

@@ -16,6 +16,7 @@ convention:
   adopted_at: 765491d
   status: active
   tools:
+    - "Claude Code:claude-fable-5-1"
     - "Claude Code:claude-opus-5-5"
     - "Claude Code:claude-sonnet-5-5"
     - "local:qwen3.8-27b"
@@ -51,7 +52,7 @@ version 0.1 at level 2. How each quality claim is checked is in
 ## AI assistance
 
 Most of Rango's code and documentation is AI-written. The maintainer frames each change, reads
-it and decides; Claude Code (Opus) frames, reviews and fixes, Sonnet subagents and a local model
+it and decides; Claude Code (Opus, at times Fable) frames, reviews and fixes, Sonnet subagents and a local model
 (qwen3.8-27b) write bulk code. Blind usability tests are run by AI agents that only read the user
 docs; their reports and the maintainer's decisions are in [audit/](audit/README.md). Every
 AI-written commit carries an `Assisted-by: <tool>:<model>` trailer.
