@@ -134,6 +134,17 @@ pub(super) fn create_table_parts(
         closing
     );
 
+    for col in &schema.columns {
+        if let Some(distance) = col.vector_index {
+            post_stmts.push(hnsw_index_sql(
+                backend,
+                &schema.table_name,
+                &col.name,
+                distance,
+            ));
+        }
+    }
+
     if backend != BackendKind::Mysql {
         for col in &schema.columns {
             if col.index && !col.primary_key && !col.unique {

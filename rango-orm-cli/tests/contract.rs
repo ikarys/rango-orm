@@ -111,6 +111,7 @@ fn pivot_schema(from: &str, to: &str) -> TableSchema {
         unique: false,
         default: None,
         index,
+        vector_index: None,
         references: Some(FkReference {
             table: t.to_string(),
             column: "id".into(),

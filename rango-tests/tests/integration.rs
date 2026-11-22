@@ -2752,7 +2752,7 @@ async fn test_pg_vector_roundtrip_and_nearest() {
     assert_eq!(b.alt, None);
     assert_eq!(b.embedding.as_slice(), &[0.9, 0.1, 0.0]);
 
-    let q = [1.0, 0.0, 0.0];
+    let q = FieldVector::<3>::new([1.0, 0.0, 0.0]).unwrap();
     let near = |d| TestEmbedding::filter(&pool).nearest(TestEmbedding::EMBEDDING, &q, 2, d);
     assert_eq!(labels(near(Distance::L2)).await, ["a", "b"]);
     assert_eq!(labels(near(Distance::Cosine)).await, ["a", "b"]);
@@ -2786,7 +2786,7 @@ async fn test_pg_vector_roundtrip_and_nearest() {
     assert_eq!(
         labels(TestEmbedding::filter(&pool).nearest(
             TestEmbedding::ALT,
-            &[1.0, 1.0, 1.0],
+            &FieldVector::new([1.0, 1.0, 1.0]).unwrap(),
             1,
             Distance::L2
         ))
@@ -2794,37 +2794,35 @@ async fn test_pg_vector_roundtrip_and_nearest() {
         ["d"]
     );
 
-    // Wrong dimension and non-vector columns are refused before any SQL runs.
+    // The distance comes back with each row: the ORDER BY value, with its bind numbered
+    // after the WHERE binds and before a later order_by.
+    let with_distance: Vec<(String, f64)> = TestEmbedding::filter(&pool)
+        .ne(TestEmbedding::LABEL, "a")
+        .nearest(TestEmbedding::EMBEDDING, &q, 3, Distance::L2)
+        .order_by(TestEmbedding::LABEL.desc())
+        .all_with_distance()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|(e, d)| (e.label.to_string(), d))
+        .collect();
+    let expected = [
+        ("b", 0.02f64.sqrt()),
+        ("d", 2f64.sqrt()),
+        ("c", 2f64.sqrt()),
+    ];
+    assert_eq!(with_distance.len(), 3);
+    for ((label, d), (want_label, want_d)) in with_distance.iter().zip(expected) {
+        assert_eq!(label, want_label);
+        assert!((d - want_d).abs() < 1e-6, "{label}: {d} vs {want_d}");
+    }
+
+    // Column kind, dimension and finiteness are checked at compile time
+    // (rango-orm/tests/ui/vector_*.rs); what is left fails before any SQL runs.
     fn err<T>(r: Result<T>) -> bool {
         matches!(r, Err(Error::Invalid(_)))
     }
-    assert!(err(TestEmbedding::filter(&pool)
-        .nearest(TestEmbedding::LABEL, &q, 1, Distance::L2)
-        .all()
-        .await));
-    assert!(err(TestEmbedding::filter(&pool)
-        .nearest(TestEmbedding::EMBEDDING, &[1.0, 0.0], 1, Distance::L2)
-        .all()
-        .await));
-    assert!(err(TestEmbedding::filter(&pool)
-        .within(
-            TestEmbedding::EMBEDDING,
-            &[f32::NAN, 0.0, 0.0],
-            1.0,
-            Distance::L2
-        )
-        .all()
-        .await));
-    // SQL injection guard: a hostile column name never reaches the SQL.
-    assert!(err(TestEmbedding::filter(&pool)
-        .nearest(
-            "embedding\" <-> '[0,0,0]'; DROP TABLE x; --",
-            &q,
-            1,
-            Distance::L2
-        )
-        .all()
-        .await));
+    assert!(err(TestEmbedding::filter(&pool).all_with_distance().await));
     assert!(err(TestEmbedding::filter(&pool)
         .nearest(TestEmbedding::EMBEDDING, &q, 1, Distance::L2)
         .annotate_count("n")

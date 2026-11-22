@@ -20,13 +20,20 @@ Use `FieldVector<N>` for a vector column, where `N` is the dimension. `N` must b
 "table"."column" is a vector column: FieldVector needs the PostgreSQL backend (pgvector)
 ```
 
-rango does not generate HNSW or IVFFlat indexes. Add an index by hand in the migration file:
+Declare the index on the field with the distance you search by:
 
-```sql
-CREATE INDEX ON "doc" USING hnsw ("embedding" vector_cosine_ops);
+```rust
+#[field(index = "cosine")]   // or "l2", "inner_product"
+embedding: FieldVector<384>,
 ```
 
-Use `vector_l2_ops` for L2 distance and `vector_ip_ops` for inner product. Without an index, search is an exact scan.
+`rango makemigrations` then writes an HNSW index with the matching operator class:
+
+```sql
+CREATE INDEX IF NOT EXISTS "doc_embedding_hnsw" ON "doc" USING hnsw ("embedding" vector_cosine_ops);
+```
+
+Changing the distance drops and recreates the index; removing the attribute drops it. Postgres only uses the index when `nearest` asks for the same distance. Without an index, search is an exact scan. A bare `#[field(index)]` on a vector field, a distance on a non-vector field, or an unknown distance is a compile error.
 
 ## Searching
 
@@ -34,11 +41,17 @@ Query methods are on the `PgQueryExt` trait. Import it with `use rango::prelude:
 
 `Distance::L2` maps to `<->`, `Distance::Cosine` maps to `<=>`, and `Distance::InnerProduct` maps to `<#>`. pgvector returns the negative inner product, so smaller values are closer for all three distances.
 
+`col` must be a vector column constant of the model, and `query` a `&FieldVector<N>` with the column's `N`. Anything else does not compile:
+
+```text
+error[E0277]: `Column<Doc, FieldText>` is not a vector column of `Doc`
+```
+
 `.nearest(col, &query, k, distance)` generates `ORDER BY col <op> $n LIMIT k`. The distance ordering comes first. A later `.order_by(...)` only breaks ties. It combines with any filter.
 
 `.within(col, &query, max, distance)` generates `WHERE col <op> $n < max`. It is a radius filter and does not order results.
 
-The distance value itself is not returned. `.aggregate()` with `.nearest()` is `Error::Invalid`. `.count()` ignores the ordering.
+`.all_with_distance()` returns `Vec<(M, f64)>`, each row with its distance to the query. It needs `.nearest()`, and does not combine with `select_related` or `prefetch_related` (both `Error::Invalid`). Postgres computes the distance once for the select list and the ordering, and still uses the HNSW index: it costs the same as `.all()` in the benchmark. `.aggregate()` with `.nearest()` is `Error::Invalid`. `.count()` ignores the ordering.
 
 ## Example
 
@@ -52,6 +65,7 @@ use rango::prelude::*;
 struct Doc {
     id: FieldUuid,
     title: FieldVarchar<1, 200>,
+    #[field(index = "cosine")]
     embedding: FieldVector<384>,
 }
 
@@ -64,10 +78,10 @@ async fn run(pool: &PgPool) -> Result<(), Box<dyn std::error::Error>> {
     })
     .await?;
 
-    let query: Vec<f32> = embed("travel plans");
-    let closest = Doc::filter(pool)
+    let query = FieldVector::new(embed("travel plans"))?;
+    let closest: Vec<(Doc, f64)> = Doc::filter(pool)
         .nearest(Doc::EMBEDDING, &query, 5, Distance::Cosine)
-        .all()
+        .all_with_distance()
         .await?;
     let similar = Doc::filter(pool)
         .within(Doc::EMBEDDING, &query, 0.25, Distance::Cosine)
@@ -81,9 +95,10 @@ async fn run(pool: &PgPool) -> Result<(), Box<dyn std::error::Error>> {
 
 On 10 000 rows of 384 dimensions, a `nearest` query takes the same time through Rango as the
 same SQL written by hand with sqlx, within 3%. Postgres uses the HNSW index for the query Rango
-builds; the benchmark checks that with `EXPLAIN ANALYZE`. Numbers and method are in
+builds; the benchmark checks that with `EXPLAIN ANALYZE`. `.all_with_distance()` takes the same
+time as `.all()` (1.300 ms against 1.299 ms). Numbers and method are in
 [benchmarks/README.md](https://github.com/ikarys/rango-orm/tree/main/benchmarks#vector-search-pgvector-2026-11-22).
 
 ## Errors and safety
 
-The column must be a vector column of the model. The query vector must have the column's dimension and finite values. Otherwise rango returns `Error::Invalid` before any SQL runs. The operator is a fixed string. The column name is checked against the model and quoted. The query vector is bound as a parameter and is never formatted into the SQL.
+The column and the query dimension are checked by the compiler; a `FieldVector` only holds finite values. The operator is a fixed string. The column name comes from the model's column constant and is quoted. The query vector is bound as a parameter and is never formatted into the SQL.

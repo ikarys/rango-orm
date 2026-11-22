@@ -36,6 +36,8 @@ pub struct ColumnDef {
     pub references: Option<FkReference>,
     /// Create a b-tree index on this column.
     pub index: bool,
+    /// Create an HNSW index for this distance on this vector column (pgvector).
+    pub vector_index: Option<crate::Distance>,
 }
 
 /// Common column types, backend-agnostic.

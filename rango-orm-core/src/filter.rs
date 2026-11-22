@@ -221,6 +221,9 @@ pub struct PrefetchSpec {
     pub collect_vec: CollectVecFn,
 }
 
+/// Result column of [`Filter::select_with_distance_sql`].
+pub const DISTANCE_COLUMN: &str = "__rango_distance";
+
 /// Filters, ordering, pagination and relation specs of one query, plus the SQL they render to.
 /// Backends wrap it in their `QueryBuilder` (see `impl_filter_methods!`) with a connection.
 #[doc(hidden)]
@@ -230,6 +233,8 @@ pub struct Filter<M> {
     order_by: Vec<String>,
     /// Binds of `raw_order_by` terms, in the order their `$__` appear in `order_by`.
     order_binds: Vec<SqlValue>,
+    /// The `order_by` term of the last `order_by_distance`, selected by `select_with_distance_sql`.
+    distance: Option<String>,
     limit: Option<i64>,
     offset: Option<i64>,
     explicit_limit: bool,
@@ -259,6 +264,7 @@ impl<M: Model + ModelValues> Filter<M> {
             dialect,
             conditions: Vec::new(),
             order_by: Vec::new(),
+            distance: None,
             order_binds: Vec::new(),
             limit: None,
             offset: None,
@@ -292,6 +298,12 @@ impl<M: Model + ModelValues> Filter<M> {
         self.order_by.insert(0, sql);
         self.order_binds.splice(0..0, binds);
         self
+    }
+
+    /// `raw_order_by` for a distance with one bind, which `select_with_distance_sql` also selects.
+    pub fn order_by_distance(mut self, sql: String, bind: SqlValue) -> Self {
+        self.distance = Some(sql.clone());
+        self.raw_order_by(sql, vec![bind])
     }
 
     /// Remember the first unknown column of model `T`; reported when the query runs.
@@ -909,9 +921,28 @@ impl<M: Model + ModelValues> Filter<M> {
     }
 
     /// `SELECT <cols> FROM t WHERE .. ORDER BY .. LIMIT .. OFFSET ..`, plus the ORDER BY clause alone.
-    fn plain_select(&self, cols: &str) -> (String, String, Vec<SqlValue>) {
+    /// With `distance`, the distance term is also selected as [`DISTANCE_COLUMN`].
+    fn plain_select(&self, cols: &str, distance: Option<&str>) -> (String, String, Vec<SqlValue>) {
         let (where_clause, mut binds) = self.build_where();
-        let mut sql = format!("SELECT {cols} FROM {}", self.q(M::table_name()));
+        let mut sql = format!("SELECT {cols}");
+        if let Some(term) = distance {
+            // Same placeholder as in ORDER BY: Postgres matches the ORDER BY expression to the
+            // selected one and computes the distance once per row, and the HNSW index still
+            // serves the ordering.
+            let pos = self.order_by.iter().position(|o| o == term).unwrap_or(0);
+            let before: usize = self.order_by[..pos]
+                .iter()
+                .map(|o| o.matches("$__").count())
+                .sum();
+            let mut idx = binds.len() + 1 + before;
+            let p = self.dialect.placeholder(&mut idx);
+            sql.push_str(&format!(
+                ", {} AS {}",
+                term.replacen("$__", &p, 1),
+                self.q(DISTANCE_COLUMN)
+            ));
+        }
+        sql.push_str(&format!(" FROM {}", self.q(M::table_name())));
         if !where_clause.is_empty() {
             sql.push(' ');
             sql.push_str(&where_clause);
@@ -1050,7 +1081,7 @@ impl<M: Model + ModelValues> Filter<M> {
     /// `SELECT` of the given plain column names, no relations.
     pub fn values_sql(&self, cols: &[&str]) -> (String, Vec<SqlValue>) {
         let list: Vec<String> = cols.iter().map(|c| self.q(c)).collect();
-        let (sql, _, binds) = self.plain_select(&list.join(", "));
+        let (sql, _, binds) = self.plain_select(&list.join(", "), None);
         (sql, binds)
     }
 
@@ -1061,7 +1092,7 @@ impl<M: Model + ModelValues> Filter<M> {
 
     /// `select_sql` with an explicit column list (already quoted) instead of `*`.
     pub fn select_sql_cols(&self, cols: &str) -> (String, Vec<SqlValue>) {
-        let (sql, order_by, binds) = self.plain_select(cols);
+        let (sql, order_by, binds) = self.plain_select(cols, None);
         if self.select_related.is_empty() {
             return (sql, binds);
         }
@@ -1093,6 +1124,24 @@ impl<M: Model + ModelValues> Filter<M> {
             format!("{select} FROM ({sql}) AS {m}{joins}{order_by}"),
             binds,
         )
+    }
+
+    /// `select_sql` plus the `order_by_distance` term as a trailing [`DISTANCE_COLUMN`].
+    pub fn select_with_distance_sql(&self) -> Result<(String, Vec<SqlValue>)> {
+        self.ensure_valid()?;
+        let Some(term) = self.distance.as_deref() else {
+            return Err(Error::Invalid(
+                "all_with_distance() needs nearest() in the query".into(),
+            ));
+        };
+        if !self.select_related.is_empty() || !self.prefetch_related.is_empty() {
+            return Err(Error::Invalid(
+                "all_with_distance() does not combine with select_related or prefetch_related"
+                    .into(),
+            ));
+        }
+        let (sql, _, binds) = self.plain_select("*", Some(term));
+        Ok((sql, binds))
     }
 
     /// `SELECT COUNT(*) FROM t WHERE ..`
@@ -1494,6 +1543,7 @@ mod tests {
                 default: None,
                 references: None,
                 index: false,
+                vector_index: None,
             };
             TableSchema {
                 columns: [
@@ -1867,6 +1917,32 @@ mod tests {
              AS \"__m\" LEFT JOIN \"test_model\" AS \"__r0\" \
              ON \"__r0\".\"id\" = \"__m\".\"parent_id\" ORDER BY \"a\" DESC"
         );
+    }
+
+    #[test]
+    fn distance_is_selected_with_its_order_by_placeholder() {
+        let f = Filter::<T>::new(Dialect::Postgres)
+            .raw_where("\"a\" = $__".into(), vec![SqlValue::Int(1)])
+            .order_by_distance("\"e\" <-> $__::vector".into(), SqlValue::Vector(vec![1.0]))
+            .raw_order_by("\"x\" <-> $__".into(), vec![SqlValue::Int(2)])
+            .limit(3);
+        let (sql, binds) = f.select_with_distance_sql().unwrap();
+        assert_eq!(
+            sql,
+            "SELECT *, \"e\" <-> $3::vector AS \"__rango_distance\" FROM \"test_model\" \
+             WHERE \"a\" = $1 ORDER BY \"x\" <-> $2, \"e\" <-> $3::vector LIMIT 3"
+        );
+        assert_eq!(binds.len(), 3);
+        // Plain `.all()` SQL is unchanged.
+        assert!(f.select_sql().0.starts_with("SELECT * FROM"));
+
+        let no_nearest = Filter::<T>::new(Dialect::Postgres).select_with_distance_sql();
+        assert!(matches!(no_nearest, Err(Error::Invalid(_))));
+        let related = Filter::<T>::new(Dialect::Postgres)
+            .order_by_distance("\"e\" <-> $__::vector".into(), SqlValue::Vector(vec![1.0]))
+            .select_related::<T>("parent_id")
+            .select_with_distance_sql();
+        assert!(matches!(related, Err(Error::Invalid(_))));
     }
 
     #[test]

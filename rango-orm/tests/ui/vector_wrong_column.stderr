@@ -1,0 +1,24 @@
+error[E0277]: `Column<Doc, rango::FieldText>` is not a vector column of `Doc`
+  --> tests/ui/vector_wrong_column.rs:11:31
+   |
+11 |     Doc::filter(pool).nearest(Doc::TITLE, q, 5, Distance::Cosine)
+   |                       ------- ^^^^^^^^^^ the trait `VectorColumn<Doc, _>` is not implemented for `Column<Doc, rango::FieldText>`
+   |                       |
+   |                       required by a bound introduced by this call
+   |
+   = note: pass a `FieldVector<N>` column constant such as `Doc::EMBEDDING`, and a query `&FieldVector<N>` of the same `N`
+help: the following other types implement trait `VectorColumn<M, N>`
+  --> $WORKSPACE/rango-orm-core/src/vector.rs
+   |
+   | impl<M, const N: usize> VectorColumn<M, N> for Column<M, FieldVector<N>> {}
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `Column<M, rango::FieldVector<N>>`
+   | impl<M, const N: usize> VectorColumn<M, N> for Column<M, Option<FieldVector<N>>> {}
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `Column<M, Option<rango::FieldVector<N>>>`
+note: required by a bound in `nearest`
+  --> $WORKSPACE/rango-orm-postgres/src/pg_ext.rs
+   |
+   |     fn nearest<const N: usize>(
+   |        ------- required by a bound in this associated function
+   |         self,
+   |         col: impl VectorColumn<M, N>,
+   |                   ^^^^^^^^^^^^^^^^^^ required by this bound in `PgQueryExt::nearest`

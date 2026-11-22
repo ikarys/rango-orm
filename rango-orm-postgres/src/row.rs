@@ -201,14 +201,24 @@ where
     M: FromRow,
     E: sqlx::Executor<'e, Database = sqlx::Postgres>,
 {
-    // A loop over the stream rather than `try_map`: that would bound `M: Send + Unpin`
+    fetch_map(q, executor, |row| Ok(M::from_row_in(row)?)).await
+}
+
+/// `fetch_decoded` with a custom decoder.
+pub(crate) async fn fetch_map<'e, T, E>(
+    q: sqlx::query::Query<'_, sqlx::Postgres, sqlx::postgres::PgArguments>,
+    executor: E,
+    decode: impl Fn(&PgRangoRow) -> rango_orm_core::Result<T>,
+) -> rango_orm_core::Result<Vec<T>>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Postgres>,
+{
+    // A loop over the stream rather than `try_map`: that would bound `T: Send + Unpin`
     // on every public query method.
     let mut rows = q.fetch(executor);
     let mut out = Vec::new();
     while let Some(row) = std::future::poll_fn(|cx| rows.as_mut().poll_next(cx)).await {
-        out.push(M::from_row_in(&PgRangoRow(
-            row.map_err(crate::error::db_err)?,
-        ))?);
+        out.push(decode(&PgRangoRow(row.map_err(crate::error::db_err)?))?);
     }
     Ok(out)
 }
