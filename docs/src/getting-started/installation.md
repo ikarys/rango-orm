@@ -9,13 +9,13 @@ Rango is pre-1.0: a `0.x` minor release may still break the API. The package is 
 
 [dependencies]
 # PostgreSQL backend (default)
-rango-orm = "0.3"
+rango-orm = "0.4"
 
 # SQLite backend
-rango-orm = { version = "0.3", default-features = false, features = ["sqlite"] }
+rango-orm = { version = "0.4", default-features = false, features = ["sqlite"] }
 
 # MySQL 8.0+ / MariaDB 10.6+ backend
-rango-orm = { version = "0.3", default-features = false, features = ["mysql"] }
+rango-orm = { version = "0.4", default-features = false, features = ["mysql"] }
 
 tokio = { version = "1", features = ["full"] }
 

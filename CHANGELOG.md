@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 (2026-11-22)
+
+- Security: `url` 2.5.9 in `Cargo.lock` for RUSTSEC-2026-0592 (stack overflow in `Url::origin()` on nested `blob:` URLs). Rango does not call `Url::origin()`; sqlx only parses `DATABASE_URL` with it.
 
 - Feat: pgvector support on PostgreSQL. `FieldVector<N>` maps to `vector(N)` (dimension and finite values checked), `PgQueryExt::nearest(col, &v, k, Distance)` orders by L2 / cosine / inner-product distance with `LIMIT k`, and `within(col, &v, max, Distance)` filters by radius; both take a `FieldVector<N>` column and a `&FieldVector<N>` query, so a non-vector column or another dimension does not compile. `.all_with_distance()` returns each row with its distance, at the cost of `.all()`. `#[field(index = "cosine" | "l2" | "inner_product")]` makes `makemigrations` write the HNSW index. `makemigrations` adds `CREATE EXTENSION IF NOT EXISTS vector` and refuses vector columns on SQLite and MySQL / MariaDB.
 - Feat: `QueryBuilder::stream()` decodes the rows one at a time as they arrive from the connection (constant memory, no default 1000-row cap, `.limit()` honoured) and returns a `RowStream` that implements `futures_core::Stream` with an inherent `next()`; relations are `Error::Invalid` there (all backends).
