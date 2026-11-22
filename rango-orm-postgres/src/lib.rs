@@ -25,7 +25,7 @@ pub use ops::{
     raw_execute, raw_scalar, raw_values, update, update_or_create,
 };
 pub use pg_ext::{Pg, PgQueryExt};
-pub use query_builder::{Conn, QueryBuilder, SelectAs};
+pub use query_builder::{Conn, QueryBuilder, RowStream, SelectAs};
 pub use rango_orm_core::WithRelated;
 pub use sqlx::PgPool;
 pub use transaction::{RangoTransaction, atomic, atomic_retry, transaction};

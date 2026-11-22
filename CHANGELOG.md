@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Feat: `QueryBuilder::stream()` decodes the rows one at a time as they arrive from the connection (constant memory, no default 1000-row cap, `.limit()` honoured) and returns a `RowStream` that implements `futures_core::Stream` with an inherent `next()`; relations are `Error::Invalid` there (all backends).
 - Perf: 1000-row selects on Postgres decode as fast as hand-written sqlx (1.28 ms vs 1.30 ms in the benchmarks, from 1.46 ms): the derives implement the new `FromRow::from_row_in<R: RangoRow>` (static dispatch, inlinable getters), columns are read by position with a name check (`RangoRow::get_*_at`, `is_null_at`, `PrimaryKey::from_row_at`, all with by-name defaults), and rows are decoded as they stream from the connection. Additive: hand-written `FromRow`, `RangoRow` and `PrimaryKey` impls keep compiling.
 
 ## 0.3.1 (2026-11-20)

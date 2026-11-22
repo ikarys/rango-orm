@@ -9,6 +9,8 @@ mod conn;
 pub use conn::Conn;
 pub(crate) mod exec;
 pub use exec::SelectAs;
+mod stream;
+pub use stream::RowStream;
 
 // ─── QueryBuilder ─────────────────────────────────────────────────────────────
 /// Chainable, lazy query builder. SQL is built and executed only at `.all()` / `.one()`.
