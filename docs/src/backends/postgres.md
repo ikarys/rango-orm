@@ -7,7 +7,7 @@ PostgreSQL is the primary Rango backend with full feature support.
 ```toml
 # Cargo.toml
 [dependencies]
-rango-orm = "0.4"
+rango-orm = "0.5"
 ```
 
 ```toml

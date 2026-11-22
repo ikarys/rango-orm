@@ -7,7 +7,7 @@ One backend, `rango-orm-mysql`, covers MySQL 8.0+ and MariaDB 10.6+. It sticks t
 ```toml
 # Cargo.toml
 [dependencies]
-rango-orm = { version = "0.4", default-features = false, features = ["mysql"] }
+rango-orm = { version = "0.5", default-features = false, features = ["mysql"] }
 ```
 
 ```toml
