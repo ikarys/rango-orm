@@ -11,6 +11,8 @@ mod conn;
 pub use conn::Conn;
 pub(crate) mod exec;
 pub use exec::SelectAs;
+mod stream;
+pub use stream::RowStream;
 
 pub use rango_orm_core::DEFAULT_QUERY_LIMIT;
 

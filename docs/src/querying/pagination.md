@@ -33,3 +33,16 @@ When no limit is set, the default cap is 1000 rows, and a `WARN` is logged if ex
 ```rust,ignore
 let all = User::filter(&pool).unlimited().all().await?;
 ```
+
+## Streaming
+`.stream()` decodes the rows one at a time as they arrive from the connection, so memory stays constant whatever the count. There is no default cap: `.limit()` is honoured, nothing else bounds the rows. It returns a `RowStream` that implements `futures_core::Stream`; its inherent `next()` needs no combinator crate.
+
+```rust,ignore
+let mut rows = User::filter(&pool).eq(User::ACTIVE, true).stream()?;
+while let Some(user) = rows.next().await {
+    let user = user?;
+    export(&user).await?;
+}
+```
+
+The stream borrows the pool or the transaction the builder was made with, and holds a connection until it is dropped. `select_related` and `prefetch_related` are not loaded by `.stream()`: they return `Error::Invalid`, use `.all()` for those.

@@ -720,6 +720,57 @@ async fn test_bulk_create() {
     teardown(&pool).await;
 }
 
+/// `stream()` has no default row cap (1001 rows come back whole), honours `.limit()`,
+/// refuses relations, and runs inside a transaction.
+#[tokio::test]
+#[cfg_attr(not(feature = "integration"), ignore)]
+async fn test_stream_yields_every_row_without_default_cap() {
+    let pool = pool().await;
+    setup(&pool).await;
+
+    let users: Vec<TestUser> = (0..1001)
+        .map(|i| user(&format!("stream{}@test.com", i)))
+        .collect();
+    bulk_create(&pool, &users).await.unwrap();
+
+    let mut rows = TestUser::filter(&pool).stream().unwrap();
+    let mut seen = 0;
+    while let Some(u) = rows.next().await {
+        u.unwrap();
+        seen += 1;
+    }
+    assert_eq!(seen, 1001);
+
+    let mut rows = TestUser::filter(&pool).limit(2).stream().unwrap();
+    let mut seen = 0;
+    while let Some(u) = rows.next().await {
+        u.unwrap();
+        seen += 1;
+    }
+    assert_eq!(seen, 2);
+
+    assert!(matches!(
+        TestPost::filter(&pool)
+            .select_related::<TestUser>("author_id")
+            .stream()
+            .err(),
+        Some(Error::Invalid(_))
+    ));
+
+    let mut tx = pool.begin().await.unwrap();
+    let mut rows = TestUser::filter(&mut *tx).limit(3).stream().unwrap();
+    let mut seen = 0;
+    while let Some(u) = rows.next().await {
+        u.unwrap();
+        seen += 1;
+    }
+    drop(rows);
+    tx.commit().await.unwrap();
+    assert_eq!(seen, 3);
+
+    teardown(&pool).await;
+}
+
 #[tokio::test]
 #[cfg_attr(not(feature = "integration"), ignore)]
 async fn test_bulk_create_unnest_large_with_nulls() {

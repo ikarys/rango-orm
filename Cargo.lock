@@ -1423,6 +1423,7 @@ name = "rango-orm-mysql"
 version = "0.3.1"
 dependencies = [
  "chrono",
+ "futures-core",
  "log",
  "rango-orm-core",
  "serde_json",
@@ -1437,6 +1438,7 @@ name = "rango-orm-postgres"
 version = "0.3.1"
 dependencies = [
  "chrono",
+ "futures-core",
  "log",
  "rango-orm-core",
  "serde_json",
@@ -1451,6 +1453,7 @@ name = "rango-orm-sqlite"
 version = "0.3.1"
 dependencies = [
  "chrono",
+ "futures-core",
  "log",
  "rango-orm-core",
  "serde_json",
