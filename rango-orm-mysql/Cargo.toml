@@ -13,9 +13,9 @@ categories = ["database", "asynchronous"]
 
 [dependencies]
 rango-orm-core = { workspace = true }
-sqlx = { version = "0.9", features = ["mysql", "runtime-tokio", "tls-rustls", "uuid", "chrono", "json", "rust_decimal"] }
+sqlx = { version = "0.9", features = ["mysql", "runtime-tokio", "tls-rustls", "uuid", "time", "json", "rust_decimal"] }
 uuid = { version = "1", features = ["v4"] }
-chrono = "0.4"
+time = "0.3.55"
 serde_json = "1"
 futures-core = "0.3"
 log = "0.4"

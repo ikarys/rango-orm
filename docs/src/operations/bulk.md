@@ -15,7 +15,7 @@ let users: Vec<User> = (0..1000)
         email: FieldEmail::new(format!("user{}@example.com", i))?,
         name: FieldVarchar::new(format!("User {}", i))?,
         active: FieldBool(true),
-        created_at: FieldDateTime(chrono::Utc::now()),
+        created_at: FieldDateTime::now(),
     })
     .collect();
 

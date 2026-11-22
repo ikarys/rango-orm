@@ -34,9 +34,9 @@ macro_rules! bind {
             SqlValue::Text(v) => $q.bind(v),
             SqlValue::Bytes(v) => $q.bind(v),
             SqlValue::Uuid(v) => $q.bind(v.to_string()),
-            SqlValue::DateTime(v) => $q.bind(v.to_rfc3339()),
-            SqlValue::Date(v) => $q.bind(v.to_string()),
-            SqlValue::Time(v) => $q.bind(v.to_string()),
+            SqlValue::DateTime(v) => $q.bind(crate::datetime::format_datetime(v)),
+            SqlValue::Date(v) => $q.bind(crate::datetime::format_date(v)),
+            SqlValue::Time(v) => $q.bind(crate::datetime::format_time(v)),
             SqlValue::Json(v) => $q.bind(v.to_string()),
             SqlValue::Vector(v) => $q.bind(serde_json::Value::from(v).to_string()),
         }

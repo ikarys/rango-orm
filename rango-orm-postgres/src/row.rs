@@ -61,9 +61,9 @@ macro_rules! impl_rangorow {
             impl_get!(get_string, get_string_at, String);
             impl_get!(get_bytes, get_bytes_at, Vec<u8>);
             impl_get!(get_uuid, get_uuid_at, uuid::Uuid);
-            impl_get!(get_datetime, get_datetime_at, chrono::DateTime<chrono::Utc>);
-            impl_get!(get_date, get_date_at, chrono::NaiveDate);
-            impl_get!(get_time, get_time_at, chrono::NaiveTime);
+            impl_get!(get_datetime, get_datetime_at, time::OffsetDateTime);
+            impl_get!(get_date, get_date_at, time::Date);
+            impl_get!(get_time, get_time_at, time::Time);
 
             #[inline]
             fn get_json(&self, col: &str) -> Result<serde_json::Value, RowError> {
@@ -172,13 +172,13 @@ impl RangoRow for PgPrefixedRow<'_> {
     fn get_uuid(&self, col: &str) -> Result<uuid::Uuid, RowError> {
         PgRangoRow2(self.row).get_uuid(&self.col(col))
     }
-    fn get_datetime(&self, col: &str) -> Result<chrono::DateTime<chrono::Utc>, RowError> {
+    fn get_datetime(&self, col: &str) -> Result<time::OffsetDateTime, RowError> {
         PgRangoRow2(self.row).get_datetime(&self.col(col))
     }
-    fn get_date(&self, col: &str) -> Result<chrono::NaiveDate, RowError> {
+    fn get_date(&self, col: &str) -> Result<time::Date, RowError> {
         PgRangoRow2(self.row).get_date(&self.col(col))
     }
-    fn get_time(&self, col: &str) -> Result<chrono::NaiveTime, RowError> {
+    fn get_time(&self, col: &str) -> Result<time::Time, RowError> {
         PgRangoRow2(self.row).get_time(&self.col(col))
     }
     fn get_json(&self, col: &str) -> Result<serde_json::Value, RowError> {

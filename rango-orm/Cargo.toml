@@ -36,4 +36,4 @@ rango-orm-mysql    = { workspace = true, optional = true }
 trybuild = "1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 uuid = { version = "1", features = ["v4"] }
-chrono = "0.4"
+time = { version = "0.3.55", features = ["macros"] }

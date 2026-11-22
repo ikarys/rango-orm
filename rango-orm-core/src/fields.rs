@@ -1,7 +1,7 @@
 use argon2::Argon2;
 use argon2::password_hash::{PasswordHasher, PasswordVerifier, phc::PasswordHash};
-use chrono::{DateTime, NaiveDate, NaiveTime, Utc};
 use serde::{Deserialize, Serialize};
+use time::{Date, OffsetDateTime, Time};
 use uuid::Uuid;
 
 /// Marker trait for all Rango field types.
@@ -383,18 +383,26 @@ impl Default for FieldUuid {
 
 // ─── Date / Time ─────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct FieldDate(pub NaiveDate);
+time::serde::format_description!(date_format, Date, "[year]-[month]-[day]");
+time::serde::format_description!(
+    time_format,
+    Time,
+    "[hour]:[minute]:[second][optional [.[subsecond]]]"
+);
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct FieldTime(pub NaiveTime);
+pub struct FieldDate(#[serde(with = "date_format")] pub Date);
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct FieldDateTime(pub DateTime<Utc>);
+pub struct FieldTime(#[serde(with = "time_format")] pub Time);
+
+/// Values read back are UTC; a value with another offset is stored as the same instant.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FieldDateTime(#[serde(with = "time::serde::rfc3339")] pub OffsetDateTime);
 
 impl FieldDateTime {
     pub fn now() -> Self {
-        Self(Utc::now())
+        Self(OffsetDateTime::now_utc())
     }
 }
 
@@ -887,18 +895,18 @@ impl From<Uuid> for FieldUuid {
         Self(v)
     }
 }
-impl From<NaiveDate> for FieldDate {
-    fn from(v: NaiveDate) -> Self {
+impl From<Date> for FieldDate {
+    fn from(v: Date) -> Self {
         Self(v)
     }
 }
-impl From<NaiveTime> for FieldTime {
-    fn from(v: NaiveTime) -> Self {
+impl From<Time> for FieldTime {
+    fn from(v: Time) -> Self {
         Self(v)
     }
 }
-impl From<DateTime<Utc>> for FieldDateTime {
-    fn from(v: DateTime<Utc>) -> Self {
+impl From<OffsetDateTime> for FieldDateTime {
+    fn from(v: OffsetDateTime) -> Self {
         Self(v)
     }
 }
@@ -924,6 +932,32 @@ mod tests {
         // 3 chars, 6 bytes
         assert!(FieldVarchar::<1, 3>::new("éèà").is_ok());
         assert!(FieldVarchar::<4, 10>::new("éèà").is_err());
+    }
+
+    #[test]
+    fn date_time_json_format() {
+        use time::macros::{date, datetime, time};
+
+        assert_eq!(
+            serde_json::to_string(&FieldDate(date!(2026 - 11 - 05))).unwrap(),
+            "\"2026-11-05\""
+        );
+        assert_eq!(
+            serde_json::to_string(&FieldTime(time!(13:37:00.123456))).unwrap(),
+            "\"13:37:00.123456\""
+        );
+
+        let dt = FieldDateTime(datetime!(2026-11-05 22:00:00.654321 UTC));
+        assert_eq!(
+            serde_json::to_string(&dt).unwrap(),
+            "\"2026-11-05T22:00:00.654321Z\""
+        );
+        let dt_from_chrono: FieldDateTime =
+            serde_json::from_str("\"2026-11-05T22:00:00.654321+00:00\"").unwrap();
+        assert_eq!(dt, dt_from_chrono);
+
+        let t: FieldTime = serde_json::from_str("\"13:37:00\"").unwrap();
+        assert_eq!(t, FieldTime(time!(13:37:00)));
     }
 
     #[test]
@@ -1003,9 +1037,9 @@ filter_values! {
     FieldUrl => String, &str;
     FieldBytes => Vec<u8>;
     FieldUuid => Uuid;
-    FieldDateTime => DateTime<Utc>;
-    FieldDate => NaiveDate;
-    FieldTime => NaiveTime;
+    FieldDateTime => OffsetDateTime;
+    FieldDate => Date;
+    FieldTime => Time;
     FieldJson => serde_json::Value;
 }
 
