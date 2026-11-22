@@ -9,6 +9,8 @@ mod conn;
 pub use conn::Conn;
 pub(crate) mod exec;
 pub use exec::SelectAs;
+mod stream;
+pub use stream::RowStream;
 
 // ─── QueryBuilder ─────────────────────────────────────────────────────────────
 /// Chainable, lazy query builder. SQL is built and executed only at `.all()` / `.one()`.
@@ -50,6 +52,11 @@ where
         self.map(|f| f.raw_where(sql, binds))
     }
 
+    /// Distance ORDER BY term, ordered first, that `all_with_distance` also selects. `$__` as in `raw_where`.
+    pub(crate) fn order_by_distance(self, sql: String, bind: SqlValue) -> Self {
+        self.map(|f| f.order_by_distance(sql, bind))
+    }
+
     /// Remember the first unknown column of model `T`; reported when the query runs.
     pub(crate) fn check_col<T: Model>(&mut self, name: &str) {
         self.f.check_col::<T>(name);
@@ -86,6 +93,19 @@ where
     let q = sqlx::query(sqlx::AssertSqlSafe(sql));
     let q = bind_sql_values(q, binds);
     q.fetch_all(executor).await.map_err(db_err)
+}
+
+async fn bind_and_fetch_decoded<'e, E, M>(
+    executor: E,
+    sql: &str,
+    binds: Vec<SqlValue>,
+) -> Result<Vec<M>>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Postgres>,
+    M: FromRow,
+{
+    let q = sqlx::query(sqlx::AssertSqlSafe(sql));
+    crate::row::fetch_decoded(bind_sql_values(q, binds), executor).await
 }
 
 /// Run `sql` with the keys bound as one Postgres array (`$1`).

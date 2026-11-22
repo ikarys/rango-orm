@@ -41,15 +41,16 @@ No mocks. The tester logs friction as it happens, not from memory at the end.
 
 ## Campaigns
 
-Three campaigns, each a different persona building a different real app. Together they touch every page of the user guide.
+Four campaigns, each a different persona building a different real app. A, B and C cover the general pages; D covers vector search, which only PostgreSQL with pgvector supports. Together they touch every page of the user guide.
 
 | Campaign | Persona | App | Backends |
 |---|---|---|---|
 | A | Django developer, little SQL | Library: books, authors, members, loans; one active loan per book | SQLite, then ported to PostgreSQL |
 | B | Backend engineer, knows SQL well | Multi-tenant SaaS billing API: tenants, customers, invoices, invoice lines, money as decimals | PostgreSQL |
 | C | Indie developer who ships on MySQL | Event booking with seat capacity and waiting list | MySQL 8 and MariaDB, SQLite for its tests |
+| D | Rust developer adding semantic search | Notes search: closest notes with their distance, related notes, filtered search | PostgreSQL with pgvector |
 
-Each campaign follows the same steps. Step 7 is about volume: it checks that the queries stay simple and correct on a real amount of data, not raw speed, which the benchmarks measure.
+Campaigns A, B and C follow the same steps; D follows the subset its brief lists. Step 7 is about volume: it checks that the queries stay simple and correct on a real amount of data, not raw speed, which the benchmarks measure.
 
 1. Install, run `rango init`, and configure the connection.
 2. Write the models: primary keys, foreign keys, many-to-many relations, optional fields, and constraints.
@@ -57,7 +58,7 @@ Each campaign follows the same steps. Step 7 is about volume: it checks that the
 4. Evolve the schema: add a field, rename a field, add a constraint, then migrate again.
 5. Seed data with bulk operations: at least 100,000 rows in the app's main table and realistic volumes in the related tables. Time the seed.
 6. Write the app's real queries: filters, relations, aggregates, and pagination.
-7. Run those queries on the seeded volume: count the SQL statements of each (no N+1), time it, page deep with keyset pagination, and check `.explain()` uses an index where one is expected. Time one migration that adds a column to the big table.
+7. Run those queries on the seeded volume: count the SQL statements of each (no N+1), time it, page deep with keyset pagination, and check with `.explain_analyze()` that an index is used where one is expected. Time one migration that adds a column to the big table.
 8. Run one transaction scenario where atomicity matters, for example borrow a book, book the last seat, or issue an invoice.
 9. Run a concurrency or retry case where the backend supports it.
 10. Check observability: count the SQL queries of each step from the tracing output.
@@ -66,34 +67,35 @@ Each campaign follows the same steps. Step 7 is about volume: it checks that the
 
 ## Feature coverage
 
-| Feature (docs page) | A | B | C |
-|---|---|---|---|
-| Installation, quick start, configuration | x | x | x |
-| Defining models, field types | x | x | x |
-| Implicit primary key (`#[rango::model]`, bigint) |  |  | x |
-| Relations: ForeignKey, ManyToMany | x | x | x |
-| ManyToMany `add_many` | x |  | x |
-| Model hooks | x |  |  |
-| Constraints, ordering, partial unique index | x | x | x |
-| makemigrations (add, rename, constraint change, SQLite rebuild) | x | x | x |
-| migrate, least-privilege migration role (`MIGRATE_DATABASE_URL`) | x | x | x |
-| Filters, `or` / `not`, subqueries (`where_exists`, `in_subquery`) | x | x | x |
-| Aggregations, decimals | x | x | x |
-| GROUP BY / HAVING (`group_by`, `annotate_*`, `having`) |  | x | x |
-| select_related, prefetch_related | x | x |  |
-| values() |  |  | x |
-| Partial selects (`select_as`) |  | x |  |
-| Keyset pagination | x | x |  |
-| Raw SQL, stored procedure via `raw` |  |  | x |
-| CRUD, get_or_create, update_or_create | x | x | x |
-| QuerySet update / delete | x |  | x |
-| Bulk create / update / upsert | x | x | x |
-| Transactions, atomic_retry | x | x | x |
-| Errors | x | x | x |
-| Tracing, slow query log, `.explain()` / `.explain_analyze()` | x | x | x |
-| Backend extensions (JSON, full-text search) |  | x |  |
-| TLS and credentials |  | x | x |
-| export / import, dump / restore / backup, restore across backends | x | x | x |
+| Feature (docs page) | A | B | C | D |
+|---|---|---|---|---|
+| Installation, quick start, configuration | x | x | x | x |
+| Defining models, field types | x | x | x | x |
+| Implicit primary key (`#[rango::model]`, bigint) |  |  | x |  |
+| Relations: ForeignKey, ManyToMany | x | x | x |  |
+| ManyToMany `add_many` | x |  | x |  |
+| Model hooks | x |  |  |  |
+| Constraints, ordering, partial unique index | x | x | x |  |
+| makemigrations (add, rename, constraint change, SQLite rebuild) | x | x | x | x |
+| migrate, least-privilege migration role (`MIGRATE_DATABASE_URL`) | x | x | x | x |
+| Filters, `or` / `not`, subqueries (`where_exists`, `in_subquery`) | x | x | x |  |
+| Aggregations, decimals | x | x | x |  |
+| GROUP BY / HAVING (`group_by`, `annotate_*`, `having`) |  | x | x |  |
+| select_related, prefetch_related | x | x |  |  |
+| values() |  |  | x |  |
+| Partial selects (`select_as`) |  | x |  |  |
+| Keyset pagination | x | x |  |  |
+| Raw SQL, stored procedure via `raw` |  |  | x |  |
+| CRUD, get_or_create, update_or_create | x | x | x |  |
+| QuerySet update / delete | x |  | x |  |
+| Bulk create / update / upsert | x | x | x | x |
+| Transactions, atomic_retry | x | x | x |  |
+| Errors | x | x | x | x |
+| Tracing, slow query log, `.explain()` / `.explain_analyze()` | x | x | x | x |
+| Backend extensions (JSON, full-text search) |  | x |  |  |
+| Vector search (pgvector) |  |  |  | x |
+| TLS and credentials |  | x | x |  |
+| export / import, dump / restore / backup, restore across backends | x | x | x |  |
 
 When a docs page is added, it gets a row and at least one campaign.
 
@@ -144,7 +146,7 @@ Every finding gets a line, and `won't fix` always gives the reason. `audit/READM
 
 ## When
 
-- Before each minor release (`0.x.0`): all three campaigns.
+- Before each minor release (`0.x.0`): all four campaigns.
 - Patch release: no campaign, unless it changes the public API or the docs; then only the steps it touches are rerun.
 - A release ships with no open `BLOCKER` or `DOC-WRONG` finding.
 

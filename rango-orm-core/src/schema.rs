@@ -36,6 +36,8 @@ pub struct ColumnDef {
     pub references: Option<FkReference>,
     /// Create a b-tree index on this column.
     pub index: bool,
+    /// Create an HNSW index for this distance on this vector column (pgvector).
+    pub vector_index: Option<crate::Distance>,
 }
 
 /// Common column types, backend-agnostic.
@@ -65,6 +67,8 @@ pub enum ColumnType {
     DateTime,
     Json,
     Jsonb, // Postgres-specific — backends that don't support it fall back to Json
+    /// pgvector `vector(N)`, N dimensions. PostgreSQL only: migrations refuse it elsewhere.
+    Vector(u32),
 }
 
 #[derive(Debug, Clone)]

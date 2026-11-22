@@ -1,0 +1,18 @@
+error: #[field(index = "...")] is an HNSW index, only valid on a FieldVector field; use #[field(index)] for a b-tree index
+ --> tests/ui/vector_index_attrs.rs:6:21
+  |
+6 |     #[field(index = "cosine")]
+  |                     ^^^^^^^^
+
+error: a vector field needs a distance for its index: #[field(index = "cosine")], "l2" or "inner_product"
+  --> tests/ui/vector_index_attrs.rs:13:5
+   |
+13 | /     #[field(index)]
+14 | |     embedding: FieldVector<3>,
+   | |_____________________________^
+
+error: unknown distance, expected one of: l2, cosine, inner_product
+  --> tests/ui/vector_index_attrs.rs:20:21
+   |
+20 |     #[field(index = "euclid")]
+   |                     ^^^^^^^^

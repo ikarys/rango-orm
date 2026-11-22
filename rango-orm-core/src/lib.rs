@@ -17,6 +17,7 @@ pub mod row;
 pub mod schema;
 #[doc(hidden)]
 pub mod type_map;
+pub mod vector;
 
 pub use column::{
     Column, ColumnRef, FilterColumn, FilterValue, ForeignKeyRef, ManyToManyField, OrderRef,
@@ -35,7 +36,8 @@ pub use error::{Error, Result};
 pub use fields::*;
 #[doc(hidden)]
 pub use filter::{
-    Cmp, DEFAULT_QUERY_LIMIT, DateTrunc, Dialect, Filter, PrefetchSpec, SelectRelatedSpec,
+    Cmp, DEFAULT_QUERY_LIMIT, DISTANCE_COLUMN, DateTrunc, Dialect, Filter, PrefetchSpec,
+    SelectRelatedSpec,
 };
 pub use hooks::{BoxFuture, HookResult, ModelHooks};
 #[doc(hidden)]
@@ -55,3 +57,4 @@ pub use rust_decimal::Decimal;
 pub use schema::{
     ColumnDef, ColumnType, DefaultValue, FkReference, ReferentialAction, TableSchema,
 };
+pub use vector::{Distance, VectorColumn};

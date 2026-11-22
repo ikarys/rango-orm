@@ -37,7 +37,7 @@ where
         } else {
             // ── select_related: R's columns came back in the same row (LEFT JOIN) ──
             for row in &rows {
-                let mut wr = WithRelated::new(M::from_row(&MySqlRowRef(row))?);
+                let mut wr = WithRelated::new(M::from_row_in(&MySqlRowRef(row))?);
                 for (i, spec) in self.f.select_related_specs().iter().enumerate() {
                     let r_row = MySqlPrefixedRow::new(row, format!("__r{i}_"));
                     // NULL primary key: no matching R (NULL or dangling FK).
@@ -122,7 +122,9 @@ where
 
         let rows = self.conn.fetch_all(&sql, binds).await?;
         match rows.into_iter().next() {
-            Some(r) => Ok(Some(M::from_row(&MySqlRangoRow(r)).map_err(Error::from)?)),
+            Some(r) => Ok(Some(
+                M::from_row_in(&MySqlRangoRow(r)).map_err(Error::from)?,
+            )),
             None => Ok(None),
         }
     }

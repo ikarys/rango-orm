@@ -41,7 +41,7 @@ pub fn expand(input: DeriveInput) -> Result<TokenStream> {
     let mut checks = Vec::new();
     let mut col_names = Vec::new();
     let mut from_row_fields = Vec::new();
-    for f in &fields.named {
+    for (pos, f) in fields.named.iter().enumerate() {
         let fname = f.ident.as_ref().unwrap();
         // Same constant the model derive generates: `User::EMAIL` for `email: Option<FieldEmail>`.
         let const_name = syn::Ident::new(
@@ -54,13 +54,16 @@ pub fn expand(input: DeriveInput) -> Result<TokenStream> {
         checks.push(quote! { let _: #core::Column<#model, #inner_ty> = <#model>::#const_name; });
         col_names.push(col.clone());
         let type_str = type_name(inner_ty);
-        let getter = field_type_to_getter(&type_str, &col, nullable, &core);
+        let getter = field_type_to_getter(&type_str, &col, pos, nullable, &core);
         from_row_fields.push(quote! { #fname: #getter });
     }
 
     Ok(quote! {
         impl #core::FromRow for #name {
             fn from_row(row: &dyn #core::RangoRow) -> Result<Self, #core::RowError> {
+                Self::from_row_in(row)
+            }
+            fn from_row_in<R: #core::RangoRow + ?Sized>(row: &R) -> Result<Self, #core::RowError> {
                 Ok(Self {
                     #(#from_row_fields),*
                 })

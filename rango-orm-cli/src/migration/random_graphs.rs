@@ -46,6 +46,7 @@ fn col(name: &str, col_type: ColumnType) -> ColumnDef {
         default: None,
         references: None,
         index: false,
+        vector_index: None,
     }
 }
 

@@ -115,6 +115,73 @@ impl<const MIN: usize, const MAX: usize> std::fmt::Display for FieldVarchar<MIN,
     }
 }
 
+/// pgvector `vector(N)` embedding, PostgreSQL only (migrations for SQLite and MySQL fail).
+///
+/// The inner value is private: [`new`](Self::new) / `TryFrom` / `Deserialize` check that
+/// there are exactly `N` values and that each one is finite (pgvector rejects NaN and
+/// infinity, so the check turns a database error into a field error).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "Vec<f32>")]
+pub struct FieldVector<const N: usize>(Vec<f32>);
+
+impl<const N: usize> FieldVector<N> {
+    pub fn new(v: impl Into<Vec<f32>>) -> Result<Self, FieldError> {
+        let v = v.into();
+        if v.len() != N {
+            return Err(FieldError(format!(
+                "Expected {} dimensions, got {}",
+                N,
+                v.len()
+            )));
+        }
+        if v.iter().any(|x| !x.is_finite()) {
+            return Err(FieldError("Vector values must be finite".into()));
+        }
+        Ok(Self(v))
+    }
+
+    pub fn as_slice(&self) -> &[f32] {
+        &self.0
+    }
+
+    pub fn into_inner(self) -> Vec<f32> {
+        self.0
+    }
+
+    /// Wraps a value read from the database without re-validating it. Not for application code.
+    #[doc(hidden)]
+    pub fn from_db(v: Vec<f32>) -> Self {
+        Self(v)
+    }
+}
+
+impl<const N: usize> TryFrom<Vec<f32>> for FieldVector<N> {
+    type Error = FieldError;
+    fn try_from(v: Vec<f32>) -> Result<Self, FieldError> {
+        Self::new(v)
+    }
+}
+
+impl<const N: usize> std::ops::Deref for FieldVector<N> {
+    type Target = [f32];
+    fn deref(&self) -> &[f32] {
+        &self.0
+    }
+}
+
+impl<const N: usize> ToSqlValue for FieldVector<N> {
+    fn to_sql_value(&self) -> SqlValue {
+        SqlValue::Vector(self.0.clone())
+    }
+}
+
+impl<const N: usize> ToSqlValue for Option<FieldVector<N>> {
+    fn to_sql_value(&self) -> SqlValue {
+        self.as_ref()
+            .map_or(SqlValue::NullVector, |v| v.to_sql_value())
+    }
+}
+
 /// Email field — validated on construction (inner value is private, see [`FieldVarchar`]).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(try_from = "String")]

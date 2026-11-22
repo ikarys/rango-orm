@@ -555,6 +555,35 @@ async fn test_sqlite_bulk_create() {
     assert_eq!(n, 5);
 }
 
+/// `stream()` has no default row cap (1001 rows come back whole) and honours `.limit()`.
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-sqlite"), ignore)]
+async fn test_sqlite_stream_yields_every_row_without_default_cap() {
+    let pool = pool().await;
+    setup(&pool).await;
+
+    let users: Vec<TestUser> = (0..1001)
+        .map(|i| user(&format!("stream{}@sqlite.com", i)))
+        .collect();
+    bulk_create(&pool, &users).await.unwrap();
+
+    let mut rows = TestUser::filter(&pool).stream().unwrap();
+    let mut seen = 0;
+    while let Some(u) = rows.next().await {
+        u.unwrap();
+        seen += 1;
+    }
+    assert_eq!(seen, 1001);
+
+    let mut rows = TestUser::filter(&pool).limit(2).stream().unwrap();
+    let mut seen = 0;
+    while let Some(u) = rows.next().await {
+        u.unwrap();
+        seen += 1;
+    }
+    assert_eq!(seen, 2);
+}
+
 #[tokio::test]
 #[cfg_attr(not(feature = "integration-sqlite"), ignore)]
 async fn test_sqlite_bulk_create_is_atomic_across_chunks() {

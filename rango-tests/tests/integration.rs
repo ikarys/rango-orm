@@ -720,6 +720,57 @@ async fn test_bulk_create() {
     teardown(&pool).await;
 }
 
+/// `stream()` has no default row cap (1001 rows come back whole), honours `.limit()`,
+/// refuses relations, and runs inside a transaction.
+#[tokio::test]
+#[cfg_attr(not(feature = "integration"), ignore)]
+async fn test_stream_yields_every_row_without_default_cap() {
+    let pool = pool().await;
+    setup(&pool).await;
+
+    let users: Vec<TestUser> = (0..1001)
+        .map(|i| user(&format!("stream{}@test.com", i)))
+        .collect();
+    bulk_create(&pool, &users).await.unwrap();
+
+    let mut rows = TestUser::filter(&pool).stream().unwrap();
+    let mut seen = 0;
+    while let Some(u) = rows.next().await {
+        u.unwrap();
+        seen += 1;
+    }
+    assert_eq!(seen, 1001);
+
+    let mut rows = TestUser::filter(&pool).limit(2).stream().unwrap();
+    let mut seen = 0;
+    while let Some(u) = rows.next().await {
+        u.unwrap();
+        seen += 1;
+    }
+    assert_eq!(seen, 2);
+
+    assert!(matches!(
+        TestPost::filter(&pool)
+            .select_related::<TestUser>("author_id")
+            .stream()
+            .err(),
+        Some(Error::Invalid(_))
+    ));
+
+    let mut tx = pool.begin().await.unwrap();
+    let mut rows = TestUser::filter(&mut *tx).limit(3).stream().unwrap();
+    let mut seen = 0;
+    while let Some(u) = rows.next().await {
+        u.unwrap();
+        seen += 1;
+    }
+    drop(rows);
+    tx.commit().await.unwrap();
+    assert_eq!(seen, 3);
+
+    teardown(&pool).await;
+}
+
 #[tokio::test]
 #[cfg_attr(not(feature = "integration"), ignore)]
 async fn test_bulk_create_unnest_large_with_nulls() {
@@ -915,6 +966,39 @@ async fn test_raw_execute() {
     .expect("raw_execute failed");
 
     assert_eq!(affected, 1);
+
+    teardown(&pool).await;
+}
+
+/// The derive reads each column at its struct position when the name there matches, and by
+/// name otherwise: a `SELECT` that reorders or prepends columns must still decode correctly.
+#[tokio::test]
+#[cfg_attr(not(feature = "integration"), ignore)]
+async fn test_decode_falls_back_to_name_when_columns_are_reordered() {
+    let pool = pool().await;
+    setup(&pool).await;
+
+    let mut u = user("reorder@test.com");
+    u.score = Some(FieldInt(42));
+    insert(&pool, u.clone()).await.unwrap();
+
+    let reordered: Vec<TestUser> = raw(
+        &pool,
+        "SELECT score, active, name, email, id FROM rango_test_user WHERE email = $1",
+        vec![SqlValue::Text("reorder@test.com".to_string())],
+    )
+    .await
+    .expect("raw failed");
+    assert_eq!(reordered, vec![u.clone()]);
+
+    let shifted: Vec<TestUser> = raw(
+        &pool,
+        "SELECT 1 AS n, u.* FROM rango_test_user u WHERE email = $1",
+        vec![SqlValue::Text("reorder@test.com".to_string())],
+    )
+    .await
+    .expect("raw failed");
+    assert_eq!(shifted, vec![u]);
 
     teardown(&pool).await;
 }
@@ -2589,4 +2673,183 @@ async fn test_pg_group_by_date_and_raw_values() {
             .unwrap()
             .is_empty()
     );
+}
+
+// ── pgvector ──────────────────────────────────────────────────────────────────
+
+#[derive(Model, Debug, Clone, PartialEq)]
+#[model(table = "rango_test_embedding")]
+struct TestEmbedding {
+    id: FieldUuid,
+    label: FieldVarchar<1, 50>,
+    embedding: FieldVector<3>,
+    alt: Option<FieldVector<3>>,
+}
+
+fn emb(label: &str, v: [f32; 3], alt: Option<[f32; 3]>) -> TestEmbedding {
+    TestEmbedding {
+        id: FieldUuid(Uuid::new_v4()),
+        label: FieldVarchar::new(label.to_string()).unwrap(),
+        embedding: FieldVector::new(v.to_vec()).unwrap(),
+        alt: alt.map(|a| FieldVector::new(a.to_vec()).unwrap()),
+    }
+}
+
+async fn labels(q: QueryBuilder<'_, TestEmbedding>) -> Vec<String> {
+    q.all()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|e| e.label.to_string())
+        .collect()
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "integration"), ignore)]
+async fn test_pg_vector_roundtrip_and_nearest() {
+    let pool = pool().await;
+    sqlx::query("CREATE EXTENSION IF NOT EXISTS vector")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(r#"DROP TABLE IF EXISTS "rango_test_embedding""#)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(r#"CREATE TABLE "rango_test_embedding" ("id" UUID PRIMARY KEY, "label" VARCHAR(50) NOT NULL, "embedding" vector(3) NOT NULL, "alt" vector(3))"#)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let a = emb("a", [1.0, 0.0, 0.0], Some([0.5, 0.5, 0.0]));
+    insert(&pool, a.clone()).await.unwrap();
+    let n = bulk_create(
+        &pool,
+        &[
+            emb("b", [0.9, 0.1, 0.0], None),
+            emb("c", [0.0, 1.0, 0.0], None),
+            emb("d", [0.0, 0.0, -1.0], Some([1.0, 1.0, 1.0])),
+        ],
+    )
+    .await
+    .unwrap();
+    assert_eq!(n, 3);
+
+    // Round trip, NULL included.
+    let got = TestEmbedding::filter(&pool)
+        .eq(TestEmbedding::LABEL, "a")
+        .one()
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(got, a);
+    let b = TestEmbedding::filter(&pool)
+        .eq(TestEmbedding::LABEL, "b")
+        .one()
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(b.alt, None);
+    assert_eq!(b.embedding.as_slice(), &[0.9, 0.1, 0.0]);
+
+    let q = FieldVector::<3>::new([1.0, 0.0, 0.0]).unwrap();
+    let near = |d| TestEmbedding::filter(&pool).nearest(TestEmbedding::EMBEDDING, &q, 2, d);
+    assert_eq!(labels(near(Distance::L2)).await, ["a", "b"]);
+    assert_eq!(labels(near(Distance::Cosine)).await, ["a", "b"]);
+    assert_eq!(labels(near(Distance::InnerProduct)).await, ["a", "b"]);
+
+    // The distance ordering wins over a later order_by, which only breaks the
+    // c/d tie (both at sqrt(2)); its placeholder follows the where binds.
+    assert_eq!(
+        labels(
+            TestEmbedding::filter(&pool)
+                .ne(TestEmbedding::LABEL, "a")
+                .nearest(TestEmbedding::EMBEDDING, &q, 3, Distance::L2)
+                .order_by(TestEmbedding::LABEL.desc())
+        )
+        .await,
+        ["b", "d", "c"]
+    );
+
+    // L2 distance from q: a=0, b≈0.14, c≈1.41, d≈1.41.
+    let mut close = labels(TestEmbedding::filter(&pool).within(
+        TestEmbedding::EMBEDDING,
+        &q,
+        0.5,
+        Distance::L2,
+    ))
+    .await;
+    close.sort();
+    assert_eq!(close, ["a", "b"]);
+
+    // A nullable vector column works too; rows with NULL are ordered last.
+    assert_eq!(
+        labels(TestEmbedding::filter(&pool).nearest(
+            TestEmbedding::ALT,
+            &FieldVector::new([1.0, 1.0, 1.0]).unwrap(),
+            1,
+            Distance::L2
+        ))
+        .await,
+        ["d"]
+    );
+
+    // The distance comes back with each row: the ORDER BY value, with its bind numbered
+    // after the WHERE binds and before a later order_by.
+    let with_distance: Vec<(String, f64)> = TestEmbedding::filter(&pool)
+        .ne(TestEmbedding::LABEL, "a")
+        .nearest(TestEmbedding::EMBEDDING, &q, 3, Distance::L2)
+        .order_by(TestEmbedding::LABEL.desc())
+        .all_with_distance()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|(e, d)| (e.label.to_string(), d))
+        .collect();
+    let expected = [
+        ("b", 0.02f64.sqrt()),
+        ("d", 2f64.sqrt()),
+        ("c", 2f64.sqrt()),
+    ];
+    assert_eq!(with_distance.len(), 3);
+    for ((label, d), (want_label, want_d)) in with_distance.iter().zip(expected) {
+        assert_eq!(label, want_label);
+        assert!((d - want_d).abs() < 1e-6, "{label}: {d} vs {want_d}");
+    }
+
+    // Column kind, dimension and finiteness are checked at compile time
+    // (rango-orm/tests/ui/vector_*.rs); what is left fails before any SQL runs.
+    fn err<T>(r: Result<T>) -> bool {
+        matches!(r, Err(Error::Invalid(_)))
+    }
+    assert!(err(TestEmbedding::filter(&pool).all_with_distance().await));
+    assert!(err(TestEmbedding::filter(&pool)
+        .nearest(TestEmbedding::EMBEDDING, &q, 1, Distance::L2)
+        .annotate_count("n")
+        .aggregate()
+        .await));
+    // count ignores the ordering, so the distance bind must not leak into it.
+    assert_eq!(
+        TestEmbedding::filter(&pool)
+            .ne(TestEmbedding::LABEL, "a")
+            .nearest(TestEmbedding::EMBEDDING, &q, 2, Distance::L2)
+            .count()
+            .await
+            .unwrap(),
+        3
+    );
+
+    sqlx::query(r#"DROP TABLE "rango_test_embedding""#)
+        .execute(&pool)
+        .await
+        .unwrap();
+}
+
+#[test]
+fn test_field_vector_validates() {
+    assert!(FieldVector::<3>::new(vec![1.0, 2.0, 3.0]).is_ok());
+    assert!(FieldVector::<3>::new(vec![1.0, 2.0]).is_err());
+    assert!(FieldVector::<3>::new(vec![1.0, f32::NAN, 3.0]).is_err());
+    assert!(FieldVector::<3>::new(vec![1.0, f32::INFINITY, 3.0]).is_err());
+    assert!(serde_json::from_str::<FieldVector<2>>("[1.0, 2.0, 3.0]").is_err());
 }

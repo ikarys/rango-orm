@@ -83,6 +83,7 @@ let max_fee: Option<Decimal> = priciest.map(|p| p.fee.0);
 | `FieldUuid` | `UUID` | `TEXT` |
 | `FieldJson` | `JSONB` | `TEXT` |
 | `FieldBytes` | `BYTEA` | `BLOB` |
+| `FieldVector<N>` | `vector(N)` (pgvector) | refused, see [pgvector](../backends/pgvector.md) |
 
 ## Relation types
 

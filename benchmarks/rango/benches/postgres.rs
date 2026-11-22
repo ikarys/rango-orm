@@ -181,6 +181,7 @@ criterion_group!(
     bench_update,
     bench_transaction,
     bench_deserialize_only,
+    bench_vector,
 );
 criterion_main!(benches);
 
@@ -212,5 +213,166 @@ fn bench_deserialize_only(c: &mut Criterion) {
                 BenchUser::filter(&pool).unlimited().all().await.unwrap()
             })
         })
+    });
+}
+// ── pgvector ──────────────────────────────────────────────────────────────────
+// Same data as bench-sqlx-raw: 10k deterministic unit vectors of 384 dimensions (the size of
+// common sentence-embedding models), searched by cosine distance.
+
+const DOCS: usize = 10_000;
+const DIM: usize = 384;
+
+#[derive(Model, Clone)]
+#[model(table = "bench_doc")]
+struct BenchDoc {
+    id: FieldBigInt,
+    embedding: FieldVector<384>,
+}
+
+#[derive(Model, Clone)]
+#[model(table = "bench_doc_exact")]
+struct BenchDocExact {
+    id: FieldBigInt,
+    embedding: FieldVector<384>,
+}
+
+#[derive(Model, Clone)]
+#[model(table = "bench_doc_ins")]
+struct BenchDocIns {
+    id: FieldUuid,
+    embedding: FieldVector<384>,
+}
+
+/// xorshift64, so both suites build the same vectors without a rand dependency.
+fn unit_vector(seed: u64) -> Vec<f32> {
+    let mut x = seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1;
+    let v: Vec<f32> = (0..DIM)
+        .map(|_| {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            (x >> 40) as f32 / (1u64 << 24) as f32 - 0.5
+        })
+        .collect();
+    let norm = v.iter().map(|a| a * a).sum::<f32>().sqrt();
+    v.into_iter().map(|a| a / norm).collect()
+}
+
+async fn vector_setup() -> PgPool {
+    let pool = setup().await;
+    sqlx::query("CREATE EXTENSION IF NOT EXISTS vector")
+        .execute(&pool)
+        .await
+        .unwrap();
+    for t in ["bench_doc", "bench_doc_exact"] {
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            r#"CREATE TABLE IF NOT EXISTS "{t}" ("id" BIGINT PRIMARY KEY, "embedding" vector(384) NOT NULL)"#
+        )))
+        .execute(&pool).await.unwrap();
+    }
+    sqlx::query(r#"CREATE TABLE IF NOT EXISTS "bench_doc_ins" ("id" UUID PRIMARY KEY, "embedding" vector(384) NOT NULL)"#)
+        .execute(&pool).await.unwrap();
+    let have = BenchDoc::filter(&pool).count().await.unwrap();
+    let exact = BenchDocExact::filter(&pool).count().await.unwrap();
+    if have != DOCS as i64 || exact != DOCS as i64 {
+        sqlx::query(r#"TRUNCATE "bench_doc", "bench_doc_exact""#)
+            .execute(&pool)
+            .await
+            .unwrap();
+        for chunk in (0..DOCS).collect::<Vec<_>>().chunks(1000) {
+            let docs: Vec<BenchDoc> = chunk
+                .iter()
+                .map(|&i| BenchDoc {
+                    id: FieldBigInt(i as i64),
+                    embedding: FieldVector::new(unit_vector(i as u64)).unwrap(),
+                })
+                .collect();
+            bulk_create(&pool, &docs).await.unwrap();
+        }
+        sqlx::query(r#"INSERT INTO "bench_doc_exact" SELECT * FROM "bench_doc""#)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(r#"CREATE INDEX IF NOT EXISTS "bench_doc_hnsw" ON "bench_doc" USING hnsw ("embedding" vector_cosine_ops)"#)
+            .execute(&pool).await.unwrap();
+        sqlx::query(r#"ANALYZE "bench_doc", "bench_doc_exact""#)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+    pool
+}
+
+fn bench_vector(c: &mut Criterion) {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let pool = rt.block_on(vector_setup());
+    let query = FieldVector::<DIM>::new(unit_vector(DOCS as u64 + 1)).unwrap();
+
+    // The SQL rango generates (with the vector as a bound parameter) must reach the HNSW index.
+    let plan = rt.block_on(async {
+        BenchDoc::filter(&pool)
+            .nearest(BenchDoc::EMBEDDING, &query, 10, Distance::Cosine)
+            .explain_analyze()
+            .await
+            .unwrap()
+    });
+    assert!(
+        plan.contains("bench_doc_hnsw"),
+        "HNSW index not used:\n{plan}"
+    );
+
+    let mut group = c.benchmark_group("rango/vector_nearest_10");
+    group.bench_function("hnsw", |b| {
+        b.iter(|| {
+            rt.block_on(async {
+                let r = BenchDoc::filter(&pool)
+                    .nearest(BenchDoc::EMBEDDING, &query, 10, Distance::Cosine)
+                    .all()
+                    .await
+                    .unwrap();
+                assert_eq!(r.len(), 10);
+                r
+            })
+        })
+    });
+    group.bench_function("hnsw_with_distance", |b| {
+        b.iter(|| {
+            rt.block_on(async {
+                let r = BenchDoc::filter(&pool)
+                    .nearest(BenchDoc::EMBEDDING, &query, 10, Distance::Cosine)
+                    .all_with_distance()
+                    .await
+                    .unwrap();
+                assert_eq!(r.len(), 10);
+                r
+            })
+        })
+    });
+    group.bench_function("exact", |b| {
+        b.iter(|| {
+            rt.block_on(async {
+                BenchDocExact::filter(&pool)
+                    .nearest(BenchDocExact::EMBEDDING, &query, 10, Distance::Cosine)
+                    .all()
+                    .await
+                    .unwrap()
+            })
+        })
+    });
+    group.finish();
+
+    c.bench_function("rango/vector_bulk_insert/100", |b| {
+        b.iter_batched(
+            || {
+                (0..100u64)
+                    .map(|i| BenchDocIns {
+                        id: FieldUuid(Uuid::new_v4()),
+                        embedding: FieldVector::new(unit_vector(i)).unwrap(),
+                    })
+                    .collect::<Vec<_>>()
+            },
+            |docs| rt.block_on(async { bulk_create(&pool, &docs).await.unwrap() }),
+            BatchSize::SmallInput,
+        )
     });
 }

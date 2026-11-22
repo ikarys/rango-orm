@@ -38,6 +38,12 @@ pub enum SchemaDiff {
         col_type: ColumnType,
         index: bool,
     },
+    /// Drop the column's HNSW index, then create it for `distance` if set.
+    AlterColumnVectorIndex {
+        table: String,
+        column: String,
+        distance: Option<rango_orm_core::Distance>,
+    },
     AlterColumnReference {
         table: String,
         column: String,
@@ -250,6 +256,7 @@ fn diff_table(d: &SchemaDiff) -> Option<&str> {
         | SchemaDiff::AlterColumnNullable { table, .. }
         | SchemaDiff::AlterColumnUnique { table, .. }
         | SchemaDiff::AlterColumnIndex { table, .. }
+        | SchemaDiff::AlterColumnVectorIndex { table, .. }
         | SchemaDiff::AlterColumnReference { table, .. }
         | SchemaDiff::AddConstraint { table, .. }
         | SchemaDiff::DropConstraint { table, .. }
@@ -293,6 +300,14 @@ pub(crate) fn column_diffs(table: &str, old: &SnapshotColumn, new: &ColumnDef) -
         });
     }
 
+    if new.vector_index.map(|d| d.name()) != old.vector_index.as_deref() {
+        diffs.push(SchemaDiff::AlterColumnVectorIndex {
+            table: table.to_string(),
+            column: new.name.clone(),
+            distance: new.vector_index,
+        });
+    }
+
     if references_changed(old.references.as_ref(), new.references.as_ref()) {
         diffs.push(SchemaDiff::AlterColumnReference {
             table: table.to_string(),
@@ -332,6 +347,7 @@ mod tests {
             default: None,
             references: None,
             index: false,
+            vector_index: None,
         }
     }
 

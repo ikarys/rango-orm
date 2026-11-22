@@ -96,6 +96,7 @@ pub(crate) fn generate_pivot_table(rel: &M2MRelation, schemas: &[TableSchema]) -
                 on_update: rango_orm_core::ReferentialAction::NoAction,
             }),
             index,
+            vector_index: None,
         }
     };
 

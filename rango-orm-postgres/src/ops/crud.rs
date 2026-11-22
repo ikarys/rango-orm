@@ -1,7 +1,7 @@
 //! Single-row CRUD operations.
 
 use crate::error::db_err;
-use crate::row::{PgRangoRow, decode_all};
+use crate::row::{PgRangoRow, fetch_decoded};
 use rango_orm_core::{Error, Result};
 use rango_orm_core::{FromRow, Model, ModelValues, SqlValue, quote_ident};
 use rango_orm_core::{
@@ -37,7 +37,7 @@ where
     let (sql, values) = build_insert_sql::<M>(&model);
     let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*sql)), values);
     let row = q.fetch_one(executor).await.map_err(db_err)?;
-    let saved = M::from_row(&PgRangoRow(row)).map_err(Error::from)?;
+    let saved = M::from_row_in(&PgRangoRow(row)).map_err(Error::from)?;
     after_insert(&saved).await?;
     Ok(saved)
 }
@@ -53,7 +53,7 @@ where
     let (sql, values) = build_update_sql::<M>(&model, model.pk_value());
     let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*sql)), values);
     let row = q.fetch_one(executor).await.map_err(db_err)?;
-    let saved = M::from_row(&PgRangoRow(row)).map_err(Error::from)?;
+    let saved = M::from_row_in(&PgRangoRow(row)).map_err(Error::from)?;
     after_update(&saved).await?;
     Ok(saved)
 }
@@ -88,7 +88,7 @@ where
     let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*sql)), vec![pk.clone()]);
     let row = q.fetch_optional(executor).await.map_err(db_err)?;
     match row {
-        Some(r) => Ok(Some(M::from_row(&PgRangoRow(r)).map_err(Error::from)?)),
+        Some(r) => Ok(Some(M::from_row_in(&PgRangoRow(r)).map_err(Error::from)?)),
         None => Ok(None),
     }
 }
@@ -102,11 +102,9 @@ where
     M: Model + ModelValues + FromRow,
 {
     let sql = format!("SELECT * FROM {}", quote_ident(M::table_name()));
-    let rows = sqlx::query(sqlx::AssertSqlSafe(&*sql))
-        .fetch_all(executor)
-        .await
-        .map_err(db_err)?;
-    decode_all::<M>(rows)
+    let rows = fetch_decoded::<M, _>(sqlx::query(sqlx::AssertSqlSafe(&*sql)), executor).await?;
+    tracing::Span::current().record("db.rows", rows.len());
+    Ok(rows)
 }
 
 // ─── Compound ops — pool or transaction, sequential queries on one connection ─
@@ -149,7 +147,7 @@ where
     let row = q.fetch_optional(&mut *conn).await.map_err(db_err)?;
 
     if let Some(r) = row {
-        let created = M::from_row(&PgRangoRow(r)).map_err(Error::from)?;
+        let created = M::from_row_in(&PgRangoRow(r)).map_err(Error::from)?;
         after_insert(&created).await?;
         return Ok((created, true));
     }
@@ -159,7 +157,10 @@ where
     let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*select_sql)), select_vals);
     let row = q.fetch_one(&mut *conn).await.map_err(db_err)?;
 
-    Ok((M::from_row(&PgRangoRow(row)).map_err(Error::from)?, false))
+    Ok((
+        M::from_row_in(&PgRangoRow(row)).map_err(Error::from)?,
+        false,
+    ))
 }
 
 /// UPDATE OR CREATE.
@@ -184,12 +185,12 @@ where
     let row = q.fetch_optional(&mut *conn).await.map_err(db_err)?;
     if let Some(row) = row {
         // Update the row that exists (its PK), not the PK carried by `values`.
-        let existing = M::from_row(&PgRangoRow(row)).map_err(Error::from)?;
+        let existing = M::from_row_in(&PgRangoRow(row)).map_err(Error::from)?;
         before_update(&mut values).await?;
         let (update_sql, update_vals) = build_update_sql::<M>(&values, existing.pk_value());
         let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*update_sql)), update_vals);
         let row = q.fetch_one(&mut *conn).await.map_err(db_err)?;
-        let saved = M::from_row(&PgRangoRow(row)).map_err(Error::from)?;
+        let saved = M::from_row_in(&PgRangoRow(row)).map_err(Error::from)?;
         after_update(&saved).await?;
         Ok(saved)
     } else {
@@ -197,7 +198,7 @@ where
         let (insert_sql, insert_vals) = build_insert_sql::<M>(&values);
         let q = bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*insert_sql)), insert_vals);
         let row = q.fetch_one(&mut *conn).await.map_err(db_err)?;
-        let saved = M::from_row(&PgRangoRow(row)).map_err(Error::from)?;
+        let saved = M::from_row_in(&PgRangoRow(row)).map_err(Error::from)?;
         after_insert(&saved).await?;
         Ok(saved)
     }

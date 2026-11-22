@@ -15,13 +15,17 @@ use rango_orm_core::Result;
 ///     .all()
 ///     .await?;
 /// ```
-use rango_orm_core::{ColumnRef, FromRow, Model, ModelValues, SqlValue, quote_ident};
+use rango_orm_core::{
+    ColumnRef, FieldVector, FromRow, Model, ModelValues, SqlValue, VectorColumn, quote_ident,
+};
 use sqlx::{PgPool, Row};
 
 use crate::ops::bind_sql_values;
 use crate::query_builder::QueryBuilder;
 use crate::related::WithRelated;
-use crate::row::decode_all;
+use crate::row::fetch_decoded;
+
+pub use rango_orm_core::Distance;
 
 /// Postgres-only extensions for `QueryBuilder`.
 pub trait PgQueryExt<M>
@@ -65,6 +69,35 @@ where
     /// WHERE "col" @> ARRAY['a', 'b']
     /// ```
     fn array_contains(self, col: impl ColumnRef<M>, values: Vec<String>) -> Self;
+
+    /// The `k` rows whose vector column is closest to `query` (pgvector), closest first.
+    /// Sets `LIMIT k`; ordered before any `order_by`. End with `.all_with_distance()` to
+    /// get each row's distance too.
+    ///
+    /// ```sql
+    /// ORDER BY "col" <=> $1::vector LIMIT k
+    /// ```
+    fn nearest<const N: usize>(
+        self,
+        col: impl VectorColumn<M, N>,
+        query: &FieldVector<N>,
+        k: i64,
+        distance: Distance,
+    ) -> Self;
+
+    /// Rows whose vector column is less than `max` away from `query` (pgvector).
+    /// With [`Distance::InnerProduct`] the distance is the negative inner product.
+    ///
+    /// ```sql
+    /// WHERE "col" <-> $1::vector < $2
+    /// ```
+    fn within<const N: usize>(
+        self,
+        col: impl VectorColumn<M, N>,
+        query: &FieldVector<N>,
+        max: f64,
+        distance: Distance,
+    ) -> Self;
 }
 
 impl<M> PgQueryExt<M> for QueryBuilder<'_, M>
@@ -129,6 +162,36 @@ where
         )
     }
 
+    fn nearest<const N: usize>(
+        self,
+        col: impl VectorColumn<M, N>,
+        query: &FieldVector<N>,
+        k: i64,
+        distance: Distance,
+    ) -> Self {
+        let name = col.column_name();
+        self.order_by_distance(
+            format!("{} {} $__::vector", quote_ident(name), distance.op()),
+            SqlValue::Vector(query.to_vec()),
+        )
+        .limit(k)
+    }
+
+    fn within<const N: usize>(
+        self,
+        col: impl VectorColumn<M, N>,
+        query: &FieldVector<N>,
+        max: f64,
+        distance: Distance,
+    ) -> Self {
+        let (name, query) = (col.column_name(), SqlValue::Vector(query.to_vec()));
+        let q = self;
+        q.raw_where(
+            format!("{} {} $__::vector < $__", quote_ident(name), distance.op()),
+            vec![query, SqlValue::Double(max)],
+        )
+    }
+
     fn array_contains(self, col: impl ColumnRef<M>, values: Vec<String>) -> Self {
         let mut q = self;
         q.check_col::<M>(col.column_name());
@@ -162,14 +225,12 @@ impl Pg {
             quote_ident(col.column_name()),
             DEFAULT_QUERY_LIMIT
         );
-        let rows = bind_sql_values(
+        let q = bind_sql_values(
             sqlx::query(sqlx::AssertSqlSafe(&*sql)),
             vec![SqlValue::Text(query.to_string())],
-        )
-        .fetch_all(pool)
-        .await
-        .map_err(db_err)?;
-        Ok(decode_all::<M>(rows)?
+        );
+        Ok(fetch_decoded::<M, _>(q, pool)
+            .await?
             .into_iter()
             .map(WithRelated::new)
             .collect())

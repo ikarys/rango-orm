@@ -69,6 +69,11 @@ pub(super) fn diff_to_sql(d: &SchemaDiff, backend: BackendKind) -> String {
                     ));
                 }
 
+                if let Some(distance) = column.vector_index {
+                    out.push_str(&hnsw_index_sql(backend, table, &column.name, distance));
+                    out.push('\n');
+                }
+
                 out
             }
         }
@@ -159,6 +164,21 @@ pub(super) fn diff_to_sql(d: &SchemaDiff, backend: BackendKind) -> String {
                     object_name(backend, &format!("{}_{}_unique", table, column))
                 )
             }
+        }
+        SchemaDiff::AlterColumnVectorIndex {
+            table,
+            column,
+            distance,
+        } => {
+            let mut out = format!(
+                "DROP INDEX IF EXISTS {};\n",
+                hnsw_index_name(backend, table, column)
+            );
+            if let Some(distance) = distance {
+                out.push_str(&hnsw_index_sql(backend, table, column, *distance));
+            }
+            out.push('\n');
+            out
         }
         SchemaDiff::AlterColumnIndex {
             table,

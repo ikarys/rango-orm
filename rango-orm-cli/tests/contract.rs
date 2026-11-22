@@ -32,6 +32,7 @@ fn col_type(t: &ColumnType) -> String {
         ColumnType::Json => "json".into(),
         ColumnType::Jsonb => "jsonb".into(),
         ColumnType::Varchar(n) => format!("varchar({n})"),
+        ColumnType::Vector(n) => format!("vector({n})"),
         ColumnType::Decimal { precision, scale } => format!("decimal({precision},{scale})"),
     }
 }
@@ -110,6 +111,7 @@ fn pivot_schema(from: &str, to: &str) -> TableSchema {
         unique: false,
         default: None,
         index,
+        vector_index: None,
         references: Some(FkReference {
             table: t.to_string(),
             column: "id".into(),

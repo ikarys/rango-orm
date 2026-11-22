@@ -1,4 +1,4 @@
-use super::fields::map_field_type;
+use super::fields::{build_column_def, map_field_type};
 use super::scan_models;
 use rango_orm_core::{ColumnType, Constraint};
 
@@ -335,4 +335,35 @@ authors: ManyToMany<Author>,
     let authors = pivot_of("authors");
     assert_eq!(authors.columns[1].col_type, ColumnType::BigInt);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ── vector index ───────────────────────────────────────────────────────────
+
+fn column(src: &str) -> anyhow::Result<rango_orm_core::ColumnDef> {
+    let field = syn::parse::Parser::parse_str(syn::Field::parse_named, src).expect("valid field");
+    build_column_def(&field)
+}
+
+#[test]
+fn vector_index_attribute_maps_to_its_distance() {
+    use rango_orm_core::Distance;
+    let c = column("#[field(index = \"cosine\")] embedding: Option<FieldVector<3>>").unwrap();
+    assert_eq!(c.vector_index, Some(Distance::Cosine));
+    assert!(!c.index);
+    let plain = column("embedding: FieldVector<3>").unwrap();
+    assert_eq!(plain.vector_index, None);
+
+    let on_text = column("#[field(index = \"l2\")] title: FieldText").unwrap_err();
+    assert!(
+        on_text.to_string().contains("only valid on a FieldVector"),
+        "{on_text}"
+    );
+    let unknown = column("#[field(index = \"euclid\")] e: FieldVector<3>").unwrap_err();
+    assert!(
+        unknown.to_string().contains("unknown distance"),
+        "{unknown}"
+    );
+    // A bare `index` on a vector would be a b-tree pgvector cannot search with.
+    let bare = column("#[field(index)] e: FieldVector<3>").unwrap_err();
+    assert!(bare.to_string().contains("needs a distance"), "{bare}");
 }

@@ -47,6 +47,7 @@
 - [SQLite](./backends/sqlite.md)
 - [MySQL / MariaDB](./backends/mysql.md)
 - [Backend-specific Features](./backends/extensions.md)
+- [Vector search (pgvector)](./backends/pgvector.md)
 
 # CLI Reference
 

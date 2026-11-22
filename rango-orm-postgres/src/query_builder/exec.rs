@@ -1,5 +1,5 @@
 use crate::related::WithRelated;
-use crate::row::{PgPrefixedRow, PgRangoRow, PgRangoRow2, decode_all};
+use crate::row::{PgPrefixedRow, PgRangoRow, PgRangoRow2};
 use rango_orm_core::{ColumnRef, FromRow, Model, ModelValues, Partial, RangoRow, SqlValue};
 use rango_orm_core::{Error, Result};
 use sqlx::Postgres;
@@ -16,6 +16,29 @@ where
     M: Model + ModelValues + FromRow,
 {
     // ── Terminal methods ──────────────────────────────────────────────────────
+    /// Rows of a `nearest()` query with their distance to the query vector, closest first.
+    ///
+    /// The distance is the value `nearest` orders by, computed once per row; an HNSW
+    /// index on the column still serves the query. `Error::Invalid` without `nearest()`,
+    /// or with `select_related` / `prefetch_related`.
+    #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "postgresql", db.operation = "SELECT", db.sql.table = M::table_name(), db.rows = tracing::field::Empty, otel.kind = "client"))]
+    pub async fn all_with_distance(self) -> Result<Vec<(M, f64)>> {
+        let (sql, binds) = self.f.select_with_distance_sql()?;
+        let mut source = self.conn;
+        let mut conn = source.acquire().await?;
+        let q = crate::ops::bind_sql_values(sqlx::query(sqlx::AssertSqlSafe(&*sql)), binds);
+        let rows = crate::row::fetch_map(q, &mut *conn, |row| {
+            let distance = row
+                .0
+                .try_get::<f64, _>(rango_orm_core::DISTANCE_COLUMN)
+                .map_err(crate::error::db_err)?;
+            Ok((M::from_row_in(row)?, distance))
+        })
+        .await?;
+        tracing::Span::current().record("db.rows", rows.len());
+        Ok(rows)
+    }
+
     /// Fetch all matching rows, populating relation caches when specs are present.
     ///
     /// Returns `Vec<WithRelated<M>>` — each item derefs to `M`, and related
@@ -28,18 +51,18 @@ where
         // One connection for the main query and every prefetch query: one pool round-trip.
         let mut source = std::mem::take(&mut self.conn);
         let mut conn = source.acquire().await?;
-        let rows = bind_and_fetch_all(&mut *conn, &sql, binds).await?;
-        self.warn_if_capped(rows.len());
-        tracing::Span::current().record("db.rows", rows.len());
-        let mut results: Vec<WithRelated<M>> = Vec::with_capacity(rows.len());
-        if self.f.select_related_specs().is_empty() {
-            for row in rows {
-                results.push(WithRelated::new(M::from_row(&PgRangoRow(row))?));
-            }
+        let mut results: Vec<WithRelated<M>> = if self.f.select_related_specs().is_empty() {
+            bind_and_fetch_decoded::<_, M>(&mut *conn, &sql, binds)
+                .await?
+                .into_iter()
+                .map(WithRelated::new)
+                .collect()
         } else {
             // ── select_related: R's columns came back in the same row (LEFT JOIN) ──
+            let rows = bind_and_fetch_all(&mut *conn, &sql, binds).await?;
+            let mut results = Vec::with_capacity(rows.len());
             for row in &rows {
-                let mut wr = WithRelated::new(M::from_row(&PgRangoRow2::new(row))?);
+                let mut wr = WithRelated::new(M::from_row_in(&PgRangoRow2::new(row))?);
                 for (i, spec) in self.f.select_related_specs().iter().enumerate() {
                     let r_row = PgPrefixedRow::new(row, format!("__r{i}_"));
                     // NULL primary key: no matching R (NULL or dangling FK).
@@ -53,7 +76,10 @@ where
                 }
                 results.push(wr);
             }
-        }
+            results
+        };
+        self.warn_if_capped(results.len());
+        tracing::Span::current().record("db.rows", results.len());
 
         if results.is_empty() {
             return Ok(results);
@@ -122,7 +148,7 @@ where
 
         let rows = self.conn.fetch_all(&sql, binds).await?;
         match rows.into_iter().next() {
-            Some(r) => Ok(Some(M::from_row(&PgRangoRow(r)).map_err(Error::from)?)),
+            Some(r) => Ok(Some(M::from_row_in(&PgRangoRow(r)).map_err(Error::from)?)),
             None => Ok(None),
         }
     }
@@ -357,10 +383,10 @@ where
             ));
         }
         let (sql, binds) = self.qb.f.select_sql_cols(&Self::cols_sql());
-        let rows = self.qb.conn.fetch_all(&sql, binds).await?;
+        let rows = self.qb.conn.fetch_decoded::<P>(&sql, binds).await?;
         self.qb.warn_if_capped(rows.len());
         tracing::Span::current().record("db.rows", rows.len());
-        decode_all::<P>(rows)
+        Ok(rows)
     }
 
     /// Fetch the first matching row as `P`.
