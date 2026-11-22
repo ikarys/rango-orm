@@ -125,7 +125,7 @@ where
     }
 
     /// Link `from` to every model of `to_list`: multi-row `INSERT`s of
-    /// [`PAIRS_PER_STATEMENT`] pairs, in one transaction. Idempotent like `add`
+    /// `PAIRS_PER_STATEMENT` (1000) pairs, in one transaction. Idempotent like `add`
     /// (existing links and duplicates in the list are left as is); an empty list runs no SQL.
     #[tracing::instrument(name = "db.query", skip_all, fields(db.system = "mysql", db.operation = "INSERT", db.sql.table = %Self::pivot_table(), db.rows = tracing::field::Empty, otel.kind = "client"))]
     pub async fn add_many<'a, A>(executor: A, from: &From, to_list: &[To]) -> Result<()>

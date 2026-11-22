@@ -17,8 +17,9 @@ help: the following other types implement trait `VectorColumn<M, N>`
 note: required by a bound in `nearest`
   --> $WORKSPACE/rango-orm-postgres/src/pg_ext.rs
    |
+   | pub trait PgQueryExt<M>
+...
    |     fn nearest<const N: usize>(
-   |        ------- required by a bound in this associated function
    |         self,
    |         col: impl VectorColumn<M, N>,
    |                   ^^^^^^^^^^^^^^^^^^ required by this bound in `PgQueryExt::nearest`

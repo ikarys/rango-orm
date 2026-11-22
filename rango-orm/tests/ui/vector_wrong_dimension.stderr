@@ -8,8 +8,8 @@ error[E0308]: mismatched types
    |                       |
    |                       arguments to this method are incorrect
    |
-   = note: expected reference `&rango::FieldVector<3>`
-              found reference `&rango::FieldVector<4>`
+   = note: expected reference `&FieldVector<3>`
+              found reference `&FieldVector<4>`
 note: method defined here
   --> $WORKSPACE/rango-orm-postgres/src/pg_ext.rs
    |
