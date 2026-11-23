@@ -33,7 +33,7 @@ SELECT "id", "email" FROM "user" ...
 Large columns such as bodies and password hashes are never read.
 
 ## Supported behavior
-- Same filters, ordering, `limit`/`offset` as `.all()`.
+- Same filters, ordering, `limit`/`offset` as `.all()`. Call them before `select_as`: it returns a `SelectAs` that only runs the query (`QueryBuilder::limit(10).select_as::<P>()`, not `.select_as::<P>().limit(10)`).
 - Relations (`select_related`, `prefetch_related`) are not supported with `select_as`.
 - Works on Postgres, SQLite, MySQL.
 

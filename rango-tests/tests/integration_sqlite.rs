@@ -2133,6 +2133,20 @@ async fn test_sqlite_bulk_update_mixed_types_over_several_chunks() {
     println!("sqlite bulk_update of 3700 rows: {:?}", t.elapsed());
     rows.sort_by_key(|r| r.id.0);
     assert_eq!(bulk_mix_sorted(&pool).await, rows);
+    assert_eq!(
+        BulkMix::filter(&pool)
+            .max::<time::OffsetDateTime>("at")
+            .await
+            .unwrap(),
+        rows.iter().map(|r| r.at.0).max()
+    );
+    assert_eq!(
+        BulkMix::filter(&pool)
+            .min::<time::OffsetDateTime>("at")
+            .await
+            .unwrap(),
+        rows.iter().map(|r| r.at.0).min()
+    );
 
     // Unchanged rows still count as matched; a subset of columns leaves the others alone.
     assert_eq!(
@@ -2532,6 +2546,20 @@ async fn test_sqlite_group_by_date_and_raw_values() {
     assert_eq!(by_year[0]["y"], SqlValue::Text("2027-01-01".into()));
     assert_eq!(by_year[1]["n"], SqlValue::BigInt(3));
 
+    assert_eq!(
+        DayRow::filter(&pool)
+            .min::<time::Date>(DayRow::DAY)
+            .await
+            .unwrap(),
+        Some(d(2026, 1, 5).0)
+    );
+    assert_eq!(
+        DayRow::filter(&pool)
+            .max::<time::Date>("day")
+            .await
+            .unwrap(),
+        Some(d(2027, 1, 9).0)
+    );
     let raw = raw_values(
         &pool,
         r#"SELECT "day" AS d, "amount" AS a FROM "day_row" WHERE "amount" > ? ORDER BY "amount""#,

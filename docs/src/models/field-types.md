@@ -76,6 +76,8 @@ let max_fee: Option<Decimal> = priciest.map(|p| p.fee.0);
 | `FieldDate` | `DATE` | `TEXT` |
 | `FieldTime` | `TIME` | `TEXT` |
 
+Each wraps a [`time`](https://docs.rs/time) value in its public `.0`: `time::OffsetDateTime`, `time::Date`, `time::Time`. Build one with `FieldDateTime(OffsetDateTime::now_utc())` or `FieldDate(Date::from_calendar_date(2026, Month::March, 2)?)`, and read it back with `.0`. Serde writes RFC 3339 for `FieldDateTime` and ISO 8601 for the other two.
+
 ## Other types
 
 | Rust type | SQL (Postgres) | SQL (SQLite) |
