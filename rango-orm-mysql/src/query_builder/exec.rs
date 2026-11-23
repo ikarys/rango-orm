@@ -428,31 +428,111 @@ pub(crate) fn row_to_map(
     row: &sqlx::mysql::MySqlRow,
     keys: &[(&str, Option<u8>)],
 ) -> Result<std::collections::HashMap<String, SqlValue>> {
-    use sqlx::Row;
+    use sqlx::{Column, Row, TypeInfo};
     let mut map = std::collections::HashMap::new();
     for &(col, scale) in keys {
+        let is_null = row
+            .try_get_raw(col)
+            .map(|v| sqlx::ValueRef::is_null(&v))
+            .unwrap_or(true);
+        let type_name = row
+            .try_column(col)
+            .map(|c| c.type_info().name().to_uppercase())
+            .unwrap_or_default();
         let val: SqlValue = if let Some(scale) = scale {
-            if row
-                .try_get_raw(col)
-                .map(|v| sqlx::ValueRef::is_null(&v))
-                .unwrap_or(true)
-            {
+            if is_null {
                 SqlValue::NullDecimal
             } else {
                 let mut d = crate::row::MySqlRowRef(row).get_decimal(col)?;
                 d.rescale(u32::from(scale));
                 SqlValue::Decimal(d)
             }
+        } else if let Some(v) = decode_typed(row, col, &type_name, is_null)? {
+            v
         } else if let Ok(Some(v)) = row.try_get::<Option<i64>, _>(col) {
             SqlValue::BigInt(v)
         } else if let Ok(Some(v)) = row.try_get::<Option<f64>, _>(col) {
             SqlValue::Double(v)
         } else if let Ok(Some(v)) = row.try_get::<Option<String>, _>(col) {
             SqlValue::Text(v)
-        } else {
+        } else if let Ok(Some(v)) = row.try_get::<Option<Vec<u8>>, _>(col) {
+            SqlValue::Bytes(v)
+        } else if is_null {
             SqlValue::NullText
+        } else {
+            return Err(Error::Decode(format!(
+                "column `{col}`: cannot read SQL type {type_name} as a value"
+            )));
         };
         map.insert(col.to_string(), val);
     }
     Ok(map)
+}
+
+fn decode_typed(
+    row: &sqlx::mysql::MySqlRow,
+    col: &str,
+    type_name: &str,
+    is_null: bool,
+) -> Result<Option<SqlValue>> {
+    let row_ref = crate::row::MySqlRowRef(row);
+    let value = match type_name {
+        "DATETIME" | "TIMESTAMP" => {
+            if is_null {
+                SqlValue::NullDateTime
+            } else {
+                SqlValue::DateTime(
+                    row_ref
+                        .get_datetime(col)
+                        .map_err(|e| Error::Decode(e.to_string()))?,
+                )
+            }
+        }
+        "DATE" => {
+            if is_null {
+                SqlValue::NullDate
+            } else {
+                SqlValue::Date(
+                    row_ref
+                        .get_date(col)
+                        .map_err(|e| Error::Decode(e.to_string()))?,
+                )
+            }
+        }
+        "TIME" => {
+            if is_null {
+                SqlValue::NullTime
+            } else {
+                SqlValue::Time(
+                    row_ref
+                        .get_time(col)
+                        .map_err(|e| Error::Decode(e.to_string()))?,
+                )
+            }
+        }
+        "DECIMAL" => {
+            if is_null {
+                SqlValue::NullDecimal
+            } else {
+                SqlValue::Decimal(
+                    row_ref
+                        .get_decimal(col)
+                        .map_err(|e| Error::Decode(e.to_string()))?,
+                )
+            }
+        }
+        "JSON" => {
+            if is_null {
+                SqlValue::NullJson
+            } else {
+                SqlValue::Json(
+                    row_ref
+                        .get_json(col)
+                        .map_err(|e| Error::Decode(e.to_string()))?,
+                )
+            }
+        }
+        _ => return Ok(None),
+    };
+    Ok(Some(value))
 }

@@ -2471,7 +2471,23 @@ async fn test_pg_group_by_date_and_raw_values() {
     .unwrap();
     assert_eq!(raw.len(), 2);
     assert_eq!(raw[0]["a"], SqlValue::BigInt(4));
-    assert!(raw[0].contains_key("d"));
+    assert_eq!(raw[0]["d"], SqlValue::Date(d(2026, 3, 2).0));
+
+    let raw = raw_values(
+        &pool,
+        r#"SELECT TIMESTAMPTZ '2026-01-02 03:04:05+00' AS ts, TIME '12:30:00' AS tm, '{"a":1}'::jsonb AS j, NULL::date AS nd"#,
+        vec![],
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        raw[0]["ts"],
+        SqlValue::DateTime(time::macros::datetime!(2026-01-02 03:04:05 UTC))
+    );
+    assert_eq!(raw[0]["tm"], SqlValue::Time(time::macros::time!(12:30:00)));
+    assert_eq!(raw[0]["j"], SqlValue::Json(serde_json::json!({"a": 1})));
+    assert_eq!(raw[0]["nd"], SqlValue::NullDate);
+
     assert!(
         raw_values(&pool, "SELECT 1 AS x WHERE 1 = 0", vec![])
             .await

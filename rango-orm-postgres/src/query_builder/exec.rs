@@ -429,7 +429,10 @@ pub(crate) fn row_to_map(
     use sqlx::{Column, Row, TypeInfo};
     let mut map = std::collections::HashMap::new();
     for &col in cols {
-        let type_name = row.column(col).type_info().name().to_uppercase();
+        let type_name = row
+            .try_column(col)
+            .map(|c| c.type_info().name().to_uppercase())
+            .unwrap_or_default();
         let val: SqlValue = match type_name.as_str() {
             "BOOL" => row
                 .try_get::<Option<bool>, _>(col)
@@ -480,11 +483,57 @@ pub(crate) fn row_to_map(
                 .ok()
                 .map(|v| v.map(SqlValue::Uuid).unwrap_or(SqlValue::NullUuid))
                 .unwrap_or(SqlValue::NullUuid),
-            _ => row
-                .try_get::<Option<String>, _>(col)
-                .ok()
-                .map(|v| v.map(SqlValue::Text).unwrap_or(SqlValue::NullText))
-                .unwrap_or(SqlValue::NullText),
+            "TIMESTAMPTZ" => match row
+                .try_get::<Option<time::OffsetDateTime>, _>(col)
+                .map_err(|e| Error::Decode(format!("column `{col}`: {e}")))?
+            {
+                Some(v) => SqlValue::DateTime(v),
+                None => SqlValue::NullDateTime,
+            },
+            "TIMESTAMP" => match row
+                .try_get::<Option<time::PrimitiveDateTime>, _>(col)
+                .map_err(|e| Error::Decode(format!("column `{col}`: {e}")))?
+            {
+                Some(v) => SqlValue::DateTime(v.assume_utc()),
+                None => SqlValue::NullDateTime,
+            },
+            "DATE" => match row
+                .try_get::<Option<time::Date>, _>(col)
+                .map_err(|e| Error::Decode(format!("column `{col}`: {e}")))?
+            {
+                Some(v) => SqlValue::Date(v),
+                None => SqlValue::NullDate,
+            },
+            "TIME" => match row
+                .try_get::<Option<time::Time>, _>(col)
+                .map_err(|e| Error::Decode(format!("column `{col}`: {e}")))?
+            {
+                Some(v) => SqlValue::Time(v),
+                None => SqlValue::NullTime,
+            },
+            "JSON" | "JSONB" => match row
+                .try_get::<Option<sqlx::types::Json<serde_json::Value>>, _>(col)
+                .map_err(|e| Error::Decode(format!("column `{col}`: {e}")))?
+            {
+                Some(v) => SqlValue::Json(v.0),
+                None => SqlValue::NullJson,
+            },
+            "BYTEA" => match row
+                .try_get::<Option<Vec<u8>>, _>(col)
+                .map_err(|e| Error::Decode(format!("column `{col}`: {e}")))?
+            {
+                Some(v) => SqlValue::Bytes(v),
+                None => SqlValue::NullBytes,
+            },
+            _ => match row.try_get::<Option<String>, _>(col) {
+                Ok(Some(v)) => SqlValue::Text(v),
+                Ok(None) => SqlValue::NullText,
+                Err(_) => {
+                    return Err(Error::Decode(format!(
+                        "column `{col}`: cannot read SQL type {type_name} as a value"
+                    )));
+                }
+            },
         };
         map.insert(col.to_string(), val);
     }
