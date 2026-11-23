@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Fix: on SQLite, `min::<T>` / `max::<T>` with `T` = `time::OffsetDateTime`, `time::Date` or `time::Time` compile again (E0277 in 0.5.0): the SQLite backend now enables sqlx's `time` feature, as PostgreSQL and MySQL already did.
+- Docs: the model type tables and the crate root list the `time` types and version 0.5; `field-types.md` shows how to build and read them; `select-as.md` says `limit`/`offset` go before `select_as`; `bulk.md` says MySQL / MariaDB count an unchanged upserted row as 1, not 0.
+
 ## 0.5.0 (2026-11-22)
 
 - Breaking: dates and times use the `time` crate instead of `chrono`, which is unmaintained (RUSTSEC-2026-0543). `FieldDateTime` wraps `time::OffsetDateTime` (UTC), `FieldDate` wraps `time::Date`, `FieldTime` wraps `time::Time`; the same types appear in `SqlValue`, the `RangoRow` getters and `min`/`max`. Replace `chrono` with `time` in your `Cargo.toml`; `FieldDateTime::now()` is unchanged. Stored data needs no migration: SQLite keeps the same text format, and JSON stays RFC 3339 / `YYYY-MM-DD` / `HH:MM:SS`.

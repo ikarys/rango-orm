@@ -69,7 +69,7 @@ error: `String` is not a Rango field type: use `FieldText` or `FieldVarchar<MIN,
 | `i16` / `i32` / `i64` | `FieldSmallInt` / `FieldInt` / `FieldBigInt` |
 | `f32` / `f64` | `FieldFloat` / `FieldDouble` |
 | `Uuid` | `FieldUuid` (`ForeignKey<M>` for a reference) |
-| `DateTime<Utc>` / `NaiveDate` / `NaiveTime` | `FieldDateTime` / `FieldDate` / `FieldTime` |
+| `time::OffsetDateTime` / `time::Date` / `time::Time` | `FieldDateTime` / `FieldDate` / `FieldTime` |
 | `serde_json::Value` | `FieldJson` |
 
 Wrapping any of them in `Option<..>` makes the column nullable.
