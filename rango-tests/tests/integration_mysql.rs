@@ -2516,7 +2516,22 @@ async fn test_mysql_group_by_date_and_raw_values() {
     .unwrap();
     assert_eq!(raw.len(), 2);
     assert_eq!(raw[0]["a"], SqlValue::BigInt(4));
-    assert!(raw[0].contains_key("d"));
+    assert_eq!(raw[0]["d"], SqlValue::Date(d(2026, 3, 2).0));
+
+    let raw = raw_values(
+        &pool,
+        r#"SELECT CAST('2026-01-02 03:04:05' AS DATETIME(6)) AS ts, CAST('12:30:00' AS TIME) AS tm, SUM(`amount`) * 1.5 AS total FROM `day_row`"#,
+        vec![],
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        raw[0]["ts"],
+        SqlValue::DateTime(time::macros::datetime!(2026-01-02 03:04:05 UTC))
+    );
+    assert_eq!(raw[0]["tm"], SqlValue::Time(time::macros::time!(12:30:00)));
+    assert_eq!(raw[0]["total"], SqlValue::Decimal("22.5".parse().unwrap()));
+
     assert!(
         raw_values(&pool, "SELECT 1 AS x WHERE 1 = 0", vec![])
             .await
