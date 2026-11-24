@@ -351,7 +351,7 @@ pub(super) fn sql_type(col_type: &ColumnType, backend: BackendKind) -> String {
             ColumnType::Jsonb => "JSONB".into(),
             ColumnType::Varchar(n) => format!("VARCHAR({})", n),
             ColumnType::Vector(n) => format!("vector({n})"),
-            ColumnType::Decimal { .. } => "NUMERIC".into(),
+            ColumnType::Decimal { precision, scale } => format!("NUMERIC({precision}, {scale})"),
         },
     }
 }
