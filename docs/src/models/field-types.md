@@ -35,7 +35,7 @@ The primitive, text and date tables below show Postgres and SQLite; the MySQL / 
 
 | Rust type | SQL (Postgres) | SQL (SQLite) | SQL (MySQL / MariaDB) | Notes |
 |---|---|---|---|---|
-| `FieldDecimal<P, S>` | `NUMERIC` | `NUMERIC` | `DECIMAL(P, S)` | P = precision, S = scale. Wraps `rango::Decimal` (exact). Only MySQL / MariaDB enforce P and S in the column; on Postgres and SQLite the column is a plain `NUMERIC`, and `FieldDecimal::from_decimal` rescales the value to S in Rust. SQLite is exact up to 15 digits through the numeric column, beyond that the digits are kept as text |
+| `FieldDecimal<P, S>` | `NUMERIC(P, S)` | `NUMERIC` | `DECIMAL(P, S)` | P = precision, S = scale. Wraps `rango::Decimal` (exact). PostgreSQL and MySQL / MariaDB enforce P and S: a value with too many integer digits is `Error::OutOfRange`, extra decimals are rounded to S. SQLite enforces neither; `FieldDecimal::from_decimal` rescales the value to S in Rust. Before 0.5.1 PostgreSQL columns were a plain `NUMERIC`: an existing column keeps that type until you add a migration with `ALTER TABLE t ALTER COLUMN c TYPE NUMERIC(P, S)`, which fails if a stored value does not fit. SQLite is exact up to 15 digits through the numeric column, beyond that the digits are kept as text |
 | `FieldRange<MIN, MAX>` | `BIGINT` | `INTEGER` | `BIGINT` | Checked when built (`FieldRange::new`) |
 
 ### Working with decimals

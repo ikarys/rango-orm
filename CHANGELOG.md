@@ -4,6 +4,7 @@
 
 - Fix: on SQLite, `min::<T>` / `max::<T>` with `T` = `time::OffsetDateTime`, `time::Date` or `time::Time` compile again (E0277 in 0.5.0): the SQLite backend now enables sqlx's `time` feature, as PostgreSQL and MySQL already did.
 - Fix: `values()`, `aggregate()` and `raw_values` no longer return `SqlValue::NullText` for a non-null value they could not decode. MySQL / MariaDB and PostgreSQL now return `DateTime`, `Date`, `Time` and `Json` (and PostgreSQL `Bytes`) for those columns, MySQL a computed `DECIMAL` as `Decimal`; any other unreadable type is an `Error::Decode`.
+- Fix: on PostgreSQL, migrations create a `FieldDecimal<P, S>` column as `NUMERIC(P, S)` instead of an unbounded `NUMERIC`, so a value with too many digits is `Error::OutOfRange` as on MySQL / MariaDB. Existing columns are not changed by `makemigrations`: add `ALTER TABLE t ALTER COLUMN c TYPE NUMERIC(P, S)` by hand (see `field-types.md`).
 - Docs: the model type tables and the crate root list the `time` types and version 0.5; `field-types.md` shows how to build and read them; `select-as.md` says `limit`/`offset` go before `select_as`; `bulk.md` says MySQL / MariaDB count an unchanged upserted row as 1, not 0.
 
 ## 0.5.0 (2026-11-22)

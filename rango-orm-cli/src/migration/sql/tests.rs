@@ -1,4 +1,4 @@
-use super::table::column_definition;
+use super::table::{column_definition, sql_type};
 use super::{check_vector_backend, generate_sql_from_diff, object_name};
 use crate::migration::diff::SchemaDiff;
 use crate::migration::scanner::{M2MRelation, generate_pivot_table};
@@ -1035,4 +1035,15 @@ fn snapshot_with_an_unknown_vector_index_is_refused() {
         .unwrap()
         .vector_index = Some("x); DROP TABLE docs; --".into());
     assert!(snap.to_schemas().is_err());
+}
+
+#[test]
+fn decimal_column_carries_precision_and_scale() {
+    let ty = ColumnType::Decimal {
+        precision: 14,
+        scale: 2,
+    };
+    assert_eq!(sql_type(&ty, BackendKind::Postgres), "NUMERIC(14, 2)");
+    assert_eq!(sql_type(&ty, BackendKind::Mysql), "DECIMAL(14, 2)");
+    assert_eq!(sql_type(&ty, BackendKind::Sqlite), "NUMERIC");
 }
