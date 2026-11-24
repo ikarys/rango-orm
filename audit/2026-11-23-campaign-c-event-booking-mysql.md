@@ -103,7 +103,7 @@ Checked against develop at commit 6230602 (2026-11-23).
 | # | Decision | Commit or reason |
 |---|---|---|
 | 1 | fixed | 6230602: MySQL / MariaDB and PostgreSQL decode DATETIME, DATE, TIME, JSON and computed DECIMAL in `values()`, `aggregate()` and `raw_values`; a non-null value of an unreadable type is `Error::Decode`, never a null. Tested on PostgreSQL, MySQL 8.4 and MariaDB 11.4. |
-| 2 | open | `rango import` on MySQL stored rows that break a foreign key and reported the file row count. Check FKs as `restore` does (or document it) and report inserted vs skipped. Data integrity: priority. |
+| 2 | fixed in f698ba6 | On MySQL / MariaDB, import and restore check every foreign key before commit and write nothing if a row is orphaned; the summary reports new and already-present rows. |
 | 3 | open | Same as A 5. |
 | 4 | fixed | b06601a: same root cause as A 2. |
 | 5 | open | Same as A 4; `Time` serializing as `18:30:00.0` to check against the documented format. |

@@ -84,7 +84,7 @@ Checked against develop at commit 6230602 (2026-11-23).
 
 | # | Decision | Commit or reason |
 |---|---|---|
-| 1 | open | Precision is not enforced on PostgreSQL: emit `NUMERIC(p,s)` (a migration for existing tables) or check precision in Rust. Highest priority of this campaign: money columns accept out-of-range values. |
+| 1 | fixed in 9b78444 | Migrations create `NUMERIC(P, S)` on PostgreSQL, so an out-of-range value is `Error::OutOfRange`. Existing columns need a hand-written `ALTER TABLE`, documented in `field-types.md`. |
 | 2 | open | Return `Decimal` from `sum`/`avg`/`annotate_sum` on decimal columns, or document the `raw_values` recipe. |
 | 3 | open | Document the atomic counter recipe (`raw_scalar` with `UPDATE ... RETURNING`) in transactions.md; `FOR UPDATE` and column expressions in `.set()` to decide. |
 | 4 | open | Composite and expression indexes in the model attribute; restore note to say indexes are not replayed. |
@@ -94,7 +94,7 @@ Checked against develop at commit 6230602 (2026-11-23).
 | 8 | open | field-types.md states the serde formats (b06601a); `group_by_date` returning `Text` and the `time` `macros` feature remain to document or change. |
 | 9 | open | Treat an empty `MIGRATE_DATABASE_URL` as unset. |
 | 10 | open | Same as A 6; also say in dump.md which URL `restore` and `import` use. |
-| 11 | open | Report inserted and skipped rows in `rango import` (same as C 2). |
+| 11 | fixed in f698ba6 | The summary reports new and already-present rows (same as C 2). |
 | 12 | open | Add a quoted string `default` example and a hazard note on cascading deletes for financial data in relations.md. |
 | 13 | open | A short "large tables" paragraph in migrate.md (rewrites, locks, `CREATE INDEX CONCURRENTLY`). |
 | 14 | open | Print column types as SQL in `Error::Invalid`; tell pool timeout from statement timeout. |
