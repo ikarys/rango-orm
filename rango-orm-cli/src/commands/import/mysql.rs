@@ -1,4 +1,4 @@
-//! MySQL / MariaDB import: foreign key checks off, UUIDs as `BINARY(16)`.
+//! MySQL / MariaDB import: foreign key checks off during inserts, checked before commit; UUIDs as `BINARY(16)`.
 
 use super::binary::uuid_text_to_bytes;
 use super::*;
@@ -30,6 +30,7 @@ pub(super) async fn import_mysql(
         .context("Failed to start transaction")?;
 
     let groups = group_by_table(rows, table);
+    let tables: Vec<String> = groups.keys().cloned().collect();
     let mut total = 0;
     for (table, table_rows) in groups {
         total += insert_rows_mysql(
@@ -41,12 +42,108 @@ pub(super) async fn import_mysql(
         .await?;
     }
 
+    check_foreign_keys_mysql(&mut tx, &tables).await?;
     sqlx::query("SET FOREIGN_KEY_CHECKS = 1")
         .execute(&mut *tx)
         .await
         .context("Failed to re-enable foreign key checks")?;
     tx.commit().await.context("Failed to commit import")?;
     Ok(total)
+}
+
+async fn check_foreign_keys_mysql(
+    conn: &mut sqlx::MySqlConnection,
+    tables: &[String],
+) -> Result<()> {
+    use sqlx::Row;
+
+    let fks = sqlx::query(sqlx::AssertSqlSafe(
+        "SELECT CAST(CONSTRAINT_NAME AS CHAR), CAST(TABLE_NAME AS CHAR), \
+         CAST(COLUMN_NAME AS CHAR), CAST(REFERENCED_TABLE_NAME AS CHAR), \
+         CAST(REFERENCED_COLUMN_NAME AS CHAR) \
+         FROM information_schema.KEY_COLUMN_USAGE \
+         WHERE TABLE_SCHEMA = DATABASE() AND REFERENCED_TABLE_NAME IS NOT NULL \
+         ORDER BY CONSTRAINT_NAME, ORDINAL_POSITION",
+    ))
+    .fetch_all(&mut *conn)
+    .await
+    .context("Failed to read foreign keys")?;
+
+    let table_set: HashSet<&str> = tables.iter().map(String::as_str).collect();
+    struct ForeignKey {
+        child: String,
+        constraint: String,
+        parent: String,
+        pairs: Vec<(String, String)>,
+    }
+    let mut groups: Vec<ForeignKey> = Vec::new();
+    for row in fks {
+        let constraint: String = row.try_get(0)?;
+        let table: String = row.try_get(1)?;
+        let column: String = row.try_get(2)?;
+        let referenced_table: String = row.try_get(3)?;
+        let referenced_column: String = row.try_get(4)?;
+        if !table_set.contains(table.as_str()) {
+            continue;
+        }
+        if let Some(group) = groups
+            .iter_mut()
+            .find(|g| g.child == table && g.constraint == constraint)
+        {
+            group.pairs.push((column, referenced_column));
+        } else {
+            groups.push(ForeignKey {
+                child: table,
+                constraint,
+                parent: referenced_table,
+                pairs: vec![(column, referenced_column)],
+            });
+        }
+    }
+
+    for ForeignKey {
+        child,
+        constraint,
+        parent,
+        pairs,
+    } in groups
+    {
+        let not_null = pairs
+            .iter()
+            .map(|(c, _)| format!("c.{} IS NOT NULL", quote_ident_mysql(c)))
+            .collect::<Vec<_>>()
+            .join(" AND ");
+        let matches = pairs
+            .iter()
+            // Qualified: a parent column with the child's name (`id`) would shadow it.
+            .map(|(c, p)| format!("p.{} = c.{}", quote_ident_mysql(p), quote_ident_mysql(c)))
+            .collect::<Vec<_>>()
+            .join(" AND ");
+        let sql = format!(
+            "SELECT COUNT(*) FROM {child} c WHERE {not_null} AND NOT EXISTS \
+             (SELECT 1 FROM {parent} p WHERE {matches})",
+            child = quote_ident_mysql(&child),
+            parent = quote_ident_mysql(&parent),
+        );
+        let n: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(&*sql))
+            .fetch_one(&mut *conn)
+            .await
+            .with_context(|| format!("Failed to check foreign key {constraint}"))?;
+        if n > 0 {
+            bail!(
+                "foreign key `{constraint}`: {n} row(s) of `{child}` point to a missing row of `{parent}`; nothing was imported"
+            );
+        }
+    }
+    Ok(())
+}
+
+async fn count_rows_mysql(conn: &mut sqlx::MySqlConnection, table: &str) -> Result<i64> {
+    let sql = format!("SELECT COUNT(*) FROM {}", quote_ident_mysql(table));
+    sqlx::query_scalar(sqlx::AssertSqlSafe(&*sql))
+        .fetch_one(&mut *conn)
+        .await
+        .context("Failed to count rows")
 }
 
 pub(super) async fn insert_rows_mysql(
@@ -95,6 +192,11 @@ pub(super) async fn insert_rows_mysql(
         OnConflict::Fail => String::new(),
     };
 
+    let count_before = if on_conflict == OnConflict::Skip {
+        Some(count_rows_mysql(&mut *conn, table).await?)
+    } else {
+        None
+    };
     for chunk in rows.chunks(rows_per_statement(65535, cols.len())) {
         let sql = format!(
             "INSERT INTO {} ({}) VALUES {} {}",
@@ -119,7 +221,12 @@ pub(super) async fn insert_rows_mysql(
             .await
             .with_context(|| format!("Failed to insert into {}", table))?;
     }
-    Ok(rows.len())
+    if let Some(before) = count_before {
+        let after = count_rows_mysql(&mut *conn, table).await?;
+        Ok(after.saturating_sub(before) as usize)
+    } else {
+        Ok(rows.len())
+    }
 }
 
 pub(super) async fn fetch_uuid_columns_mysql(

@@ -64,6 +64,7 @@ pub(super) async fn insert_rows_sqlite(
         .map(|c| quote_ident(c))
         .collect::<Vec<_>>()
         .join(", ");
+    let mut inserted = 0;
     for chunk in rows.chunks(rows_per_statement(32766, cols.len())) {
         let sql = format!(
             "{} INTO {} ({}) VALUES {}{}",
@@ -85,11 +86,13 @@ pub(super) async fn insert_rows_sqlite(
                 };
             }
         }
-        q.execute(&mut *conn)
+        inserted += q
+            .execute(&mut *conn)
             .await
-            .with_context(|| format!("Failed to insert into {}", table))?;
+            .with_context(|| format!("Failed to insert into {}", table))?
+            .rows_affected() as usize;
     }
-    Ok(rows.len())
+    Ok(inserted)
 }
 
 /// Columns declared `BLOB`.
