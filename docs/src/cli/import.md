@@ -34,10 +34,14 @@ rango import data --format json --table users
 
 | Mode | SQL | Use case |
 |---|---|---|
-| Default (skip) | `INSERT OR IGNORE` / `ON CONFLICT DO NOTHING` | Load fixtures without overwriting |
+| Default (skip) | `ON CONFLICT DO NOTHING` (MySQL: no-op `ON DUPLICATE KEY UPDATE`) | Load fixtures without overwriting |
 | `--replace` | `INSERT OR REPLACE` / `ON CONFLICT DO UPDATE` | Sync/upsert data |
 
 Rows are inserted in multi-row statements (up to 1000 rows each). On Postgres, `--replace` fails with `ON CONFLICT DO UPDATE command cannot affect row a second time` when the same primary key appears twice in one file: remove the duplicates first.
+
+## Foreign keys and the count
+
+The import runs in one transaction. Rows whose foreign key points at a missing row are rejected and nothing is stored: PostgreSQL and SQLite check at commit, MySQL / MariaDB check every foreign key of the imported tables before commit. In skip mode the summary counts only new rows and says how many were already present.
 
 ## JSON format
 

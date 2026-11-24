@@ -502,12 +502,33 @@ pub struct Post {
 
     let output = project.run_cli(&["import", "dump.json"]);
     assert_success(&output, "import again");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("0 new row(s)"), "stdout: {stdout}");
+    assert!(
+        stdout.contains("already present, skipped"),
+        "stdout: {stdout}"
+    );
     assert_eq!(count_rows(&pool, "e2e_my_rt_person").await, 1);
     assert_eq!(count_rows(&pool, "e2e_my_rt_post").await, 1);
     assert_eq!(
         count_rows(&pool, "e2e_my_rt_post_e2e_my_rt_person").await,
         1
     );
+
+    std::fs::write(
+        project.dir.join("orphan.json"),
+        r#"[{"__table": "e2e_my_rt_post", "id": "03030303-0303-0303-0303-030303030303", "author": "09090909-0909-0909-0909-090909090909"}]"#,
+    )
+    .expect("write orphan.json");
+    let output = project.run_cli(&["import", "orphan.json"]);
+    assert_failure(&output, "orphan import");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("foreign key"), "stderr: {stderr}");
+    assert!(
+        stderr.contains("point to a missing row"),
+        "stderr: {stderr}"
+    );
+    assert_eq!(count_rows(&pool, "e2e_my_rt_post").await, 1);
 
     let output = project.run_cli(&["import", "--replace", "dump.json"]);
     assert_success(&output, "import replace");

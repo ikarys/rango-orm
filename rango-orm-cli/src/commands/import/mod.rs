@@ -59,21 +59,22 @@ pub async fn run(
         postgres::csv_json_columns(database_url, t, &mut rows).await?;
     }
 
-    let count = insert_rows(
-        backend,
-        database_url,
-        &rows,
-        table,
-        if replace {
-            OnConflict::Replace
-        } else {
-            OnConflict::Skip
-        },
-        None,
-    )
-    .await?;
+    let on_conflict = if replace {
+        OnConflict::Replace
+    } else {
+        OnConflict::Skip
+    };
+    let count = insert_rows(backend, database_url, &rows, table, on_conflict, None).await?;
 
-    println!("✅ Imported {} row(s) from {}", count, input);
+    let total = rows.len();
+    if replace {
+        println!("✅ Imported {count} row(s) from {input} (new or replaced)");
+    } else if count == total {
+        println!("✅ Imported {count} row(s) from {input}");
+    } else {
+        let skipped = total.saturating_sub(count);
+        println!("✅ Imported {count} new row(s) from {input}; {skipped} already present, skipped");
+    }
     Ok(())
 }
 

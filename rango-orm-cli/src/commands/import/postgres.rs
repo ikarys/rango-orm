@@ -252,6 +252,7 @@ pub(super) async fn insert_rows_postgres(
     );
 
     let binary = binary_columns_postgres(&mut *conn, table).await?;
+    let mut inserted = 0;
     for chunk in rows.chunks(rows_per_statement(65535, cols.len())) {
         let mut records = Vec::with_capacity(chunk.len());
         for row in chunk {
@@ -269,13 +270,14 @@ pub(super) async fn insert_rows_postgres(
             }
             records.push(serde_json::Value::Object(values));
         }
-        sqlx::query(sqlx::AssertSqlSafe(&*sql))
+        inserted += sqlx::query(sqlx::AssertSqlSafe(&*sql))
             .bind(serde_json::Value::Array(records).to_string())
             .execute(&mut *conn)
             .await
-            .with_context(|| format!("Failed to insert into {}", table))?;
+            .with_context(|| format!("Failed to insert into {}", table))?
+            .rows_affected() as usize;
     }
-    Ok(rows.len())
+    Ok(inserted)
 }
 
 /// Single-column nullable foreign keys of the current schema, as `(table, column, parent)`.
